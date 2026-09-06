@@ -8,3 +8,10 @@
 - [x] Ajouter un workflow GitHub Actions de déploiement Pages.
 - [x] Vérifier le nombre de fichiers, le build et les références d’assets.
 - [ ] Commit et push de la version autonome sur GitHub.
+
+## Correction GitHub Pages
+
+- [ ] Copier le build Vite final à la racine du dépôt, car Pages utilise actuellement la source legacy `main /`.
+- [ ] Ajouter `.nojekyll` pour empêcher Jekyll de traiter le build Vite.
+- [ ] Vérifier que l’index racine et les assets publics répondent avec HTTP 200.
+- [ ] Republier et confirmer que la page sert l’application Ordinal Punks plutôt que le README.
