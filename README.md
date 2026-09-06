@@ -32,4 +32,4 @@ The source archive supplied for this project contains 10,000 1024×1024 PNG file
 
 ## Notes
 
-The image and data storage paths in the frontend are tied to the managed web project lifecycle. If this repository is moved to another static host, replace the `/manus-storage/` asset paths with the equivalent public asset URLs for that host.
+The repository is self-contained for GitHub Pages: the complete six-megabyte metadata manifest, 100 optimized WebP sprite sheets containing all 10,000 images, and the four brand assets live under `client/public/assets/`. Vite automatically switches to the `/ordinal-punks-collection/` base path in GitHub Actions, and the included workflow deploys the built `dist/public` directory to GitHub Pages.

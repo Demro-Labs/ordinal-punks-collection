@@ -8,10 +8,11 @@ import { COLLECTION_DATA_URL, INSCRIPTION_BASE_URL, SHEET_URLS } from "@/lib/col
 
 const PER_PAGE = 20;
 const TOTAL_ITEMS = 10000;
-const HERO_URL = "/manus-storage/ordinal-ledger-hero_1548d278.png";
-const PAPER_URL = "/manus-storage/ordinal-ledger-paper-texture_a30a9c5b.png";
-const MARK_URL = "/manus-storage/ordinal-ledger-mark_ad606d69.png";
-const STAMP_URL = "/manus-storage/ordinal-ledger-stamp_7ca0d2f1.png";
+const ASSET_BASE = import.meta.env.BASE_URL;
+const HERO_URL = `${ASSET_BASE}assets/brand/ordinal-ledger-hero.webp`;
+const PAPER_URL = `${ASSET_BASE}assets/brand/ordinal-ledger-paper-texture.webp`;
+const MARK_URL = `${ASSET_BASE}assets/brand/ordinal-ledger-mark.webp`;
+const STAMP_URL = `${ASSET_BASE}assets/brand/ordinal-ledger-stamp.webp`;
 
 type Trait = { trait_type: string; value: string };
 type PunkRecord = {
