@@ -1,4 +1,4 @@
-/* Inscription Ledger: tokens ivoire/charbon/cuivre, grain d’archive et mouvements éditoriaux discrets. */
+/* Inscription Ledger: graphite, steel, copper, archive grain, and restrained editorial motion. */
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -33,23 +33,23 @@
 
 :root {
   --radius: 0.25rem;
-  --background: oklch(0.953 0.014 83);
-  --foreground: oklch(0.23 0.012 74);
-  --card: oklch(0.972 0.011 83);
-  --card-foreground: oklch(0.23 0.012 74);
-  --popover: oklch(0.972 0.011 83);
-  --popover-foreground: oklch(0.23 0.012 74);
-  --primary: oklch(0.34 0.018 74);
-  --primary-foreground: oklch(0.97 0.01 83);
-  --secondary: oklch(0.91 0.018 83);
-  --secondary-foreground: oklch(0.34 0.018 74);
-  --muted: oklch(0.91 0.018 83);
-  --muted-foreground: oklch(0.53 0.018 74);
-  --accent: oklch(0.55 0.15 38);
-  --accent-foreground: oklch(0.98 0.006 83);
-  --border: oklch(0.84 0.022 80);
-  --input: oklch(0.84 0.022 80);
-  --ring: oklch(0.55 0.15 38);
+  --background: oklch(0.12 0.015 255);
+  --foreground: oklch(0.94 0.018 85);
+  --card: oklch(0.16 0.018 255);
+  --card-foreground: oklch(0.94 0.018 85);
+  --popover: oklch(0.16 0.018 255);
+  --popover-foreground: oklch(0.94 0.018 85);
+  --primary: oklch(0.80 0.13 75);
+  --primary-foreground: oklch(0.12 0.015 255);
+  --secondary: oklch(0.20 0.022 255);
+  --secondary-foreground: oklch(0.88 0.018 85);
+  --muted: oklch(0.20 0.022 255);
+  --muted-foreground: oklch(0.66 0.02 255);
+  --accent: oklch(0.72 0.13 65);
+  --accent-foreground: oklch(0.12 0.015 255);
+  --border: oklch(0.28 0.025 255);
+  --input: oklch(0.28 0.025 255);
+  --ring: oklch(0.72 0.13 65);
 }
 
 * { box-sizing: border-box; }
@@ -57,11 +57,11 @@ html { scroll-behavior: smooth; }
 body {
   @apply bg-background text-foreground;
   font-family: "IBM Plex Sans", sans-serif;
-  background-image: linear-gradient(rgba(96, 86, 72, 0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(96, 86, 72, 0.025) 1px, transparent 1px);
+  background-image: linear-gradient(rgba(142, 160, 180, 0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(142, 160, 180, 0.045) 1px, transparent 1px);
   background-size: 32px 32px;
 }
 button, a, input, select { -webkit-tap-highlight-color: transparent; }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #c8663d; outline-offset: 3px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #d99a54; outline-offset: 3px; }
 
 @layer base {
   * { @apply border-border outline-ring/50; }
@@ -73,11 +73,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .font-sans { font-family: "IBM Plex Sans", sans-serif; }
   .font-mono { font-family: "IBM Plex Mono", monospace; }
   .ledger-sheet { position: relative; }
-  .ledger-sheet::before, .ledger-sheet::after { content: ""; position: absolute; top: 16px; width: 22px; height: 8px; border-top: 1px solid #c8663d; border-left: 1px solid #c8663d; opacity: 0.7; pointer-events: none; }
+  .ledger-sheet::before, .ledger-sheet::after { content: ""; position: absolute; top: 16px; width: 22px; height: 8px; border-top: 1px solid #d99a54; border-left: 1px solid #d99a54; opacity: 0.7; pointer-events: none; }
   .ledger-sheet::before { left: 10px; }
   .ledger-sheet::after { right: 10px; transform: rotate(90deg); }
   .card-image { transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 220ms cubic-bezier(0.23, 1, 0.32, 1), filter 220ms ease; }
-  .group:hover .card-image { transform: translateY(-3px); box-shadow: 7px 7px 0 rgba(200, 102, 61, 0.22); filter: saturate(1.06); }
+  .group:hover .card-image { transform: translateY(-3px); box-shadow: 7px 7px 0 rgba(217, 154, 84, 0.24); filter: saturate(1.06); }
 }
 
 @media (prefers-reduced-motion: reduce) {
