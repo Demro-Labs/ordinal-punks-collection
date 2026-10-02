@@ -359,10 +359,10 @@ export default function Home() {
                     { label: "X / Fractal Ordinals", href: "https://x.com/fractal_ordinal", src: `${SOCIAL_ASSET_BASE}x.svg` },
                     { label: "Facebook / Demro Labs", href: "https://www.facebook.com/demrolabs", src: `${SOCIAL_ASSET_BASE}facebook.svg` },
                     { label: "Epsilon / @fo@epsilon.social", href: "https://epsilon.social/@fo", src: `${SOCIAL_ASSET_BASE}epsilon.png` },
-                    { label: "Link.me / Demro", href: "https://link.me/demro", src: `${SOCIAL_ASSET_BASE}linktree.svg` },
+                    { label: "Link.me / Demro", href: "https://link.me/demro", src: `${SOCIAL_ASSET_BASE}link-me.png` },
                   ].map((social) => (
                     <a key={social.label} href={social.href} target="_blank" rel="noreferrer" aria-label={social.label} title={social.label} className="flex h-11 w-11 items-center justify-center border border-[#3b434d] bg-[#12161b]/80 transition-colors hover:border-[#d99a54] hover:bg-[#0b0d10]">
-                      <img src={social.src} alt="" className="h-5 w-5 object-contain" />
+                      <img src={social.src} alt="" className="h-6 w-6 object-contain" />
                     </a>
                   ))}
                 </div>
