@@ -373,11 +373,12 @@ export default function Home() {
                   <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7f8b99]">Powered by</p>
                   <a className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#f3efe5] underline decoration-[#d99a54] underline-offset-4" href="https://fractal.unisat.io/market/collection?collectionId=opunk" target="_blank" rel="noreferrer">Open collection on UniSat <ArrowUpRight size={13} /></a>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   {[
                     { label: "Fractal Ordinals", href: "https://x.com/fractal_ordinal", src: FRACTAL_ORDINALS_URL },
                     { label: "UniSat", href: "https://unisat.io", src: `${SOCIAL_ASSET_BASE}unisat.png` },
                     { label: "Fractal Bitcoin", href: "https://fractalbitcoin.io", src: `${SOCIAL_ASSET_BASE}fractal-bitcoin.png` },
+                    { label: "GitHub Collection", href: "https://github.com/Demro-Labs/ordinal-punks-collection", src: `${SOCIAL_ASSET_BASE}github.svg` },
                   ].map((partner) => (
                     <a key={partner.label} href={partner.href} target="_blank" rel="noreferrer" className="flex min-h-16 items-center gap-3 border border-[#2c323a] bg-[#12161b]/70 px-3 transition-colors hover:border-[#d99a54] hover:bg-[#0b0d10]">
                       <img src={partner.src} alt={`${partner.label} logo`} className="h-10 w-10 rounded-full object-cover" />
