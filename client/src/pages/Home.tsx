@@ -378,7 +378,7 @@ export default function Home() {
                     { label: "Fractal Ordinals", href: "https://x.com/fractal_ordinal", src: FRACTAL_ORDINALS_URL },
                     { label: "UniSat", href: "https://unisat.io", src: `${SOCIAL_ASSET_BASE}unisat.png` },
                     { label: "Fractal Bitcoin", href: "https://fractalbitcoin.io", src: `${SOCIAL_ASSET_BASE}fractal-bitcoin.png` },
-                    { label: "GitHub Collection", href: "https://github.com/Demro-Labs/ordinal-punks-collection", src: `${SOCIAL_ASSET_BASE}github.svg` },
+                    { label: "GitHub", href: "https://github.com/Demro-Labs/ordinal-punks-collection", src: `${SOCIAL_ASSET_BASE}github.svg` },
                   ].map((partner) => (
                     <a key={partner.label} href={partner.href} target="_blank" rel="noreferrer" className="flex min-h-16 items-center gap-3 border border-[#2c323a] bg-[#12161b]/70 px-3 transition-colors hover:border-[#d99a54] hover:bg-[#0b0d10]">
                       <img src={partner.src} alt={`${partner.label} logo`} className="h-10 w-10 rounded-full object-cover" />
