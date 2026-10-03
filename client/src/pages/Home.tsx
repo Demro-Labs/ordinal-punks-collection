@@ -4,17 +4,18 @@ import { ArrowUpRight, ChevronLeft, ChevronRight, ExternalLink, Filter, Loader2,
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { COLLECTION_DATA_URL, INSCRIPTION_BASE_URL, SHEET_URLS } from "@/lib/collection";
+import { COLLECTION_DATA_URL, INSCRIPTION_BASE_URL } from "@/lib/collection";
 
 const PER_PAGE = 20;
 const TOTAL_ITEMS = 10000;
 const ASSET_BASE = import.meta.env.BASE_URL;
 const HERO_URL = `${ASSET_BASE}assets/brand/ordinal-ledger-hero.webp`;
 const PAPER_URL = `${ASSET_BASE}assets/brand/ordinal-ledger-paper-texture.webp`;
-const MARK_URL = `${ASSET_BASE}assets/brand/ordinal-ledger-mark.webp`;
-const STAMP_URL = `${ASSET_BASE}assets/brand/ordinal-ledger-stamp.webp`;
 const FRACTAL_ORDINALS_URL = `${ASSET_BASE}assets/brand/fractal-ordinals.jpeg`;
+const MARK_URL = FRACTAL_ORDINALS_URL;
+const STAMP_URL = FRACTAL_ORDINALS_URL;
 const SOCIAL_ASSET_BASE = `${ASSET_BASE}assets/brand/social/`;
+const PUNKS_IMAGE_BASE = `${ASSET_BASE}assets/ordinal-punks/images/`;
 
 type Trait = { trait_type: string; value: string };
 type PunkRecord = {
@@ -28,7 +29,7 @@ type PunkRecord = {
   row: number;
 };
 
-type FilterKey = "Sex" | "Background";
+type FilterKey = "Sex" | "Skin Tone";
 
 function getTrait(record: PunkRecord, label: string) {
   return record.attributes.find((attribute) => attribute.trait_type === label)?.value ?? "—";
@@ -47,19 +48,9 @@ function uniqueValues(records: PunkRecord[], key: FilterKey) {
 }
 
 function SpriteImage({ record }: { record: PunkRecord }) {
-  const horizontal = record.col === 0 ? 0 : (record.col / 9) * 100;
-  const vertical = record.row === 0 ? 0 : (record.row / 9) * 100;
   return (
-    <div
-      className="card-image relative aspect-square overflow-hidden bg-[#171b21]"
-      aria-label={`${record.name}, image de la collection`}
-      role="img"
-      style={{
-        backgroundImage: `url(${SHEET_URLS[record.sheet]})`,
-        backgroundPosition: `${horizontal}% ${vertical}%`,
-        backgroundSize: "1000% 1000%",
-      }}
-    >
+    <div className="card-image relative aspect-square overflow-hidden bg-[#171b21]" aria-label={`${record.name}, image de la collection`} role="img">
+      <img src={`${PUNKS_IMAGE_BASE}${record.fileName}`} alt={`${record.name}, high-resolution artwork`} className="h-full w-full object-cover" loading="lazy" />
       <span className="absolute left-3 top-3 bg-[#0b0d10]/90 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-[#f3efe5]">
         #{record.tokenId}
       </span>
@@ -164,7 +155,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [sex, setSex] = useState("all");
-  const [background, setBackground] = useState("all");
+  const [skinTone, setSkinTone] = useState("all");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<PunkRecord | null>(null);
   const galleryRef = useRef<HTMLElement>(null);
@@ -185,17 +176,17 @@ export default function Home() {
   }, []);
 
   const sexValues = useMemo(() => uniqueValues(records, "Sex"), [records]);
-  const backgroundValues = useMemo(() => uniqueValues(records, "Background"), [records]);
+  const skinToneValues = useMemo(() => uniqueValues(records, "Skin Tone"), [records]);
 
   const filteredRecords = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return records.filter((record) => {
       const matchesQuery = !normalized || [record.name, record.id, record.tokenId, ...record.attributes.map((item) => item.value)].join(" ").toLowerCase().includes(normalized);
       const matchesSex = sex === "all" || getTrait(record, "Sex") === sex;
-      const matchesBackground = background === "all" || getTrait(record, "Background") === background;
-      return matchesQuery && matchesSex && matchesBackground;
+      const matchesSkinTone = skinTone === "all" || getTrait(record, "Skin Tone") === skinTone;
+      return matchesQuery && matchesSex && matchesSkinTone;
     });
-  }, [background, query, records, sex]);
+  }, [query, records, sex, skinTone]);
 
   const pageCount = Math.max(1, Math.ceil(filteredRecords.length / PER_PAGE));
   const visibleRecords = filteredRecords.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -204,7 +195,7 @@ export default function Home() {
 
   useEffect(() => {
     setPage(1);
-  }, [background, query, sex]);
+  }, [query, sex, skinTone]);
 
   useEffect(() => {
     if (page > pageCount) setPage(pageCount);
@@ -291,10 +282,10 @@ export default function Home() {
                   </select>
                 </label>
                 <label className="flex h-11 items-center gap-2 border border-[#3b434d] bg-[#12161b] px-3">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#718092]">Background</span>
-                  <select value={background} onChange={(event) => setBackground(event.target.value)} className="max-w-[120px] bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none">
+                  <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#718092]">Skin Tone</span>
+                  <select value={skinTone} onChange={(event) => setSkinTone(event.target.value)} className="max-w-[120px] bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none">
                     <option value="all">All</option>
-                    {backgroundValues.map((value) => <option value={value} key={value}>{value}</option>)}
+                    {skinToneValues.map((value) => <option value={value} key={value}>{value}</option>)}
                   </select>
                 </label>
               </div>
@@ -334,7 +325,7 @@ export default function Home() {
                           <Badge variant="outline" className="shrink-0 rounded-none border-[#3b434d] px-1.5 py-0.5 font-mono text-[9px] font-normal text-[#7f8b99]">{record.attributes.length} traits</Badge>
                         </div>
                         <div className="mt-3 grid grid-cols-2 gap-x-2 gap-y-1.5 border-t border-[#2c323a] pt-2.5">
-                          {["Sex", "Hair", "Eyes", "Background"].map((label) => <span key={label} className="truncate font-sans text-[11px] text-[#9ea7b3]"><span className="font-mono text-[9px] uppercase text-[#718092]">{label}: </span>{getTrait(record, label)}</span>)}
+                          {["Sex", "Hair", "Eyes", "Skin Tone"].map((label) => <span key={label} className="truncate font-sans text-[11px] text-[#9ea7b3]"><span className="font-mono text-[9px] uppercase text-[#718092]">{label}: </span>{getTrait(record, label)}</span>)}
                         </div>
                         <a href={inscriptionUrl(record.id)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} className="mt-3 inline-flex items-center gap-1.5 bg-[#d99a54] px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#0b0d10] transition-transform duration-150 hover:-translate-y-0.5 hover:bg-[#c77e3b] active:scale-[0.97]">View inscription <ExternalLink size={11} /></a>
                       </div>
