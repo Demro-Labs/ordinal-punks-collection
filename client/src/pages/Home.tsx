@@ -9,7 +9,7 @@ import { COLLECTION_DATA_URL, INSCRIPTION_BASE_URL } from "@/lib/collection";
 const PER_PAGE = 20;
 const TOTAL_ITEMS = 10000;
 const ASSET_BASE = import.meta.env.BASE_URL;
-const HERO_URL = `${ASSET_BASE}assets/brand/ordinal-ledger-hero.webp`;
+const HERO_URL = `${ASSET_BASE}assets/brand/ordinal-punks-hero.webp`;
 const PAPER_URL = `${ASSET_BASE}assets/brand/ordinal-ledger-paper-texture.webp`;
 const FRACTAL_ORDINALS_URL = `${ASSET_BASE}assets/brand/fractal-ordinals.jpeg`;
 const MARK_URL = FRACTAL_ORDINALS_URL;
@@ -254,7 +254,7 @@ export default function Home() {
 
         <main className="min-w-0">
           <section className="relative isolate overflow-hidden border-b border-[#2c323a] px-5 py-10 sm:px-8 sm:py-14 lg:px-12 lg:py-20" style={{ backgroundImage: `url(${HERO_URL})`, backgroundPosition: "center right", backgroundSize: "cover" }}>
-            <div className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(11,13,16,0.98)_0%,rgba(11,13,16,0.93)_42%,rgba(11,13,16,0.28)_100%)]" />
+            <div className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(11,13,16,0.99)_0%,rgba(11,13,16,0.94)_42%,rgba(11,13,16,0.48)_100%)]" />
             <div className="max-w-3xl">
               <p className="mb-6 font-mono text-[10px] uppercase tracking-[0.24em] text-[#d99a54]">Field catalogue / 2026 edition</p>
               <h1 className="max-w-2xl font-display text-5xl font-semibold leading-[0.95] tracking-[-0.06em] text-[#f3efe5] sm:text-7xl lg:text-[6.4rem]">Ten thousand<br /><span className="text-[#d99a54]">inscriptions.</span></h1>
