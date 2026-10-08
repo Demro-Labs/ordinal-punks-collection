@@ -4,6 +4,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' https://forge.butterfly-effect.dev https://*.googleapis.com https://*.gstatic.com *.google.com https://*.ggpht.com *.googleusercontent.com 'unsafe-eval' blob:; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; style-src-attr 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https://*.googleapis.com https://*.gstatic.com *.google.com *.googleusercontent.com data: blob:; connect-src 'self' https://fractal-ordinal-live.servostar23.workers.dev https://forge.butterfly-effect.dev https://*.googleapis.com *.google.com https://*.gstatic.com data: blob:; manifest-src 'self'; worker-src 'self' blob:; frame-src *.google.com; upgrade-insecure-requests" />
+    <meta name="referrer" content="no-referrer" />
     <meta name="theme-color" content="#0b0d10" />
     <meta name="description" content="Ordinal Punks Ledger — a visual index of 10,000 inscriptions on Fractal Bitcoin." />
     <link rel="icon" type="image/png" sizes="192x192" href="%BASE_URL%assets/brand/fractal-ordinals-icon-192.png" />
@@ -22,6 +24,5 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script defer src="%VITE_ANALYTICS_ENDPOINT%/umami" data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
   </body>
 </html>
