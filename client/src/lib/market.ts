@@ -40,3 +40,13 @@ export async function fetchLiveMarket(collectionId: string, start = 0, limit = 2
   if (!response.ok) throw new Error(`Live market request failed (${response.status}).`);
   return (await response.json()) as LiveMarket;
 }
+
+export async function fetchAllLiveMarketListings(collectionId: string, totalListings: number, signal?: AbortSignal): Promise<LiveMarketListing[]> {
+  const starts = Array.from({ length: Math.ceil(totalListings / 20) }, (_, page) => page * 20);
+  const pages = await Promise.all(starts.map((start) => fetchLiveMarket(collectionId, start, 20, signal)));
+  return pages.flatMap((page) => page.listings);
+}
+
+export function listingTokenId(name: string | null): string | null {
+  return name?.match(/#(\d+)$/)?.[1] ?? null;
+}
