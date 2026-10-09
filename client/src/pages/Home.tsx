@@ -910,6 +910,69 @@ export default function Home() {
                   ))}
                 </div>
               </div>
+              <section
+                className="border-b border-[#2c323a] py-6"
+                aria-labelledby="security-badges-title"
+              >
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p
+                      id="security-badges-title"
+                      className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7f8b99]"
+                    >
+                      Security protocols
+                    </p>
+                    <p className="mt-1 font-sans text-xs text-[#9ea7b3]">
+                      Protections verified on this site
+                    </p>
+                  </div>
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    className="h-6 w-6 text-[#70c7a0]"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  >
+                    <path d="M12 3 20 6v5c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-3Z" />
+                    <path d="m8.5 12 2.2 2.2 4.8-5" />
+                  </svg>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {[
+                    { label: "HTTPS / TLS", detail: "Encrypted connection" },
+                    { label: "CSP", detail: "Content Security Policy" },
+                    { label: "HSTS", detail: "Strict Transport Security" },
+                  ].map(protocol => (
+                    <div
+                      key={protocol.label}
+                      className="flex min-h-14 items-center gap-3 border border-[#2c323a] bg-[#12161b]/70 px-3"
+                      title={protocol.detail}
+                    >
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        className="h-5 w-5 shrink-0 text-[#70c7a0]"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      >
+                        <path d="M7 10V7a5 5 0 0 1 10 0v3" />
+                        <rect x="5" y="10" width="14" height="11" rx="2" />
+                        <path d="m10 15 1.4 1.4L14.5 13" />
+                      </svg>
+                      <span>
+                        <span className="block font-mono text-[10px] uppercase tracking-[0.12em] text-[#d9d3c6]">
+                          {protocol.label}
+                        </span>
+                        <span className="mt-0.5 block font-sans text-[10px] text-[#7f8b99]">
+                          {protocol.detail}
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </section>
               <div className="border-y border-[#2c323a] py-6">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7f8b99]">
