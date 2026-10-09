@@ -25,7 +25,7 @@ import {
   type LiveMarket,
   type LiveMarketListing,
 } from "@/lib/market";
-import { COLLECTION_DATA_URL, INSCRIPTION_BASE_URL } from "@/lib/collection";
+import { COLLECTION_DATA_URL, COLLECTION_GENERATED_AT, INSCRIPTION_BASE_URL } from "@/lib/collection";
 
 const PER_PAGE = 20;
 const TOTAL_ITEMS = 10000;
@@ -305,6 +305,9 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState(() => readUrlParam("q"));
+  const [queryInput, setQueryInput] = useState(() => readUrlParam("q"));
+  const [favoritesOnly, setFavoritesOnly] = useState(() => readUrlParam("fav") === "1");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [sex, setSex] = useState(() => readUrlParam("sex", "all"));
   const [skinTone, setSkinTone] = useState(() => readUrlParam("skin", "all"));
   const [page, setPage] = useState(readUrlPage);
@@ -314,6 +317,7 @@ export default function Home() {
   const [market, setMarket] = useState<LiveMarket | null>(null);
   const [marketLoading, setMarketLoading] = useState(true);
   const [marketError, setMarketError] = useState("");
+  const [marketRetry, setMarketRetry] = useState(0);
   const [marketPage, setMarketPage] = useState(0);
   const [rarityFilter, setRarityFilter] = useState(() => readUrlParam("rarity", "all"));
   const [listingFilter, setListingFilter] = useState(() => readUrlParam("listing", "all"));
@@ -354,6 +358,10 @@ export default function Home() {
     return () => controller.abort();
   }, []);
   useEffect(() => {
+    const timeout = window.setTimeout(() => setQuery(queryInput), 180);
+    return () => window.clearTimeout(timeout);
+  }, [queryInput]);
+  useEffect(() => {
     try { localStorage.setItem("catalog-favorites", JSON.stringify(Array.from(favorites))); } catch { /* storage may be unavailable */ }
   }, [favorites]);
   useEffect(() => {
@@ -371,9 +379,10 @@ export default function Home() {
     if (rarityFilter !== "all") params.set("rarity", rarityFilter);
     if (listingFilter !== "all") params.set("listing", listingFilter);
     if (page > 1) params.set("page", String(page));
+    if (favoritesOnly) params.set("fav", "1");
     const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
     window.history.replaceState(null, "", next);
-  }, [query, page, sex, skinTone, rarityFilter, listingFilter]);
+  }, [query, page, favoritesOnly, sex, skinTone, rarityFilter, listingFilter]);
   const rarity = useMemo(
     () =>
       createRarityIndex(records, [
@@ -387,6 +396,7 @@ export default function Home() {
   useEffect(() => {
     const controller = new AbortController();
     setMarketLoading(true);
+    setMarketError("");
     fetchLiveMarket("opunk", marketPage * 20, 20, controller.signal)
       .then(setMarket)
       .catch((e: Error) => {
@@ -395,7 +405,7 @@ export default function Home() {
       })
       .finally(() => setMarketLoading(false));
     return () => controller.abort();
-  }, [marketPage]);
+  }, [marketPage, marketRetry]);
   useEffect(() => {
     if (!market) return;
     const controller = new AbortController();
@@ -467,7 +477,8 @@ export default function Home() {
         (listingFilter === "all" ||
           (listingFilter === "listed"
             ? listedTokenIds.has(record.tokenId)
-            : !listedTokenIds.has(record.tokenId)))
+            : !listedTokenIds.has(record.tokenId))) &&
+        (!favoritesOnly || favorites.has(record.id))
       );
     });
   }, [
@@ -478,6 +489,8 @@ export default function Home() {
     rarity,
     rarityFilter,
     listingFilter,
+    favoritesOnly,
+    favorites,
     listedTokenIds,
   ]);
   const pageCount = Math.max(1, Math.ceil(filteredRecords.length / PER_PAGE));
@@ -490,7 +503,7 @@ export default function Home() {
   const lastVisible = Math.min(page * PER_PAGE, filteredRecords.length);
   useEffect(
     () => setPage(1),
-    [query, sex, skinTone, rarityFilter, listingFilter]
+    [query, sex, skinTone, rarityFilter, listingFilter, favoritesOnly]
   );
   useEffect(() => {
     if (page > pageCount) setPage(pageCount);
@@ -642,6 +655,7 @@ export default function Home() {
                   page={marketPage}
                   onPage={setMarketPage}
                   imageForListing={listingImage}
+                  onRetry={() => setMarketRetry(value => value + 1)}
                 />
               </Suspense>
             ) : (
@@ -653,6 +667,7 @@ export default function Home() {
             aria-label="Catalogue filters"
           >
             <div className="border border-[#3b434d] bg-[#12161b] p-3 shadow-[0_18px_40px_rgba(0,0,0,0.18)] sm:p-4">
+              <button type="button" className="mb-3 inline-flex min-h-11 items-center border border-[#3b434d] px-3 font-mono text-[10px] uppercase tracking-[0.14em] text-[#d9d3c6] sm:hidden" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(value => !value)}>{filtersOpen ? "Hide filters" : "Show filters"}</button>
               <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(0,1fr)_220px_220px_220px_220px]">
                 <label className="relative block h-12 w-full min-w-0 flex-1 border border-[#3b434d] bg-[#12161b] transition-colors focus-within:ring-0 focus-within:border-[#3b434d] 2xl:max-w-none">
                   <span className="sr-only">Search for an ordinal</span>
@@ -662,8 +677,8 @@ export default function Home() {
                   />
                   <Input
                     type="search"
-                    value={query}
-                    onChange={event => setQuery(event.target.value)}
+                    value={queryInput}
+                    onChange={event => setQueryInput(event.target.value)}
                     autoComplete="off"
                     spellCheck={false}
                     placeholder="Search by ID, name or trait"
@@ -673,7 +688,7 @@ export default function Home() {
                   {query && (
                     <button
                       type="button"
-                      onClick={() => setQuery("")}
+                      onClick={() => setQueryInput("")}
                       className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center text-[#718092] hover:text-[#f3efe5]"
                       aria-label="Clear search"
                     >
@@ -681,7 +696,7 @@ export default function Home() {
                     </button>
                   )}
                 </label>
-                <div className="contents">
+                <div className={`contents ${filtersOpen ? "" : "hidden sm:contents"}`}>
                   <label className="flex h-12 min-w-0 w-full items-center gap-2 border border-[#3b434d] bg-[#12161b] px-3">
                     <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#718092]">
                       Sex
@@ -758,7 +773,10 @@ export default function Home() {
                     ? "Live listing sync unavailable"
                     : `${listedTokenIds.size.toLocaleString()} live listed tokens`}
               </p>
-              <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-[#5f6b78]">Snapshot data · {snapshotDate ? new Date(snapshotDate).toLocaleDateString() : "local asset"}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <button type="button" onClick={() => setFavoritesOnly(value => !value)} aria-pressed={favoritesOnly} className={`border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] ${favoritesOnly ? "border-[#d99a54] bg-[#d99a54] text-[#0b0d10]" : "border-[#3b434d] text-[#9ea7b3] hover:border-[#d99a54]"}`}>Favorites · {favorites.size}</button>
+              </div>
+              <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-[#5f6b78]">Snapshot data · {new Date(snapshotDate || COLLECTION_GENERATED_AT).toLocaleDateString()}</p>
             </div>
           </section>
           <section
