@@ -938,8 +938,9 @@ export default function Home() {
                     <path d="m8.5 12 2.2 2.2 4.8-5" />
                   </svg>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                   {[
+                    { label: "Cloudflare Turnstile", detail: "Server-verified human check" },
                     { label: "HTTPS / TLS", detail: "Encrypted connection" },
                     { label: "CSP", detail: "Content Security Policy" },
                     { label: "HSTS", detail: "Strict Transport Security" },
