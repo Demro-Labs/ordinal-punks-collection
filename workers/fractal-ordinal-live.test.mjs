@@ -21,6 +21,44 @@ test('responses contain API security headers and allow the site origin', async (
   assert.match(response.headers.get('content-security-policy') || '', /default-src 'none'/);
 });
 
+test('caches successful public market responses at the edge', async () => {
+  const previousCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
+  const previousFetch = globalThis.fetch;
+  const entries = new Map();
+  const cache = {
+    async match(request) { return entries.get(request.url)?.clone() || undefined; },
+    async put(request, response) { entries.set(request.url, response.clone()); },
+  };
+  let upstreamCalls = 0;
+  Object.defineProperty(globalThis, 'caches', { configurable: true, value: { default: cache } });
+  globalThis.fetch = async (input) => {
+    upstreamCalls += 1;
+    const url = String(input);
+    if (url.includes('collection_statistic')) return Response.json({ code: 0, data: { name: 'Ordinal Punks', floorPrice: 100000000, listed: 1, total: 10000, btcValue: 0 } });
+    if (url.endsWith('/auction/list')) return Response.json({ code: 0, data: { list: [], total: 1 } });
+    if (url.endsWith('/auction/actions')) return Response.json({ code: 0, data: { list: [] } });
+    if (url.includes('coingecko')) return Response.json({ 'fractal-bitcoin': { usd: 0.4 } });
+    if (url.includes('coinpaprika')) return Response.json({ quotes: { USD: { price: 0.4 } } });
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const env = { UNISAT_API_KEY: 'test-only' };
+    const path = '/api/market?collectionId=opunk&start=0&limit=20';
+    const first = await worker.fetch(makeRequest(path, { ip: '192.0.2.90' }), env);
+    const second = await worker.fetch(makeRequest(path, { ip: '192.0.2.91' }), env);
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('x-edge-cache'), 'MISS');
+    assert.equal(second.status, 200);
+    assert.equal(second.headers.get('x-edge-cache'), 'HIT');
+    assert.equal(second.headers.get('cache-control'), 'public, max-age=20, s-maxage=20, stale-while-revalidate=60');
+    assert.equal(upstreamCalls, 5);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousCaches) Object.defineProperty(globalThis, 'caches', previousCaches);
+    else delete globalThis.caches;
+  }
+});
+
 test('rejects unlisted browser origins', async () => {
   const response = await worker.fetch(makeRequest('/api/market?collectionId=opunk', { origin: 'https://attacker.example' }), {});
   assert.equal(response.status, 403);

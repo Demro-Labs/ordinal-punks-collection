@@ -204,6 +204,51 @@ async function inscription(inscriptionId, env) {
   };
 }
 
+async function edgeCachedResponse(request, headers, freshSeconds, staleSeconds, producer) {
+  const cache = typeof caches === 'undefined' ? null : caches.default;
+  if (!cache) {
+    const response = await producer();
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.set('Cache-Control', `public, max-age=${freshSeconds}, s-maxage=${freshSeconds}, stale-while-revalidate=${staleSeconds}`);
+    responseHeaders.set('X-Edge-Cache', 'BYPASS');
+    return new Response(response.body, { status: response.status, headers: responseHeaders });
+  }
+
+  const cacheUrl = new URL(request.url);
+  cacheUrl.searchParams.set('__edge_origin', request.headers.get('Origin') || 'no-origin');
+  const cacheKey = new Request(cacheUrl.toString(), { method: 'GET' });
+  let cached = null;
+  try { cached = await cache.match(cacheKey); } catch { /* Cache API is best-effort. */ }
+  const now = Date.now();
+  const freshUntil = Number(cached?.headers.get('X-Edge-Fresh-Until') || 0);
+
+  const serve = (response, cacheState) => {
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.delete('X-Edge-Fresh-Until');
+    for (const [name, value] of Object.entries(headers)) responseHeaders.set(name, value);
+    responseHeaders.set('Cache-Control', `public, max-age=${freshSeconds}, s-maxage=${freshSeconds}, stale-while-revalidate=${staleSeconds}`);
+    responseHeaders.set('X-Edge-Cache', cacheState);
+    return new Response(response.body, { status: response.status, headers: responseHeaders });
+  };
+
+  if (cached && freshUntil > now) return serve(cached, 'HIT');
+  try {
+    const response = await producer();
+    if (response.ok) {
+      const storedHeaders = new Headers(response.headers);
+      storedHeaders.set('X-Edge-Fresh-Until', String(now + freshSeconds * 1000));
+      storedHeaders.set('Cache-Control', `public, max-age=${freshSeconds + staleSeconds}`);
+      try {
+        await cache.put(cacheKey, new Response(response.clone().body, { status: response.status, headers: storedHeaders }));
+      } catch { /* Continue with the fresh origin response if edge storage fails. */ }
+    }
+    return serve(response, 'MISS');
+  } catch (error) {
+    if (cached?.ok) return serve(cached, 'STALE');
+    throw error;
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -241,9 +286,7 @@ export default {
             headers: { ...headers, 'Cache-Control': 'no-store' },
           });
         }
-        return Response.json(await market(collectionId, start, limit, env), {
-          headers: { ...headers, 'Cache-Control': 'public, max-age=20' },
-        });
+        return edgeCachedResponse(request, headers, 20, 60, async () => Response.json(await market(collectionId, start, limit, env), { headers }));
       }
 
       const inscriptionId = url.searchParams.get('inscriptionId') || '';
@@ -253,9 +296,7 @@ export default {
           headers: { ...headers, 'Cache-Control': 'no-store' },
         });
       }
-      return Response.json(await inscription(inscriptionId, env), {
-        headers: { ...headers, 'Cache-Control': 'public, max-age=20' },
-      });
+      return edgeCachedResponse(request, headers, 120, 300, async () => Response.json(await inscription(inscriptionId, env), { headers }));
     } catch {
       console.warn('Live API upstream request failed', url.pathname);
       return Response.json({ error: 'Live UniSat data is temporarily unavailable.' }, {
