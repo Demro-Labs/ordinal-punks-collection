@@ -599,7 +599,7 @@ export default function Home() {
           >
             <div className="border border-[#3b434d] bg-[#12161b] p-3 shadow-[0_18px_40px_rgba(0,0,0,0.18)] sm:p-4">
               <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(0,1fr)_220px_220px_220px_220px]">
-                <label className="relative block h-12 w-full min-w-0 flex-1 border border-[#3b434d] bg-[#12161b] transition-colors focus-within:ring-1 focus-within:ring-inset focus-within:ring-[#d99a54] 2xl:max-w-none">
+                <label className="relative block h-12 w-full min-w-0 flex-1 border border-[#3b434d] bg-[#12161b] transition-colors focus-within:ring-0 focus-within:border-[#3b434d] 2xl:max-w-none">
                   <span className="sr-only">Search for an ordinal</span>
                   <Search
                     size={16}
@@ -634,7 +634,7 @@ export default function Home() {
                     <select
                       value={sex}
                       onChange={event => setSex(event.target.value)}
-                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
+                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none focus:border-[#3b434d] focus:outline-none focus:ring-0"
                     >
                       <option value="all">All</option>
                       {sexValues.map(value => (
@@ -651,7 +651,7 @@ export default function Home() {
                     <select
                       value={skinTone}
                       onChange={event => setSkinTone(event.target.value)}
-                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
+                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none focus:border-[#3b434d] focus:outline-none focus:ring-0"
                     >
                       <option value="all">All</option>
                       {skinToneValues.map(value => (
@@ -668,7 +668,7 @@ export default function Home() {
                     <select
                       value={rarityFilter}
                       onChange={event => setRarityFilter(event.target.value)}
-                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
+                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none focus:border-[#3b434d] focus:outline-none focus:ring-0"
                     >
                       <option value="all">All</option>
                       <option value="Legendary">Legendary</option>
@@ -685,7 +685,7 @@ export default function Home() {
                     <select
                       value={listingFilter}
                       onChange={event => setListingFilter(event.target.value)}
-                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
+                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none focus:border-[#3b434d] focus:outline-none focus:ring-0"
                     >
                       <option value="all">All</option>
                       <option value="listed">Listed</option>
