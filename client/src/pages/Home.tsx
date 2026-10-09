@@ -598,8 +598,8 @@ export default function Home() {
             aria-label="Catalogue filters"
           >
             <div className="space-y-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-                <label className="relative block w-full min-w-0 flex-1 lg:max-w-3xl">
+              <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(0,1fr)_220px_220px_220px_220px]">
+                <label className="relative block w-full min-w-0 flex-1 border border-[#3b434d] bg-[#12161b] transition-colors focus-within:border-[#d99a54] focus-within:ring-1 focus-within:ring-[#d99a54] 2xl:max-w-none">
                   <span className="sr-only">Search for an ordinal</span>
                   <Search
                     size={16}
@@ -613,7 +613,7 @@ export default function Home() {
                     spellCheck={false}
                     placeholder="Search by ID, name or trait"
                     aria-label="Search Ordinal Punks"
-                    className="h-12 rounded-none border-[#3b434d] bg-[#12161b] pl-10 pr-10 font-mono text-xs text-[#f3efe5] placeholder:text-[#718092] focus-visible:ring-[#d99a54]"
+                    className="h-12 rounded-none border-0 bg-transparent pl-10 pr-10 font-mono text-xs text-[#f3efe5] placeholder:text-[#718092] focus-visible:ring-0"
                   />
                   {query && (
                     <button
@@ -626,15 +626,15 @@ export default function Home() {
                     </button>
                   )}
                 </label>
-                <div className="flex flex-wrap gap-3">
-                  <label className="flex h-12 items-center gap-2 border border-[#3b434d] bg-[#12161b] px-3">
+                <div className="contents">
+                  <label className="flex h-12 min-w-0 w-full items-center gap-2 border border-[#3b434d] bg-[#12161b] px-3">
                     <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#718092]">
                       Sex
                     </span>
                     <select
                       value={sex}
                       onChange={event => setSex(event.target.value)}
-                      className="max-w-[120px] bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
+                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
                     >
                       <option value="all">All</option>
                       {sexValues.map(value => (
@@ -644,14 +644,14 @@ export default function Home() {
                       ))}
                     </select>
                   </label>
-                  <label className="flex h-12 items-center gap-2 border border-[#3b434d] bg-[#12161b] px-3">
+                  <label className="flex h-12 min-w-0 w-full items-center gap-2 border border-[#3b434d] bg-[#12161b] px-3">
                     <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#718092]">
                       Skin Tone
                     </span>
                     <select
                       value={skinTone}
                       onChange={event => setSkinTone(event.target.value)}
-                      className="max-w-[140px] bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
+                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
                     >
                       <option value="all">All</option>
                       {skinToneValues.map(value => (
@@ -661,14 +661,14 @@ export default function Home() {
                       ))}
                     </select>
                   </label>
-                  <label className="flex h-12 items-center gap-2 border border-[#3b434d] bg-[#12161b] px-3">
+                  <label className="flex h-12 min-w-0 w-full items-center gap-2 border border-[#3b434d] bg-[#12161b] px-3">
                     <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#718092]">
                       Rarity rank
                     </span>
                     <select
                       value={rarityFilter}
                       onChange={event => setRarityFilter(event.target.value)}
-                      className="max-w-[130px] bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
+                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
                     >
                       <option value="all">All</option>
                       <option value="Legendary">Legendary</option>
@@ -678,14 +678,14 @@ export default function Home() {
                       <option value="Common">Common</option>
                     </select>
                   </label>
-                  <label className="flex h-12 items-center gap-2 border border-[#3b434d] bg-[#12161b] px-3">
+                  <label className="flex h-12 min-w-0 w-full items-center gap-2 border border-[#3b434d] bg-[#12161b] px-3">
                     <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#718092]">
                       Listing status
                     </span>
                     <select
                       value={listingFilter}
                       onChange={event => setListingFilter(event.target.value)}
-                      className="max-w-[130px] bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
+                      className="min-w-0 flex-1 bg-transparent pr-5 font-sans text-sm text-[#d9d3c6] outline-none"
                     >
                       <option value="all">All</option>
                       <option value="listed">Listed</option>
@@ -709,7 +709,7 @@ export default function Home() {
             ref={galleryRef}
             className="ledger-sheet relative px-5 py-8 sm:px-8 lg:px-12"
           >
-            <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+            <div className="mb-8 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
               <div>
                 <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#d99a54]">
                   Plate {String(page).padStart(3, "0")}
@@ -718,19 +718,21 @@ export default function Home() {
                   Collection index
                 </h2>
               </div>
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute right-0 -top-8 font-mono text-[7rem] font-semibold leading-none tracking-[-0.12em] text-[#2c323a]/80 sm:-right-2 sm:-top-10 sm:text-[9rem]"
-              >
-                {String(page).padStart(3, "0")}
-              </span>
-              {!loading && !error && (
-                <p className="font-mono text-xs text-[#7f8b99]">
-                  Showing {firstVisible.toLocaleString("en-US")}–
-                  {lastVisible.toLocaleString("en-US")} /{" "}
-                  {filteredRecords.length.toLocaleString("en-US")}
-                </p>
-              )}
+              <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 sm:justify-end">
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none shrink-0 font-mono text-5xl font-semibold leading-none tracking-[-0.12em] text-[#2c323a]/80 sm:text-7xl"
+                >
+                  {String(page).padStart(3, "0")}
+                </span>
+                {!loading && !error && (
+                  <p className="font-mono text-xs text-[#7f8b99]">
+                    Showing {firstVisible.toLocaleString("en-US")}–
+                    {lastVisible.toLocaleString("en-US")} /{" "}
+                    {filteredRecords.length.toLocaleString("en-US")}
+                  </p>
+                )}
+              </div>
             </div>
             <div className="mb-6">
               <Pagination
