@@ -599,7 +599,7 @@ export default function Home() {
           >
             <div className="space-y-4">
               <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(0,1fr)_220px_220px_220px_220px]">
-                <label className="relative block h-12 w-full min-w-0 flex-1 border border-[#3b434d] bg-[#12161b] transition-colors focus-within:border-[#d99a54] 2xl:max-w-none">
+                <label className="relative block h-12 w-full min-w-0 flex-1 border border-[#3b434d] bg-[#12161b] transition-colors focus-within:ring-1 focus-within:ring-inset focus-within:ring-[#d99a54] 2xl:max-w-none">
                   <span className="sr-only">Search for an ordinal</span>
                   <Search
                     size={16}
