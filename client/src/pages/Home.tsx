@@ -597,7 +597,7 @@ export default function Home() {
             className="border-y border-[#2c323a] bg-[#11161b] px-5 py-5 shadow-[inset_0_1px_0_rgba(243,239,229,0.04)] sm:px-8 lg:px-12"
             aria-label="Catalogue filters"
           >
-            <div className="space-y-4">
+            <div className="border border-[#3b434d] bg-[#12161b] p-3 shadow-[0_18px_40px_rgba(0,0,0,0.18)] sm:p-4">
               <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(0,1fr)_220px_220px_220px_220px]">
                 <label className="relative block h-12 w-full min-w-0 flex-1 border border-[#3b434d] bg-[#12161b] transition-colors focus-within:ring-1 focus-within:ring-inset focus-within:ring-[#d99a54] 2xl:max-w-none">
                   <span className="sr-only">Search for an ordinal</span>
@@ -707,7 +707,7 @@ export default function Home() {
           </section>
           <section
             ref={galleryRef}
-            className="ledger-sheet relative border-x border-[#2c323a]/70 px-5 py-8 sm:px-8 lg:px-12"
+            className="ledger-sheet relative border-x border-[#2c323a]/70 bg-[#0d1115] px-5 py-8 shadow-[inset_0_1px_0_rgba(243,239,229,0.04)] sm:px-8 lg:px-12"
           >
             <div className="mb-8 grid gap-3 border-b border-[#2c323a] pb-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
               <div>
@@ -721,7 +721,7 @@ export default function Home() {
               <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 sm:justify-end">
                 <span
                   aria-hidden="true"
-                  className="pointer-events-none shrink-0 font-mono text-5xl font-semibold leading-none tracking-[-0.12em] text-[#2c323a]/70 sm:text-7xl"
+                  className="pointer-events-none shrink-0 font-mono text-7xl font-semibold leading-none tracking-[-0.12em] text-[#3b434d]/80 sm:text-[8rem]"
                 >
                   {String(page).padStart(3, "0")}
                 </span>
@@ -734,7 +734,7 @@ export default function Home() {
                 )}
               </div>
             </div>
-            <div className="mb-6">
+            <div className="mb-6 border-y border-[#2c323a] bg-[#11161b] px-3 py-3">
               <Pagination
                 page={page}
                 pageCount={pageCount}
@@ -764,7 +764,7 @@ export default function Home() {
                     return (
                       <article
                         key={record.id}
-                        className="group min-w-0 border border-[#2c323a] bg-[#12161b] p-3 transition-colors hover:border-[#d99a54]/60 animate-in fade-in slide-in-from-bottom-2 duration-500"
+                        className="group min-w-0 border border-[#3b434d] border-t-2 border-t-[#d99a54]/60 bg-[#12161b] p-3 shadow-[0_10px_24px_rgba(0,0,0,0.16)] transition-all hover:-translate-y-0.5 hover:border-[#d99a54]/70 animate-in fade-in slide-in-from-bottom-2 duration-500"
                       >
                         <button
                           type="button"
