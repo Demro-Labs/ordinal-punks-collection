@@ -1,4 +1,5 @@
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -174,15 +175,15 @@ async function startServer() {
       ? path.resolve(__dirname, "public")
       : path.resolve(__dirname, "..", "dist", "public");
   app.use(express.static(staticPath));
-  app.get("*", (req, res) => {
-    const ip = req.ip || req.socket.remoteAddress || "unknown";
-    if (isRateLimited(ip))
-      return res
-        .setHeader("Retry-After", "60")
-        .status(429)
-        .json({ error: "Too many requests." });
-    return res.sendFile(path.join(staticPath, "index.html"));
+  const spaRateLimit = rateLimit({
+    windowMs: RATE_WINDOW_MS,
+    limit: RATE_MAX_REQUESTS,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
   });
+  app.get("*", spaRateLimit, (_req, res) =>
+    res.sendFile(path.join(staticPath, "index.html"))
+  );
   const port = process.env.PORT || 3000;
   server.listen(port, () =>
     console.log(`Server running on http://localhost:${port}/`)
