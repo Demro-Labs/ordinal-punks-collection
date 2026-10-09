@@ -599,7 +599,7 @@ export default function Home() {
           >
             <div className="space-y-4">
               <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(0,1fr)_220px_220px_220px_220px]">
-                <label className="relative block w-full min-w-0 flex-1 border border-[#3b434d] bg-[#12161b] transition-colors focus-within:border-[#d99a54] focus-within:ring-1 focus-within:ring-[#d99a54] 2xl:max-w-none">
+                <label className="relative block h-12 w-full min-w-0 flex-1 border border-[#3b434d] bg-[#12161b] transition-colors focus-within:border-[#d99a54] 2xl:max-w-none">
                   <span className="sr-only">Search for an ordinal</span>
                   <Search
                     size={16}
@@ -613,7 +613,7 @@ export default function Home() {
                     spellCheck={false}
                     placeholder="Search by ID, name or trait"
                     aria-label="Search Ordinal Punks"
-                    className="h-12 rounded-none border-0 bg-transparent pl-10 pr-10 font-mono text-xs text-[#f3efe5] placeholder:text-[#718092] focus-visible:ring-0"
+                    className="h-full rounded-none border-0 bg-transparent pl-10 pr-10 font-mono text-xs text-[#f3efe5] placeholder:text-[#718092] focus-visible:ring-0"
                   />
                   {query && (
                     <button
