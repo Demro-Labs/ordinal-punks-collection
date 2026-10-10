@@ -1,35 +1,96 @@
-# Ordinal Punks / Ledger
+# Ordinal Punks Collection
 
-A visual catalogue for all 10,000 Ordinal Punks inscribed on Fractal Bitcoin. The interface presents 20 records per plate, exposes the supplied metadata for each punk, and links every inscription ID directly to its UniSat source page.
+Catalogue visuel des **10 000 Ordinal Punks** inscrits sur Fractal Bitcoin, avec consultation des métadonnées, galerie optimisée, données live UniSat et outils wallet.
 
-## What is included
+## Fonctionnalités
 
-The catalogue loads the supplied `inscriptions.json` data, including the inscription ID, name, description, token ID, file name and trait attributes. The 10,000 source PNGs are represented in optimized 100-tile WebP sheets so the browser only fetches the sheets needed for the current page. Each card provides a clickable inscription ID, a copper UniSat source badge and a full metadata record in the detail panel.
+- Galerie paginée des 10 000 inscriptions avec images optimisées en feuilles WebP.
+- Recherche et consultation des métadonnées : inscription ID, nom, description, token ID, fichier et traits.
+- Panneau de détail d’une inscription avec propriétaire, créateur et état de listing UniSat lorsque ces données sont disponibles.
+- Chargement automatique des inscriptions détenues après connexion du wallet UniSat.
+- Filtrage des inscriptions éligibles au transfert : les inscriptions et actifs protocolaires sont protégés contre une sélection accidentelle.
+- Transfert sécurisé par PSBT avec contrôle de la sortie d’inscription et prévention des sorties dust.
+- Chaque transfert nécessite une approbation explicite dans UniSat : aucune transaction n’est signée ou diffusée automatiquement par le site.
+- Upload et inscription UniSat avec création d’ordre et approbation wallet.
+- Marché live de la collection, alimenté par le Worker Cloudflare et l’API UniSat.
+- Liens directs vers les pages UniSat de la collection et de chaque inscription.
 
-The collection source is [UniSat Fractal Bitcoin](https://fractal.unisat.io/market/collection?collectionId=opunk). Individual records use the direct URL format `https://fractal.unisat.io/inscription/{inscription_id}`.
+## Wallet et transfert
 
-## Local development
+Le bouton de connexion utilise l’extension UniSat. Après connexion, le site charge automatiquement les inscriptions du wallet connecté.
+
+Le transfert utilise l’adresse destinataire saisie par l’utilisateur et sélectionne uniquement des inscriptions compatibles avec le transfert PSBT. Les UTXO de frais sont récupérés via la route sécurisée :
+
+```text
+GET https://fractal-ordinal-live.servostar23.workers.dev/api/spendable-utxos
+```
+
+Le Worker vérifie notamment l’adresse, le montant, le script, l’absence d’inscription et l’absence d’actifs protocolaires signalés. La politique dust du réseau ne peut pas être contournée par une clé API.
+
+> Toujours vérifier l’adresse destinataire et le résumé affiché dans UniSat avant de signer.
+
+## Upload et inscription
+
+Le panneau d’inscription permet de préparer un fichier, de créer un ordre UniSat et de suivre son statut. La clé API UniSat reste côté Worker Cloudflare dans le secret `UNISAT_API_KEY` ; elle n’est jamais envoyée au navigateur.
+
+L’utilisateur doit approuver le paiement et les opérations demandées directement dans UniSat.
+
+## Architecture live
+
+Le frontend appelle le Worker Cloudflare suivant :
+
+```text
+https://fractal-ordinal-live.servostar23.workers.dev
+```
+
+Routes principales utilisées par l’interface :
+
+- `/api/market` — marché live de la collection ;
+- `/api/live-inscription` — propriétaire, créateur et listing d’une inscription ;
+- `/api/spendable-utxos` — UTXO de frais admissibles au transfert PSBT ;
+- `/api/inscribe/order` — création et suivi des ordres d’inscription.
+
+Les réponses live peuvent être partielles lorsque UniSat est temporairement indisponible. L’interface utilise des valeurs de repli et continue d’afficher les métadonnées locales.
+
+## Développement local
 
 ```bash
 pnpm install
 pnpm run dev
 ```
 
-The project is a React 19 + Vite + Tailwind 4 static frontend. Type checking and the production build can be verified with:
+Commandes de validation :
 
 ```bash
 pnpm run check
 pnpm run build
 ```
 
-## Design direction
+Le projet utilise React 19, Vite, Tailwind CSS 4 et TypeScript. Le serveur local peut être lancé après compilation avec :
 
-The visual system follows **Inscription Ledger**: warm archive paper, charcoal ink, muted Copper Index accents, monospaced record fields and an asymmetric catalogue layout. The interface is deliberately documentary rather than marketplace-like, with UniSat treated as the primary source for verification.
+```bash
+pnpm run start
+```
 
-## Source data
+## Déploiement
 
-The source archive supplied for this project contains 10,000 1024×1024 PNG files and a 10,000-record JSON metadata file. The build pipeline used during preparation is documented outside the frontend source because the deployed interface consumes the optimized manifest and sprite sheets.
+Le site est déployé automatiquement sur GitHub Pages depuis `main` par le workflow inclus dans `.github/workflows/`.
 
-## Notes
+URL de production :
 
-The repository is self-contained for GitHub Pages: the complete six-megabyte metadata manifest, 100 optimized WebP sprite sheets containing all 10,000 images, and the four brand assets live under `client/public/assets/`. Vite automatically switches to the `/ordinal-punks-collection/` base path in GitHub Actions, and the included workflow deploys the built `dist/public` directory to GitHub Pages.
+```text
+https://demro-labs.github.io/ordinal-punks-collection/
+```
+
+Vite utilise automatiquement la base `/ordinal-punks-collection/` lors du build GitHub Pages.
+
+## Données et assets
+
+Le dépôt contient le manifeste des inscriptions, les métadonnées locales, les feuilles WebP optimisées et les assets de marque sous `client/public/assets/`. Les données locales permettent de consulter la collection même lorsque les services live sont indisponibles.
+
+## Sécurité et limites
+
+- La clé UniSat n’est pas exposée dans le frontend.
+- Les signatures et paiements restent sous le contrôle de l’utilisateur dans UniSat.
+- Le site ne contourne pas les règles dust du réseau.
+- Les données de marché, propriétaire et inscription dépendent de la disponibilité de l’API UniSat.
