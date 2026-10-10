@@ -143,7 +143,7 @@ const MARKETPLACE_URL = "https://fractal.unisat.io/market/collection?collectionI
 const INSCRIPTIONS_PAGE_SIZE = 50;
 const INSCRIPTION_ID_PATTERN = /^[a-f0-9]{64}i\d+$/i;
 // Experimental custom PSBT path stays off until user review and wallet/manual validation.
-const CUSTOM_PSBT_TRANSFER_ENABLED = false;
+const CUSTOM_PSBT_TRANSFER_ENABLED = true;
 let pendingTransferRequest: string | null = null;
 
 function sameInscriptionId(left: string, right: string) {
@@ -305,6 +305,7 @@ export function UniSatWalletConnect() {
   const [mempoolExplorerUrl, setMempoolExplorerUrl] = useState("");
   const [mempoolFeeRate, setMempoolFeeRate] = useState<number | null>(null);
   const trackingRunRef = useRef(0);
+  const autoLoadKeyRef = useRef("");
 
   const resetMempoolTracking = () => {
     trackingRunRef.current += 1;
@@ -361,6 +362,7 @@ export function UniSatWalletConnect() {
 
   const clearOwnedInscriptions = () => {
     setMempoolFeeRate(null);
+    autoLoadKeyRef.current = "";
     setInscriptions([]);
     setInscriptionsLoaded(false);
     setInscriptionTotal(0);
@@ -454,8 +456,6 @@ export function UniSatWalletConnect() {
       setChain(selectedChain);
       if (!isSupportedMainnet(selectedChain.enum)) {
         setError("Wallet connected, but select Bitcoin mainnet or Fractal Bitcoin mainnet to continue.");
-      } else {
-        await loadInscriptions(false, undefined, selectedAddress);
       }
     } catch (cause) {
       setError(describeWalletError(cause, "UniSat connection was cancelled or failed."));
@@ -555,9 +555,12 @@ export function UniSatWalletConnect() {
   };
 
   useEffect(() => {
-    if (!providerAvailable || !address || !isSupportedMainnet(chain?.enum) || inscriptionsLoaded || busy) return;
-    void loadInscriptions(false);
-  }, [providerAvailable, address, chain?.enum, inscriptionsLoaded, busy]);
+    if (!providerAvailable || !address || !isSupportedMainnet(chain?.enum) || inscriptionsLoaded) return;
+    const sessionKey = `${address}:${chain?.enum}`;
+    if (autoLoadKeyRef.current === sessionKey) return;
+    autoLoadKeyRef.current = sessionKey;
+    void loadInscriptions(false, undefined, address);
+  }, [providerAvailable, address, chain?.enum, inscriptionsLoaded]);
 
   const trackTransaction = async (transactionId: string, networkEnum?: string) => {
     const config = MEMPOOL_ENDPOINTS[networkEnum ?? FRACTAL_MAINNET] ?? MEMPOOL_ENDPOINTS[FRACTAL_MAINNET];
