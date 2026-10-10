@@ -44,6 +44,10 @@ const INSCRIPTIONS_PAGE_SIZE = 50;
 const INSCRIPTION_ID_PATTERN = /^[a-f0-9]{64}i\d+$/i;
 let pendingTransferRequest: string | null = null;
 
+function sameInscriptionId(left: string, right: string) {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
 export function requestUniSatTransfer(inscriptionId: string) {
   if (!INSCRIPTION_ID_PATTERN.test(inscriptionId)) return;
   pendingTransferRequest = inscriptionId;
@@ -81,20 +85,20 @@ export function UniSatWalletConnect() {
       const requestedId = typeof detail?.inscriptionId === "string" ? detail.inscriptionId : "";
       if (!INSCRIPTION_ID_PATTERN.test(requestedId)) return;
       pendingTransferRequest = requestedId;
-      setSelectedInscriptionId(inscriptions.some(item => item.inscriptionId === requestedId) ? requestedId : "");
+      setSelectedInscriptionId(inscriptions.some(item => sameInscriptionId(item.inscriptionId, requestedId)) ? requestedId : "");
       setConfirmed(false);
       setTxid("");
       setTransferError(
         address && chain?.enum === FRACTAL_MAINNET
           ? inscriptions.length > 0
-            ? inscriptions.some(item => item.inscriptionId === requestedId)
+            ? inscriptions.some(item => sameInscriptionId(item.inscriptionId, requestedId))
               ? ""
               : "This Ordinal Punks inscription is not among the inscriptions loaded from this UniSat account."
             : "Load your UniSat inscriptions first; the transfer will only use an inscription owned by this account."
           : "Connect UniSat on Fractal Bitcoin, then load your inscriptions before transferring."
       );
-      if (address && chain?.enum === FRACTAL_MAINNET && !inscriptionsLoaded && !busy) {
-        void loadInscriptions();
+      if (address && chain?.enum === FRACTAL_MAINNET && !busy && (!inscriptionsLoaded || !inscriptions.some(item => sameInscriptionId(item.inscriptionId, requestedId)))) {
+        void loadInscriptions(false, requestedId);
       }
       if (!address && providerAvailable && !busy) {
         void connect();
@@ -109,7 +113,7 @@ export function UniSatWalletConnect() {
 
   useEffect(() => {
     if (!pendingTransferRequest) return;
-    if (inscriptions.some(item => item.inscriptionId === pendingTransferRequest)) {
+    if (inscriptions.some(item => sameInscriptionId(item.inscriptionId, pendingTransferRequest!))) {
       setSelectedInscriptionId(pendingTransferRequest);
       setConfirmed(false);
       setTxid("");
@@ -219,7 +223,7 @@ export function UniSatWalletConnect() {
     }
   };
 
-  const loadInscriptions = async (append = false) => {
+  const loadInscriptions = async (append = false, targetId?: string) => {
     const provider = window.unisat;
     if (!provider?.getInscriptions) {
       setTransferError("Update UniSat Wallet to view inscriptions from this site.");
@@ -242,23 +246,42 @@ export function UniSatWalletConnect() {
           throw new Error("The selected wallet account changed. Reconnect UniSat and reload.");
         }
       }
-      const cursor = append ? inscriptionCursor : 0;
-      const page = await provider.getInscriptions(cursor, INSCRIPTIONS_PAGE_SIZE);
-      const pageItems = Array.isArray(page.list) ? page.list : [];
-      const valid = pageItems.filter(item =>
-        typeof item.inscriptionId === "string" && INSCRIPTION_ID_PATTERN.test(item.inscriptionId)
+      const initialCursor = append ? inscriptionCursor : 0;
+      let cursor = initialCursor;
+      let total = 0;
+      let pageItems: UniSatInscription[] = [];
+      const loaded: UniSatInscription[] = [];
+      do {
+        const page = await provider.getInscriptions(cursor, INSCRIPTIONS_PAGE_SIZE);
+        const currentItems = Array.isArray(page.list) ? page.list : [];
+        pageItems = currentItems;
+        total = Number.isFinite(page.total) ? page.total : cursor + currentItems.length;
+        loaded.push(...currentItems.filter(item =>
+          typeof item.inscriptionId === "string" && INSCRIPTION_ID_PATTERN.test(item.inscriptionId)
+        ));
+        cursor += currentItems.length;
+        const targetFound = targetId && loaded.some(item => sameInscriptionId(item.inscriptionId, targetId));
+        if (!targetId || targetFound || currentItems.length === 0 || cursor >= total) break;
+      } while (true);
+
+      const valid = loaded.filter((item, index, items) =>
+        items.findIndex(candidate => sameInscriptionId(candidate.inscriptionId, item.inscriptionId)) === index
       );
       setInscriptions(previous => append
-        ? [...previous, ...valid.filter(item => !previous.some(existing => existing.inscriptionId === item.inscriptionId))]
+        ? [...previous, ...valid.filter(item => !previous.some(existing => sameInscriptionId(existing.inscriptionId, item.inscriptionId)))]
         : valid
       );
       setInscriptionsLoaded(true);
-      setInscriptionTotal(Number.isFinite(page.total) ? page.total : valid.length);
-      setInscriptionCursor(cursor + pageItems.length);
-      setSelectedInscriptionId("");
+      setInscriptionTotal(total);
+      setInscriptionCursor(cursor);
+      const found = targetId ? valid.find(item => sameInscriptionId(item.inscriptionId, targetId)) : undefined;
+      setSelectedInscriptionId(found?.inscriptionId ?? (append ? selectedInscriptionId : ""));
       setConfirmed(false);
       setTxid("");
-      if (!valid.length && (page.total ?? 0) > 0) {
+      if (targetId && !found) {
+        pendingTransferRequest = null;
+        setTransferError("This Ordinal Punks inscription was not found among the inscriptions owned by this UniSat account.");
+      } else if (!valid.length && total > 0) {
         setTransferError("UniSat returned no usable inscription IDs. Refresh the wallet and try again.");
       }
     } catch (cause) {
