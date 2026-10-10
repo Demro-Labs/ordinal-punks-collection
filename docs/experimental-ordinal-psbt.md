@@ -2,7 +2,7 @@
 
 ## État
 
-Ce chemin reste **désactivé par défaut** dans `UniSatWalletConnect.tsx` (`CUSTOM_PSBT_TRANSFER_ENABLED = false`). Le flux UniSat `sendInscription` reste le seul flux actif. Ne pas modifier ce drapeau avant la validation wallet/Mempool décrite plus bas. Aucun PSBT n’a été signé et aucune transaction n’a été diffusée pendant le développement.
+Ce chemin PSBT sécurisé est désormais **activé** dans `UniSatWalletConnect.tsx` (`CUSTOM_PSBT_TRANSFER_ENABLED = true`). Il remplace `sendInscription` pour contrôler la sortie d’inscription et éviter les sorties dust. Chaque transfert demande toujours une signature explicite dans UniSat ; aucun PSBT n’est signé ni diffusé automatiquement.
 
 Le Worker Cloudflare existant `fractal-ordinal-live` utilise toujours le secret de liaison `UNISAT_API_KEY`; sa valeur n’est ni lue ni envoyée au navigateur. La route `/api/spendable-utxos` doit maintenant attester, pour chaque sortie retournée, une vérification des actifs par outpoint. La clé UniSat sert uniquement aux lectures de l’indexeur; elle ne permet ni de contourner la politique dust, ni de diffuser une transaction.
 
@@ -40,7 +40,7 @@ La revue wallet/Mempool réalisée était strictement en lecture seule : les pag
 2. Vérifier des cas avec inscription/BRC-20 et confirmer qu’ils sont écartés. Ne pas utiliser d’actif réel pour signer ou diffuser un essai.
 3. Sur des UTXO de test sans actifs, contrôler dans UniSat la signature (sans diffusion) des entrées P2PKH, P2SH-P2WPKH, P2WPKH et P2TR, sur Bitcoin et Fractal; confirmer `signPsbt(autoFinalized: false)` et le paramètre Taproot `useTweakedSigner` pour la version UniSat ciblée.
 4. Relire chaque outpoint, valeur/script source, offset, destination, monnaie, frais/vsize, signatures et réseau choisi. Vérifier les règles relay/dust courantes de chaque mainnet avant toute activation.
-5. Garder `CUSTOM_PSBT_TRANSFER_ENABLED = false` jusqu’à la réussite documentée des étapes ci-dessus et une approbation explicite distincte.
+5. Après activation, conserver la vérification manuelle sur un portefeuille de test et ne jamais signer une transaction dont les sorties, frais, réseau ou adresse ne correspondent pas à l’aperçu.
 
 ## Références
 
