@@ -260,7 +260,7 @@ function describeWalletError(cause: unknown, fallback: string) {
       : "";
   }
   if (/dust|0-fee/i.test(message)) {
-    return `${message}${code}. The inscription UTXO is dust and cannot fund the transaction fee. Add a separate spendable BTC/FB UTXO in UniSat; a Mempool fee estimate cannot make a dust-only input spendable.`;
+    return `${message}${code}. The network relay policy rejected a transaction that contains a dust output while paying a non-zero fee. The offending output may be the inscription sent to the recipient or the wallet's change; adding BTC/FB only helps if it removes a dust change output. UniSat sendInscription exposes a fee rate but no output-value control, and a Mempool or Cloudflare API key cannot override this policy.`;
   }
   return message ? `${message}${code}` : fallback;
 }
