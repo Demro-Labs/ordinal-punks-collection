@@ -383,10 +383,17 @@ export function UniSatWalletConnect() {
 
     const handleAccounts = (...args: unknown[]) => {
       const accounts = args[0];
-      setAddress(Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : null);
+      const nextAddress = Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : null;
+      setAddress(nextAddress);
       setDestination("");
       setTransferError("");
       clearOwnedInscriptions();
+      if (nextAddress) {
+        void provider.getChain?.().then(nextChain => {
+          setChain(nextChain);
+          if (isSupportedMainnet(nextChain.enum)) void loadInscriptions(false, undefined, nextAddress);
+        }).catch(() => setChain(null));
+      }
     };
     const handleChain = () => {
       void provider.getChain?.().then(nextChain => {
@@ -460,6 +467,9 @@ export function UniSatWalletConnect() {
       setChain(selectedChain);
       if (!isSupportedMainnet(selectedChain.enum)) {
         setError("Wallet connected, but select Bitcoin mainnet or Fractal Bitcoin mainnet to continue.");
+      } else {
+        // Do not wait for a later React effect: refresh the account immediately after connection.
+        await loadInscriptions(false, undefined, selectedAddress);
       }
     } catch (cause) {
       setError(describeWalletError(cause, "UniSat connection was cancelled or failed."));
@@ -482,6 +492,9 @@ export function UniSatWalletConnect() {
       clearOwnedInscriptions();
       if (selectedChain.enum !== FRACTAL_MAINNET) {
         setError("UniSat did not confirm Fractal Bitcoin mainnet.");
+      } else if (address) {
+        // Switching to Fractal changes the wallet asset view; reload it immediately.
+        await loadInscriptions(false, undefined, address);
       }
     } catch (cause) {
       setError(describeWalletError(cause, "Network switch was cancelled or failed."));
