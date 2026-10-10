@@ -123,6 +123,17 @@ async function ensureFeeBalance(provider: UniSatProvider) {
   }
 }
 
+const WALLET_REQUEST_TIMEOUT_MS = 30_000;
+
+function withWalletTimeout<T>(promise: Promise<T>, message: string) {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      window.setTimeout(() => reject(new Error(message)), WALLET_REQUEST_TIMEOUT_MS);
+    }),
+  ]);
+}
+
 function describeWalletError(cause: unknown, fallback: string) {
   if (cause instanceof Error && cause.message) return cause.message;
   if (typeof cause === "string" && cause.trim()) return cause;
@@ -291,10 +302,16 @@ export function UniSatWalletConnect() {
 
     setBusy(true);
     try {
-      const accounts = await provider.requestAccounts();
+      const accounts = await withWalletTimeout(
+        provider.requestAccounts(),
+        "UniSat did not respond. Open the UniSat extension, approve the pending request, then try again."
+      );
       const selectedAddress = accounts[0];
       if (!selectedAddress) throw new Error("UniSat did not return an account.");
-      const selectedChain = await provider.getChain();
+      const selectedChain = await withWalletTimeout(
+        provider.getChain(),
+        "UniSat did not return the active network. Unlock the wallet and try again."
+      );
       clearOwnedInscriptions();
       setDestination("");
       setAddress(selectedAddress);
