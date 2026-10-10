@@ -27,6 +27,7 @@ import {
 } from "@/lib/market";
 import { COLLECTION_DATA_URL, COLLECTION_GENERATED_AT, INSCRIPTION_BASE_URL } from "@/lib/collection";
 import { cacheCollectionResponse, readCachedCollection } from "@/lib/collection-cache";
+import { requestUniSatTransfer } from "@/components/UniSatWalletConnect";
 
 const PER_PAGE = 20;
 const TOTAL_ITEMS = 10000;
@@ -168,12 +169,14 @@ function Pagination({
 function DetailPanel({
   record,
   onClose,
+  onTransfer,
   rarity,
   live,
   liveLoading,
 }: {
   record: PunkRecord;
   onClose: () => void;
+  onTransfer: (inscriptionId: string) => void;
   rarity: ReturnType<typeof createRarityIndex>;
   live: LiveInscription | null;
   liveLoading: boolean;
@@ -276,6 +279,13 @@ function DetailPanel({
             >
               Open UniSat source <ExternalLink size={15} />
             </a>
+            <button
+              type="button"
+              className="mt-3 inline-flex min-h-12 items-center justify-center gap-2 border border-[#d99a54] px-5 font-mono text-xs uppercase tracking-[0.14em] text-[#f2bd63] transition-colors hover:bg-[#d99a54]/10"
+              onClick={() => onTransfer(record.id)}
+            >
+              Transfer this inscription
+            </button>
           </div>
         </div>
       </section>
@@ -660,7 +670,7 @@ export default function Home() {
               </div>
             </div>
           </section>
-          <div ref={marketRef} className="min-h-24">
+          <div id="live-market" ref={marketRef} className="min-h-24">
             {marketReady ? (
               <Suspense fallback={<div className="flex min-h-24 items-center justify-center border-b border-[#2c323a] font-mono text-[10px] uppercase tracking-[0.14em] text-[#718092]">Preparing live market…</div>}>
                 <MarketPanel
@@ -930,6 +940,16 @@ export default function Home() {
                           >
                             View inscription <ExternalLink size={11} />
                           </a>
+                          <button
+                            type="button"
+                            className="mt-2 inline-flex items-center gap-1.5 border border-[#c8663d] px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#aa4f2f] transition-colors hover:bg-[#c8663d]/10"
+                            onClick={event => {
+                              event.stopPropagation();
+                              requestUniSatTransfer(record.id);
+                            }}
+                          >
+                            Transfer <ArrowUpRight size={11} />
+                          </button>
                         </div>
                       </article>
                     );
@@ -1146,6 +1166,7 @@ export default function Home() {
         <DetailPanel
           record={selected}
           onClose={() => setSelected(null)}
+          onTransfer={requestUniSatTransfer}
           rarity={rarity}
           live={liveData[selected.id] ?? null}
           liveLoading={liveLoading}
