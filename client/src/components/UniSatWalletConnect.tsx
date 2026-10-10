@@ -19,12 +19,19 @@ type UniSatBalance = {
   unconfirmed?: number;
   total?: number;
 };
+type UniSatBalanceV2 = {
+  available?: number;
+  unavailable?: number;
+  total?: number;
+};
 
 type UniSatProvider = {
   requestAccounts: () => Promise<string[]>;
   getAccounts?: () => Promise<string[]>;
   getChain?: () => Promise<UniSatChain>;
   getBalance?: () => Promise<UniSatBalance>;
+  getBalanceV2?: () => Promise<UniSatBalanceV2>;
+  getBitcoinUtxos?: (cursor: number, size: number) => Promise<unknown>;
   switchChain?: (chain: "FRACTAL_BITCOIN_MAINNET") => Promise<UniSatChain>;
   getInscriptions?: (cursor: number, size: number) => Promise<{
     total: number;
@@ -84,13 +91,35 @@ function shortAddress(address: string) {
 }
 
 async function ensureFeeBalance(provider: UniSatProvider) {
+  if (provider.getBalanceV2) {
+    const balance = await provider.getBalanceV2();
+    const available = Number(balance.available ?? 0);
+    if (!Number.isFinite(available) || available <= 0) {
+      throw new Error("No spendable FB fee UTXO is available. Add separate FB to UniSat or use the UniSat UTXO tool to unlock/consolidate the dust UTXO before transferring.");
+    }
+    return;
+  }
+
+  if (provider.getBitcoinUtxos) {
+    const result = await provider.getBitcoinUtxos(0, 10);
+    const utxos = Array.isArray(result)
+      ? result
+      : result && typeof result === "object" && "list" in result && Array.isArray(result.list)
+        ? result.list
+        : [];
+    if (utxos.length === 0) {
+      throw new Error("No spendable FB fee UTXO is available. Add separate FB to UniSat or use the UniSat UTXO tool to unlock/consolidate the dust UTXO before transferring.");
+    }
+    return;
+  }
+
   if (!provider.getBalance) return;
   const balance = await provider.getBalance();
   const confirmed = Number(balance.confirmed ?? 0);
   const unconfirmed = Number(balance.unconfirmed ?? 0);
   const total = Number(balance.total ?? confirmed + unconfirmed);
   if (!Number.isFinite(total) || total <= 0) {
-    throw new Error("Add BTC to this UniSat wallet to pay the Fractal Bitcoin network fee before transferring.");
+    throw new Error("Add separate FB to this UniSat wallet to pay the Fractal Bitcoin network fee before transferring.");
   }
 }
 
