@@ -181,7 +181,7 @@ async function startServer() {
     standardHeaders: "draft-8",
     legacyHeaders: false,
   });
-  app.get("*", spaRateLimit, (_req, res) =>
+  app.get(/^\/(?!api(?:\/|$)).*/, spaRateLimit, (_req, res) =>
     res.sendFile(path.join(staticPath, "index.html"))
   );
   const port = process.env.PORT || 3000;
