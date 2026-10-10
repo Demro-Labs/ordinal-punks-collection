@@ -7,5 +7,12 @@ export const LIVE_DATA_API_BASE = LIVE_DATA_URL.replace(/\/api\/live-inscription
 export async function fetchLiveInscription(inscriptionId: string, signal?: AbortSignal): Promise<LiveInscription> {
   const response = await fetch(`${LIVE_DATA_URL}?inscriptionId=${encodeURIComponent(inscriptionId)}`, { signal, headers: { Accept: "application/json" } });
   if (!response.ok) throw new Error(`Live UniSat request failed (${response.status}).`);
-  return (await response.json()) as LiveInscription;
+  const payload = (await response.json()) as Partial<LiveInscription>;
+  return {
+    inscriptionId: payload.inscriptionId || inscriptionId,
+    owner: payload.owner ?? null,
+    creator: payload.creator ?? null,
+    listing: payload.listing ?? { listed: false, auctionId: null, price: null, address: null, marketType: null, collectionName: null },
+    refreshedAt: payload.refreshedAt || new Date().toISOString(),
+  };
 }
