@@ -147,9 +147,16 @@ function shortAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
 }
 
-async function ensureFeeBalance(provider: UniSatProvider, networkEnum: string, inscription: UniSatInscription) {
+async function ensureFeeBalance(
+  provider: UniSatProvider,
+  networkEnum: string,
+  inscription: UniSatInscription,
+  feeRate: number
+) {
   const networkLabel = getMempoolConfig(networkEnum)?.label ?? "selected network";
   const feeAsset = networkEnum === BITCOIN_MAINNET ? "BTC" : "FB";
+  // Reserve a conservative 350 vB for the inscription transfer plus a non-dust change output.
+  const minimumFeeBalance = Math.max(1_000, Math.ceil(feeRate * 350) + 600);
   let availableBalance: number | null = null;
   if (provider.getBalanceV2) {
     const balance = await provider.getBalanceV2();
@@ -158,6 +165,12 @@ async function ensureFeeBalance(provider: UniSatProvider, networkEnum: string, i
       throw new Error(`UniSat reports no spendable ${feeAsset} fee balance on ${networkLabel}. Add a separate, non-dust ${feeAsset} UTXO before transferring.`);
     }
     availableBalance = available;
+    if (available < minimumFeeBalance) {
+      const additional = Math.ceil(minimumFeeBalance - available);
+      throw new Error(
+        `Insufficient spendable ${feeAsset} on ${networkLabel} for fees and non-dust change. UniSat reports ${Math.floor(available)} sats available; add about ${additional} more sats (estimated minimum ${minimumFeeBalance} sats at ${feeRate} sat/vB).`
+      );
+    }
   }
 
   if (provider.getBitcoinUtxos) {
@@ -624,7 +637,7 @@ export function UniSatWalletConnect() {
       await validateMempoolAddress(activeNetworkEnum, recipient);
       const feeRate = await getRecommendedFeeRate(activeNetworkEnum);
       setMempoolFeeRate(feeRate);
-      await ensureFeeBalance(provider, activeNetworkEnum, selected);
+      await ensureFeeBalance(provider, activeNetworkEnum, selected, feeRate);
       const result = await provider.sendInscription(recipient, selected.inscriptionId, { feeRate });
       const returnedTxid = typeof result === "string" ? result : result?.txid;
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) {
