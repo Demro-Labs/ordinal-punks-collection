@@ -124,6 +124,23 @@ async function ensureFeeBalance(provider: UniSatProvider) {
 }
 
 const WALLET_REQUEST_TIMEOUT_MS = 30_000;
+const UNISAT_MOBILE_APP_NAME = "Ordinal Punks";
+
+function isMobileBrowser() {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function openUniSatMobileWallet() {
+  if (!isMobileBrowser()) return false;
+  const nonce = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const query = new URLSearchParams({
+    method: "connect",
+    from: UNISAT_MOBILE_APP_NAME,
+    nonce,
+  });
+  window.location.href = `unisat://request?${query.toString()}`;
+  return true;
+}
 
 function withWalletTimeout<T>(promise: Promise<T>, message: string) {
   return Promise.race([
@@ -292,7 +309,11 @@ export function UniSatWalletConnect() {
     setError("");
     if (!provider) {
       setProviderAvailable(false);
-      setError("Install or enable the official UniSat Wallet extension, then try again.");
+      if (openUniSatMobileWallet()) {
+        setError("Opening UniSat Wallet. Approve the connection in the app, then return to this site.");
+      } else {
+        setError("Install or enable the official UniSat Wallet extension, then try again.");
+      }
       return;
     }
     if (!provider.getChain) {
@@ -552,7 +573,9 @@ export function UniSatWalletConnect() {
                 ? `Connected to ${chain?.name ?? "another network"}; switch to Fractal to continue.`
                 : providerAvailable
                   ? "Connect only when you choose. No signature is requested on connection."
-                  : "UniSat Wallet extension not detected."}
+                  : isMobileBrowser()
+                    ? "Connect opens the UniSat Wallet app on this mobile device."
+                    : "UniSat Wallet extension not detected."}
           </p>
           {connectedToFractal && (
             <p className="mt-1 font-mono text-[9px] text-[#718092]">
