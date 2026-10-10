@@ -278,7 +278,10 @@ export function UniSatWalletConnect() {
       setSelectedInscriptionId(found?.inscriptionId ?? (append ? selectedInscriptionId : ""));
       setConfirmed(false);
       setTxid("");
-      if (targetId && !found) {
+      if (targetId && found) {
+        pendingTransferRequest = null;
+        setTransferError("");
+      } else if (targetId && !found) {
         pendingTransferRequest = null;
         setTransferError("This Ordinal Punks inscription was not found among the inscriptions owned by this UniSat account.");
       } else if (!valid.length && total > 0) {
