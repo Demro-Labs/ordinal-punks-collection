@@ -454,6 +454,8 @@ export function UniSatWalletConnect() {
       setChain(selectedChain);
       if (!isSupportedMainnet(selectedChain.enum)) {
         setError("Wallet connected, but select Bitcoin mainnet or Fractal Bitcoin mainnet to continue.");
+      } else {
+        await loadInscriptions(false, undefined, selectedAddress);
       }
     } catch (cause) {
       setError(describeWalletError(cause, "UniSat connection was cancelled or failed."));
@@ -484,7 +486,7 @@ export function UniSatWalletConnect() {
     }
   };
 
-  const loadInscriptions = async (append = false, targetId?: string) => {
+  const loadInscriptions = async (append = false, targetId?: string, accountAddress = address) => {
     const provider = window.unisat;
     if (!provider?.getInscriptions) {
       setTransferError("Update UniSat Wallet to view inscriptions from this site.");
@@ -499,9 +501,9 @@ export function UniSatWalletConnect() {
         clearOwnedInscriptions();
         throw new Error("Switch UniSat to Bitcoin mainnet or Fractal Bitcoin mainnet, then reload your inscriptions.");
       }
-      if (address && provider.getAccounts) {
+      if (accountAddress && provider.getAccounts) {
         const currentAccounts = await provider.getAccounts();
-        if (!currentAccounts.includes(address)) {
+        if (!currentAccounts.includes(accountAddress)) {
           setAddress(currentAccounts[0] ?? null);
           clearOwnedInscriptions();
           throw new Error("The selected wallet account changed. Reconnect UniSat and reload.");
