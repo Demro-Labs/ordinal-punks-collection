@@ -94,6 +94,24 @@ async function ensureFeeBalance(provider: UniSatProvider) {
   }
 }
 
+function describeWalletError(cause: unknown, fallback: string) {
+  if (cause instanceof Error && cause.message) return cause.message;
+  if (typeof cause === "string" && cause.trim()) return cause;
+  if (cause && typeof cause === "object") {
+    const details = cause as { message?: unknown; error?: unknown; code?: unknown };
+    const message = typeof details.message === "string"
+      ? details.message
+      : typeof details.error === "string"
+        ? details.error
+        : "";
+    const code = typeof details.code === "string" || typeof details.code === "number"
+      ? ` (code ${details.code})`
+      : "";
+    if (message) return `${message}${code}`;
+  }
+  return fallback;
+}
+
 export function UniSatWalletConnect() {
   const [providerAvailable, setProviderAvailable] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
@@ -256,7 +274,7 @@ export function UniSatWalletConnect() {
         setError("Wallet connected, but it is not on Fractal Bitcoin mainnet.");
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "UniSat connection was cancelled or failed.");
+      setError(describeWalletError(cause, "UniSat connection was cancelled or failed."));
     } finally {
       setBusy(false);
     }
@@ -278,7 +296,7 @@ export function UniSatWalletConnect() {
         setError("UniSat did not confirm Fractal Bitcoin mainnet.");
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Network switch was cancelled or failed.");
+      setError(describeWalletError(cause, "Network switch was cancelled or failed."));
     } finally {
       setBusy(false);
     }
@@ -346,7 +364,7 @@ export function UniSatWalletConnect() {
         setTransferError("UniSat returned no usable inscription IDs. Refresh the wallet and try again.");
       }
     } catch (cause) {
-      setTransferError(cause instanceof Error ? cause.message : "Could not load inscriptions from UniSat.");
+      setTransferError(describeWalletError(cause, "Could not load inscriptions from UniSat."));
     } finally {
       setBusy(false);
     }
@@ -464,7 +482,7 @@ export function UniSatWalletConnect() {
       setConfirmed(false);
       setDestination("");
     } catch (cause) {
-      setTransferError(cause instanceof Error ? cause.message : "Transfer was cancelled or failed in UniSat.");
+      setTransferError(describeWalletError(cause, "Transfer was cancelled or failed in UniSat."));
     } finally {
       setTransferBusy(false);
     }
