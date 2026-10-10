@@ -235,13 +235,17 @@ function isMobileBrowser() {
 
 function openUniSatMobileWallet() {
   if (!isMobileBrowser()) return false;
-  const nonce = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // UniSat's mobile connect deeplink returns to a custom app scheme, which
+  // Safari/Chrome cannot receive. The official openDapp flow loads this site
+  // inside UniSat's in-app browser where window.unisat is injected.
+  const dappUrl = window.location.href;
+  const data = btoa(JSON.stringify([dappUrl]));
   const query = new URLSearchParams({
-    method: "connect",
+    method: "openDapp",
     from: UNISAT_MOBILE_APP_NAME,
-    nonce,
+    data,
   });
-  window.location.href = `unisat://request?${query.toString()}`;
+  window.location.href = `https://app.unisat.cloud/request?${query.toString()}`;
   return true;
 }
 
@@ -427,7 +431,7 @@ export function UniSatWalletConnect() {
     if (!provider) {
       setProviderAvailable(false);
       if (openUniSatMobileWallet()) {
-        setError("Opening UniSat Wallet. Approve the connection in the app, then return to this site.");
+        setError("Opening this site inside UniSat Wallet. Approve the request, then connect from the UniSat in-app browser.");
       } else {
         setError("Install or enable the official UniSat Wallet extension, then try again.");
       }
