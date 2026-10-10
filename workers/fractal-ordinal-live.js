@@ -1,4 +1,5 @@
 const API_BASE = 'https://open-api-fractal.unisat.io';
+const BITCOIN_API_BASE = 'https://open-api.unisat.io';
 const ALLOWED_ORIGINS = new Set([
   'https://demro-labs.github.io',
   'https://punksgallery-mlwdpcwl.manus.space',
@@ -78,6 +79,52 @@ async function uni(path, env, init = {}) {
   const payload = await response.json();
   if (payload.code !== 0) throw new Error('UniSat upstream rejected the request');
   return payload.data;
+}
+
+async function uniNetwork(base, path, env, init = {}) {
+  if (!env.UNISAT_API_KEY) throw new Error('UniSat server binding is missing');
+  const response = await fetch(base + path, {
+    ...init,
+    headers: {
+      Authorization: 'Bearer ' + env.UNISAT_API_KEY,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
+  });
+  if (!response.ok) throw new Error('UniSat upstream returned ' + response.status);
+  const payload = await response.json();
+  if (payload.code !== 0) throw new Error('UniSat upstream rejected the request');
+  return payload.data;
+}
+
+function validWalletAddress(value) {
+  return typeof value === 'string' && value.length >= 14 && value.length <= 100 && /^[A-Za-z0-9]+$/.test(value);
+}
+
+async function spendableUtxos(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  const chain = url.searchParams.get('chain') || '';
+  const address = url.searchParams.get('address') || '';
+  const cursor = parseBoundedInteger(url.searchParams.get('cursor'), 0, 1000000);
+  const requestedSize = parseBoundedInteger(url.searchParams.get('size'), 50, 50);
+  if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new Error('Invalid spendable UTXO query.');
+  const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
+  const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}`, env);
+  const raw = Array.isArray(source?.utxo) ? source.utxo : [];
+  const checked = [];
+  for (const item of raw.slice(0, 25)) {
+    const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
+    const vout = Number(item?.vout);
+    const satoshi = Number(item?.satoshi);
+    const scriptPk = typeof item?.scriptPk === 'string' ? item.scriptPk.toLowerCase() : '';
+    const height = Number(item?.height);
+    if (item?.address !== address || !/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !Number.isSafeInteger(satoshi) || satoshi < 600 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) || !Number.isSafeInteger(height) || height <= 0 || item?.isLowFee === true || item?.isOpInRBF === true || !Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0) continue;
+    const detail = await uniNetwork(base, `/v1/indexer/utxo/${txid}/${vout}`, env);
+    if (detail?.address !== address || Number(detail?.satoshi) !== satoshi || String(detail?.scriptPk || '').toLowerCase() !== scriptPk || detail?.spent === true || (Array.isArray(detail?.inscriptions) && detail.inscriptions.length !== 0)) continue;
+    checked.push({ address, txid, vout, satoshi, scriptPk, height, isLowFee: false, isOpInRBF: false, inscriptions: [], protocolAssetsChecked: true });
+  }
+  return Response.json({ chain, address, cursor, nextCursor: cursor + raw.length, total: Number.isSafeInteger(source?.total) ? source.total : cursor + raw.length, scannedCount: raw.length, utxo: checked }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
 
 async function market(collectionId, start, limit, env) {
@@ -287,6 +334,10 @@ export default {
       return new Response('Forbidden', { status: 403, headers });
     }
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+    if (request.method === 'GET' && url.pathname === '/api/spendable-utxos') {
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
+      try { return await spendableUtxos(request, env, headers); } catch { return Response.json({ error: 'Live UniSat data is temporarily unavailable.' }, { status: 503, headers: { ...headers, 'Cache-Control': 'no-store' } }); }
+    }
     if (request.method === 'POST' && url.pathname === '/api/inscribe/order') {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
       try { return await inscribeOrder(request, env, headers); } catch { return Response.json({ error: 'Unable to create the UniSat inscription order.' }, { status: 502, headers: { ...headers, 'Cache-Control': 'no-store' } }); }
