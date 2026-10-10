@@ -24,6 +24,11 @@ declare global {
   }
 }
 
+function isUniSatAppBrowser() {
+  const ua = navigator.userAgent.toLowerCase();
+  return Boolean((window as Window & { unisat?: unknown }).unisat) || ua.includes("unisat");
+}
+
 function loadTurnstile(): Promise<TurnstileApi> {
   if (window.turnstile) return Promise.resolve(window.turnstile);
   return new Promise((resolve, reject) => {
@@ -59,7 +64,7 @@ async function postJson(path: string, body: Record<string, string>) {
 export default function HumanVerificationGate({ action, children }: { action: Action; children: ReactNode }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
-  const [verified, setVerified] = useState(false);
+  const [verified, setVerified] = useState(() => isUniSatAppBrowser());
   const [message, setMessage] = useState("Vérification en cours…");
   const [submitting, setSubmitting] = useState(false);
   const [ready, setReady] = useState(false);
@@ -87,6 +92,14 @@ export default function HumanVerificationGate({ action, children }: { action: Ac
 
     const start = async () => {
       setMessage("Vérification en cours…");
+      // UniSat's embedded dApp browser does not support the interactive
+      // Turnstile challenge reliably. Wallet approval remains mandatory for
+      // every sensitive operation, so allow this read-only gate to continue
+      // only when UniSat explicitly exposes its in-app provider or UA.
+      if (isUniSatAppBrowser()) {
+        if (!cancelled) setVerified(true);
+        return;
+      }
       try {
         const saved = localStorage.getItem(storageKey);
         if (saved) {
