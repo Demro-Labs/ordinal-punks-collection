@@ -82,6 +82,20 @@ function parseUtxoRecord(value: unknown): UtxoOutpoint | null {
   return { txid, vout };
 }
 
+export function assertProtocolAssetScanPassed(
+  value: unknown
+): asserts value is Record<string, unknown> {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    (value as Record<string, unknown>).protocolAssetsChecked !== true
+  ) {
+    throw new Error(
+      "The UniSat safe-UTXO service did not verify inscriptions, Runes, and Alkanes for this output."
+    );
+  }
+}
+
 function parseLocation(location: string | undefined) {
   const match = location?.match(/^([a-f0-9]{64}):(\d+):(\d+)$/i);
   if (!match)
@@ -202,6 +216,7 @@ async function loadIndexedSpendableRefs(
         throw new Error(
           "The UniSat safe-UTXO service returned an invalid UTXO."
         );
+      assertProtocolAssetScanPassed(value);
       const item = value as Record<string, unknown>;
       const txid = typeof item.txid === "string" ? item.txid.toLowerCase() : "";
       const vout = Number(item.vout);

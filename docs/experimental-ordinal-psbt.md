@@ -1,50 +1,53 @@
-# Experimental custom Ordinal transfer (PSBT)
+# Transfert Ordinal expérimental par PSBT
 
-## Status
+## État
 
-This path is **disabled by default** in `UniSatWalletConnect.tsx` (`CUSTOM_PSBT_TRANSFER_ENABLED = false`). The existing UniSat `sendInscription` path remains active. Do not flip the flag or enable this path in production until every manual check below is complete. No wallet signing or live transaction broadcast was performed while developing this code.
+Ce chemin reste **désactivé par défaut** dans `UniSatWalletConnect.tsx` (`CUSTOM_PSBT_TRANSFER_ENABLED = false`). Le flux UniSat `sendInscription` reste le seul flux actif. Ne pas modifier ce drapeau avant la validation wallet/Mempool décrite plus bas. Aucun PSBT n’a été signé et aucune transaction n’a été diffusée pendant le développement.
 
-The existing Cloudflare Worker `fractal-ordinal-live` now has an additive `/api/spendable-utxos` route for Bitcoin and Fractal mainnet. Its UniSat API credential remains in the `UNISAT_API_KEY` secret binding and is never sent to the browser. The Worker configuration and secret binding were verified after the content-only update. The safe-UTXO route was not fully validated from this sandbox on both networks; one later direct probe was blocked by Cloudflare browser-signature protection.
+Le Worker Cloudflare existant `fractal-ordinal-live` utilise toujours le secret de liaison `UNISAT_API_KEY`; sa valeur n’est ni lue ni envoyée au navigateur. La route `/api/spendable-utxos` doit maintenant attester, pour chaque sortie retournée, une vérification des actifs par outpoint. La clé UniSat sert uniquement aux lectures de l’indexeur; elle ne permet ni de contourner la politique dust, ni de diffuser une transaction.
 
-## Transaction shape and guards
+## Construction et garde-fous
 
-- The selected inscription outpoint is always input 0. Its sat offset is parsed from UniSat’s `txid:vout:offset` location and checked against the source output value.
-- The inscription is always routed to output 0. Its value is at least 1,200 sats, or `offset + 1` when the marked sat lies farther into the source output.
-- Fee candidates must appear in both the active wallet’s `getBitcoinUtxos` result and the Cloudflare proxy of UniSat OpenAPI `/v1/indexer/address/{address}/available-utxo-data`. The proxy supports `open-api.unisat.io` (Bitcoin mainnet) and `open-api-fractal.unisat.io` (Fractal mainnet). The client cross-checks each candidate’s outpoint, value and script against Mempool’s raw previous transaction and the active UniSat key.
-- The Worker and client reject malformed outputs, outputs below 600 sats, unconfirmed or low-fee outputs, RBF-marked outputs, and outputs reporting any inscriptions. The official UniSat `available-utxo-data` contract excludes inscriptions, Runes, Alkanes and other protocol assets by default, as well as dust below 600 sats.
-- **Important unresolved limitation:** UniSat documents that an asset-bearing UTXO explicitly unlocked in its UTXO-management tool can subsequently be returned as “available.” The response contract does not give this prototype a reliable flag to distinguish such an unlocked asset-bearing outpoint from ordinary BTC. Therefore, the code cannot guarantee that a manually unlocked Runes/Alkanes (or other protocol-asset) UTXO will never be selected. Do not enable this path unless this case is independently resolved and verified; the feature flag remains off.
-- Multiple inscriptions sharing the selected outpoint cause a hard failure. Any inscription outpoint in the loaded wallet inventory is excluded from fee inputs.
-- Change is returned only when it can be at least 1,200 sats. Otherwise the constructor accepts only a small, bounded no-change fee; if it cannot meet that bound, it refuses to create a PSBT.
-- Source fee inputs support single-key Legacy P2PKH, Nested SegWit P2SH-P2WPKH, Native SegWit P2WPKH and Taproot P2TR key-path. Legacy inputs include the full previous transaction; nested inputs include the redeem script; Taproot inputs include the internal key. Other source scripts (including P2WSH and Taproot script-path) fail closed.
-- Recipient scripts are derived locally with BitcoinJS for Bitcoin mainnet address encodings and must exactly match the chain-specific Mempool validation response. Recipient outputs support Legacy P2PKH, P2SH, Native SegWit P2WPKH/P2WSH and Taproot P2TR; non-standard scripts are rejected.
-- UniSat is asked to sign without auto-finalizing. Before broadcast, the client checks ECDSA/Schnorr signatures cryptographically, finalizes locally, then verifies input order, version, locktime, sequences, exact output scripts/values, dust floor, fee accounting and actual virtual-size fee rate. The wallet account, public key and chain are rechecked immediately before signing, after signing and just before broadcast.
-- On success, raw transaction hex is sent to the selected Mempool endpoint for the active Bitcoin or Fractal mainnet. No transaction is broadcast during offline testing.
+- L’inscription sélectionnée reste l’entrée 0. Son offset sat est extrait de `txid:vout:offset` et contrôlé contre la valeur réelle de la sortie source.
+- L’inscription est routée vers la sortie 0 avec au moins 1 200 sats, ou `offset + 1` si le sat marqué se trouve plus loin dans la sortie.
+- Un UTXO de frais doit être présent à la fois dans `getBitcoinUtxos` du wallet actif et dans le proxy Cloudflare de l’API UniSat `available-utxo-data`.
+- **Cas d’un actif explicitement déverrouillé dans UniSat :** la liste `available-utxo-data` seule n’est plus considérée comme preuve suffisante. Avant de retourner un candidat, le Worker consulte l’API UniSat de l’outpoint `/v1/indexer/utxo/{txid}/{vout}` pour vérifier l’état dépensé et les inscriptions, puis `/v1/indexer/runes/utxo/{txid}/{vout}/balance`; sur Fractal, il consulte aussi `/v1/indexer/alkanes/utxo/{txid}/{vout}/balance`. Une sortie qui porte une inscription, un Rune ou un Alkane est écartée même si elle a été déverrouillée manuellement. Les réponses doivent correspondre à l’adresse, l’outpoint, la valeur et le script attendus, être confirmées et explicitement vides pour les actifs concernés.
+- Le Worker ne marque `protocolAssetsChecked: true` qu’après ces vérifications. Le client exige cette attestation; une route ancienne, une réponse absente, incomplète, malformée ou une panne d’indexeur arrête le flux **fail-closed**, sans signer ni diffuser.
+- Les pages de vérification sont plafonnées à 25 UTXO afin de borner les requêtes d’indexeur. Une page est paginée selon le nombre réellement inspecté.
+- La vérification des inscriptions couvre aussi les inscriptions BRC-20 signalées par UniSat. Les indexeurs confirmés ci-dessus couvrent Runes sur Bitcoin et Fractal, ainsi qu’Alkanes sur Fractal. Les autres protocoles qui ne sont pas exposés par ces indexeurs n’ont pas été indépendamment validés; c’est une raison supplémentaire de laisser le drapeau désactivé.
+- Plusieurs inscriptions partageant la sortie sélectionnée provoquent un refus. Toutes les sorties d’inscription connues dans le wallet sont exclues des frais.
+- La monnaie n’est rendue que si elle vaut au moins 1 200 sats; sinon, le constructeur n’accepte qu’un frais sans monnaie borné et refuse tout autre cas.
+- Les entrées de frais prises en charge sont Legacy P2PKH, Nested SegWit P2SH-P2WPKH, Native SegWit P2WPKH et Taproot P2TR key-path. Les scripts de dépense non pris en charge échouent sans émission de PSBT.
+- Les scripts destinataires pris en charge sont Legacy P2PKH, P2SH, Native SegWit P2WPKH/P2WSH et Taproot P2TR. Ils sont dérivés localement puis comparés au résultat de validation Mempool propre au réseau.
+- UniSat signe avec finalisation automatique désactivée. Avant toute diffusion, le client vérifie cryptographiquement les signatures ECDSA/Schnorr, finalise localement, puis compare l’ordre et les métadonnées des entrées, les champs de transaction, les scripts et montants de sortie, les limites dust, la comptabilité des frais et le taux réel après calcul de la taille virtuelle. Le compte, la clé publique et le réseau sont revérifiés avant et après la signature ainsi qu’avant la diffusion.
+- La diffusion, si le flux était ultérieurement approuvé, utiliserait uniquement l’endpoint Mempool du réseau Bitcoin ou Fractal actif.
 
-## Validation performed
+## Validation réalisée
 
-Offline tests cover real test-only signatures and finalization for all four supported input styles; Legacy, Nested SegWit, Native SegWit, P2WSH and Taproot recipient scripts; inscription offsets; dust-safe output/change; multiple inscriptions in one outpoint; inscription UTXO exclusion; invalid script ownership; and rejection of a modified ECDSA signature. Run with:
+Les tests hors ligne couvrent des signatures de test réelles et la finalisation des quatre styles d’entrée; les sorties destinataires Legacy, Nested/Native SegWit, P2WSH et Taproot; les offsets d’inscription; les seuils dust; les inscriptions multiples; l’exclusion d’une entrée inscrite; la propriété de script; le rejet d’une signature altérée; et le refus d’une attestation d’actifs manquante ou fausse. Commandes :
 
 ```sh
-pnpm exec vitest run client/src/lib/ordinal-transfer-psbt.test.ts
+pnpm exec vitest run client/src/lib/ordinal-transfer-psbt.test.ts client/src/lib/custom-ordinal-transfer.test.ts
 pnpm check
 pnpm build
 ```
 
-The tests do **not** substitute for signing and inspection in UniSat, nor do they establish relay-policy behavior on both live networks. The Cloudflare Worker content update returned success and its source/settings were read back; the `UNISAT_API_KEY` binding remained present and its value was not read or exposed. A complete Bitcoin-mainnet upstream probe could not be confirmed from the sandbox.
+La revue wallet/Mempool réalisée était strictement en lecture seule : les pages UniSat Bitcoin et Fractal ainsi que des sorties confirmées et les frais recommandés Mempool des deux réseaux ont été consultés. Aucun PSBT n’a été signé, aucun UTXO n’a été déverrouillé et aucune transaction n’a été diffusée. L’appel sandbox direct au Worker avait précédemment été bloqué par la protection Cloudflare; le test d’intégration depuis les origines autorisées des sites reste à faire. Le binding `UNISAT_API_KEY` a été confirmé par son nom seulement.
 
-## Manual review required before activation
+## Vérifications manuelles encore requises avant activation
 
-1. Resolve the documented UniSat “explicitly unlocked asset UTXO” exception. Either add a trustworthy, tested asset-status check or prove by manual UTXO review that no such output can be selected. Until then, keep the feature flag `false`.
-2. In UniSat on non-sensitive test UTXOs, inspect and sign—but do not broadcast—PSBTs for P2PKH, P2SH-P2WPKH, P2WPKH and P2TR key-path on **both** Fractal and Bitcoin mainnet. Confirm `signPsbt(autoFinalized: false)` and Taproot `useTweakedSigner` behavior for the target UniSat version/platform.
-3. Verify the Cloudflare proxy returns the expected filtered UTXOs on both networks from an allowed site origin. Do not retry from a client that Cloudflare has blocked; ask the site owner to validate from the intended browser/session.
-4. Review every PSBT outpoint, input script/value, inscription offset, output destination/value, change address, signature, fee/vsize and transaction fields before any real wallet confirmation.
-5. Recheck Mempool minimum-relay/dust rules and actual fee-rate acceptance on both networks immediately before activation.
-6. Only after the above independent reviews and a separate explicit approval should anyone consider changing `CUSTOM_PSBT_TRANSFER_ENABLED`.
+1. Depuis l’origine autorisée d’un site, vérifier que le Worker renvoie `protocolAssetsChecked: true` sur des UTXO ordinaires des deux réseaux, et qu’il exclut réellement un outpoint porteur de Rune ainsi qu’un outpoint porteur d’Alkane sur Fractal après son déverrouillage UniSat.
+2. Vérifier des cas avec inscription/BRC-20 et confirmer qu’ils sont écartés. Ne pas utiliser d’actif réel pour signer ou diffuser un essai.
+3. Sur des UTXO de test sans actifs, contrôler dans UniSat la signature (sans diffusion) des entrées P2PKH, P2SH-P2WPKH, P2WPKH et P2TR, sur Bitcoin et Fractal; confirmer `signPsbt(autoFinalized: false)` et le paramètre Taproot `useTweakedSigner` pour la version UniSat ciblée.
+4. Relire chaque outpoint, valeur/script source, offset, destination, monnaie, frais/vsize, signatures et réseau choisi. Vérifier les règles relay/dust courantes de chaque mainnet avant toute activation.
+5. Garder `CUSTOM_PSBT_TRANSFER_ENABLED = false` jusqu’à la réussite documentée des étapes ci-dessus et une approbation explicite distincte.
 
-## References
+## Références
 
-- [UniSat OpenAPI BTC balance and UTXO rules](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/open-api/btc-balance-utxo.md)
-- [UniSat Bitcoin mainnet Get BTC UTXO](https://docs.unisat.io/developer-support/open-api-documentation/api-for-bitcoin/general/addresses/get-btc-utxo)
-- [UniSat Fractal mainnet Get BTC UTXO](https://docs.unisat.io/developer-support/open-api-documentation/api-for-fractal-bitcoin/general/addresses/get-btc-utxo)
-- [UniSat Wallet manage-assets API](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/wallet-api/api-docs/manage-assets.md)
-- [Mempool API documentation](https://mempool.space/docs/api/rest)
+- [UniSat OpenAPI — règles de solde et UTXO BTC](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/open-api/btc-balance-utxo.md)
+- [UniSat — UTXO Bitcoin mainnet](https://docs.unisat.io/developer-support/open-api-documentation/api-for-bitcoin/general/addresses/get-btc-utxo)
+- [UniSat — UTXO Fractal mainnet](https://docs.unisat.io/developer-support/open-api-documentation/api-for-fractal-bitcoin/general/addresses/get-btc-utxo)
+- [UniSat — API indexeur Runes](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/open-api/auto-generated/docs/runes-indexer.md)
+- [UniSat — API indexeur Alkanes](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/open-api/auto-generated/docs/alkanes-indexer.md)
+- [UniSat — API wallet manage-assets](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/wallet-api/api-docs/manage-assets.md)
+- [Mempool — API REST](https://mempool.space/docs/api/rest)
