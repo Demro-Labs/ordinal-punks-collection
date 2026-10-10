@@ -14,10 +14,17 @@ type UniSatInscription = {
   preview?: string;
 };
 
+type UniSatBalance = {
+  confirmed?: number;
+  unconfirmed?: number;
+  total?: number;
+};
+
 type UniSatProvider = {
   requestAccounts: () => Promise<string[]>;
   getAccounts?: () => Promise<string[]>;
   getChain?: () => Promise<UniSatChain>;
+  getBalance?: () => Promise<UniSatBalance>;
   switchChain?: (chain: "FRACTAL_BITCOIN_MAINNET") => Promise<UniSatChain>;
   getInscriptions?: (cursor: number, size: number) => Promise<{
     total: number;
@@ -60,6 +67,17 @@ export function requestUniSatTransfer(inscriptionId: string) {
 
 function shortAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
+}
+
+async function ensureFeeBalance(provider: UniSatProvider) {
+  if (!provider.getBalance) return;
+  const balance = await provider.getBalance();
+  const confirmed = Number(balance.confirmed ?? 0);
+  const unconfirmed = Number(balance.unconfirmed ?? 0);
+  const total = Number(balance.total ?? confirmed + unconfirmed);
+  if (!Number.isFinite(total) || total <= 0) {
+    throw new Error("Add BTC to this UniSat wallet to pay the Fractal Bitcoin network fee before transferring.");
+  }
 }
 
 export function UniSatWalletConnect() {
@@ -353,6 +371,7 @@ export function UniSatWalletConnect() {
         }
       }
 
+      await ensureFeeBalance(provider);
       const result = await provider.sendInscription(recipient, selected.inscriptionId);
       const returnedTxid = typeof result === "string" ? result : result?.txid;
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) {
