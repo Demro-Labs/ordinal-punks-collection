@@ -96,13 +96,16 @@ export function UniSatWalletConnect() {
       if (address && chain?.enum === FRACTAL_MAINNET && !inscriptionsLoaded && !busy) {
         void loadInscriptions();
       }
+      if (!address && providerAvailable && !busy) {
+        void connect();
+      }
     };
     window.addEventListener("ordinal-punks:request-transfer", handleTransferRequest);
     if (pendingTransferRequest) {
       handleTransferRequest(new CustomEvent("ordinal-punks:request-transfer", { detail: { inscriptionId: pendingTransferRequest } }));
     }
     return () => window.removeEventListener("ordinal-punks:request-transfer", handleTransferRequest);
-  }, [address, chain, inscriptions, inscriptionsLoaded, busy]);
+  }, [address, chain, inscriptions, inscriptionsLoaded, busy, providerAvailable]);
 
   useEffect(() => {
     if (!pendingTransferRequest) return;
