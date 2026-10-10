@@ -10,6 +10,8 @@ type UniSatChain = {
 type UniSatInscription = {
   inscriptionId: string;
   inscriptionNumber?: string | number;
+  location?: string;
+  output?: string;
   content?: string;
   preview?: string;
 };
@@ -67,6 +69,61 @@ const MEMPOOL_ENDPOINTS: Record<string, { api: string; explorer: string; label: 
   },
 };
 type MempoolTrackingStatus = "idle" | "checking" | "pending" | "confirmed" | "timeout" | "error";
+
+function getMempoolConfig(networkEnum?: string) {
+  return networkEnum ? MEMPOOL_ENDPOINTS[networkEnum] : undefined;
+}
+
+function isSupportedMainnet(networkEnum?: string) {
+  return Boolean(getMempoolConfig(networkEnum));
+}
+
+async function getRecommendedFeeRate(networkEnum: string) {
+  const config = getMempoolConfig(networkEnum);
+  if (!config) throw new Error("Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat.");
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 8_000);
+  try {
+    const response = await fetch(`${config.api}/api/v1/fees/recommended`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`Mempool fee API returned HTTP ${response.status}.`);
+    const fees = (await response.json()) as {
+      fastestFee?: number;
+      halfHourFee?: number;
+      hourFee?: number;
+      minimumFee?: number;
+    };
+    const selected = fees.halfHourFee ?? fees.fastestFee ?? fees.hourFee ?? fees.minimumFee;
+    const feeRate = Number(selected);
+    if (!Number.isFinite(feeRate) || feeRate <= 0) {
+      throw new Error("Mempool did not return a valid fee rate.");
+    }
+    return Math.max(1, Math.ceil(feeRate));
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function validateMempoolAddress(networkEnum: string, address: string) {
+  const config = getMempoolConfig(networkEnum);
+  if (!config) throw new Error("Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat.");
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 8_000);
+  try {
+    const response = await fetch(`${config.api}/api/v1/validate-address/${encodeURIComponent(address)}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`Mempool address API returned HTTP ${response.status}.`);
+    const result = (await response.json()) as { isvalid?: boolean };
+    if (!result.isvalid) throw new Error(`The recipient address is not valid for ${config.label} mainnet.`);
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 const MARKETPLACE_URL = "https://fractal.unisat.io/market/collection?collectionId=opunk";
 const INSCRIPTIONS_PAGE_SIZE = 50;
 const INSCRIPTION_ID_PATTERN = /^[a-f0-9]{64}i\d+$/i;
@@ -90,28 +147,44 @@ function shortAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
 }
 
-async function ensureFeeBalance(provider: UniSatProvider) {
+async function ensureFeeBalance(provider: UniSatProvider, networkEnum: string, inscription: UniSatInscription) {
+  const networkLabel = getMempoolConfig(networkEnum)?.label ?? "selected network";
+  const feeAsset = networkEnum === BITCOIN_MAINNET ? "BTC" : "FB";
+  let availableBalance: number | null = null;
   if (provider.getBalanceV2) {
     const balance = await provider.getBalanceV2();
     const available = Number(balance.available ?? 0);
     if (!Number.isFinite(available) || available <= 0) {
-      throw new Error("No spendable FB fee UTXO is available. Add separate FB to UniSat or use the UniSat UTXO tool to unlock/consolidate the dust UTXO before transferring.");
+      throw new Error(`UniSat reports no spendable ${feeAsset} fee balance on ${networkLabel}. Add a separate, non-dust ${feeAsset} UTXO before transferring.`);
     }
-    return;
+    availableBalance = available;
   }
 
   if (provider.getBitcoinUtxos) {
-    const result = await provider.getBitcoinUtxos(0, 10);
+    const result = await provider.getBitcoinUtxos(0, 100);
     const utxos = Array.isArray(result)
       ? result
       : result && typeof result === "object" && "list" in result && Array.isArray(result.list)
         ? result.list
         : [];
-    if (utxos.length === 0) {
-      throw new Error("No spendable FB fee UTXO is available. Add separate FB to UniSat or use the UniSat UTXO tool to unlock/consolidate the dust UTXO before transferring.");
+    const location = typeof inscription.location === "string" ? inscription.location : "";
+    const inscriptionOutpoint = location.match(/^([a-f0-9]{64}):(\d+)(?::\d+)?$/i);
+    const spendableUtxos = inscriptionOutpoint
+      ? utxos.filter(item => {
+          if (!item || typeof item !== "object") return false;
+          const utxo = item as { txid?: unknown; vout?: unknown };
+          return typeof utxo.txid === "string"
+            && typeof utxo.vout === "number"
+            && `${utxo.txid}:${utxo.vout}`.toLowerCase() !== `${inscriptionOutpoint[1]}:${inscriptionOutpoint[2]}`.toLowerCase();
+        })
+      : utxos;
+    if (spendableUtxos.length === 0) {
+      throw new Error(`No separate spendable ${feeAsset} fee UTXO is available on ${networkLabel}. The inscription output itself is reserved for the Ordinal and cannot also pay network fees; add another non-dust UTXO.`);
     }
     return;
   }
+
+  if (availableBalance !== null) return;
 
   if (!provider.getBalance) return;
   const balance = await provider.getBalance();
@@ -119,7 +192,7 @@ async function ensureFeeBalance(provider: UniSatProvider) {
   const unconfirmed = Number(balance.unconfirmed ?? 0);
   const total = Number(balance.total ?? confirmed + unconfirmed);
   if (!Number.isFinite(total) || total <= 0) {
-    throw new Error("Add separate FB to this UniSat wallet to pay the Fractal Bitcoin network fee before transferring.");
+    throw new Error(`Add a separate, spendable ${feeAsset} UTXO to this UniSat wallet to pay the ${networkLabel} network fee before transferring.`);
   }
 }
 
@@ -152,21 +225,31 @@ function withWalletTimeout<T>(promise: Promise<T>, message: string) {
 }
 
 function describeWalletError(cause: unknown, fallback: string) {
-  if (cause instanceof Error && cause.message) return cause.message;
-  if (typeof cause === "string" && cause.trim()) return cause;
-  if (cause && typeof cause === "object") {
+  let message = "";
+  let code = "";
+  if (cause instanceof Error) {
+    message = cause.message;
+    const errorCode = (cause as Error & { code?: unknown }).code;
+    code = typeof errorCode === "string" || typeof errorCode === "number"
+      ? ` (code ${errorCode})`
+      : "";
+  } else if (typeof cause === "string") {
+    message = cause.trim();
+  } else if (cause && typeof cause === "object") {
     const details = cause as { message?: unknown; error?: unknown; code?: unknown };
-    const message = typeof details.message === "string"
+    message = typeof details.message === "string"
       ? details.message
       : typeof details.error === "string"
         ? details.error
         : "";
-    const code = typeof details.code === "string" || typeof details.code === "number"
+    code = typeof details.code === "string" || typeof details.code === "number"
       ? ` (code ${details.code})`
       : "";
-    if (message) return `${message}${code}`;
   }
-  return fallback;
+  if (/dust|0-fee/i.test(message)) {
+    return `${message}${code}. The inscription UTXO is dust and cannot fund the transaction fee. Add a separate spendable BTC/FB UTXO in UniSat; a Mempool fee estimate cannot make a dust-only input spendable.`;
+  }
+  return message ? `${message}${code}` : fallback;
 }
 
 export function UniSatWalletConnect() {
@@ -190,6 +273,7 @@ export function UniSatWalletConnect() {
   const [mempoolNetwork, setMempoolNetwork] = useState("");
   const [mempoolBlockHeight, setMempoolBlockHeight] = useState<number | null>(null);
   const [mempoolExplorerUrl, setMempoolExplorerUrl] = useState("");
+  const [mempoolFeeRate, setMempoolFeeRate] = useState<number | null>(null);
   const trackingRunRef = useRef(0);
 
   const resetMempoolTracking = () => {
@@ -212,15 +296,15 @@ export function UniSatWalletConnect() {
       setTxid("");
       resetMempoolTracking();
       setTransferError(
-        address && chain?.enum === FRACTAL_MAINNET
+        address && isSupportedMainnet(chain?.enum)
           ? inscriptions.length > 0
             ? inscriptions.some(item => sameInscriptionId(item.inscriptionId, requestedId))
               ? ""
               : "This Ordinal Punks inscription is not among the inscriptions loaded from this UniSat account."
             : "Load your UniSat inscriptions first; the transfer will only use an inscription owned by this account."
-          : "Connect UniSat on Fractal Bitcoin, then load your inscriptions before transferring."
+          : "Connect UniSat on Bitcoin or Fractal mainnet, then load your inscriptions before transferring."
       );
-      if (address && chain?.enum === FRACTAL_MAINNET && !busy && (!inscriptionsLoaded || !inscriptions.some(item => sameInscriptionId(item.inscriptionId, requestedId)))) {
+      if (address && isSupportedMainnet(chain?.enum) && !busy && (!inscriptionsLoaded || !inscriptions.some(item => sameInscriptionId(item.inscriptionId, requestedId)))) {
         void loadInscriptions(false, requestedId);
       }
       if (!address && providerAvailable && !busy) {
@@ -246,6 +330,7 @@ export function UniSatWalletConnect() {
   }, [inscriptions]);
 
   const clearOwnedInscriptions = () => {
+    setMempoolFeeRate(null);
     setInscriptions([]);
     setInscriptionsLoaded(false);
     setInscriptionTotal(0);
@@ -337,8 +422,8 @@ export function UniSatWalletConnect() {
       setDestination("");
       setAddress(selectedAddress);
       setChain(selectedChain);
-      if (selectedChain.enum !== FRACTAL_MAINNET) {
-        setError("Wallet connected, but it is not on Fractal Bitcoin mainnet.");
+      if (!isSupportedMainnet(selectedChain.enum)) {
+        setError("Wallet connected, but select Bitcoin mainnet or Fractal Bitcoin mainnet to continue.");
       }
     } catch (cause) {
       setError(describeWalletError(cause, "UniSat connection was cancelled or failed."));
@@ -379,10 +464,10 @@ export function UniSatWalletConnect() {
     setTransferError("");
     try {
       const currentChain = await window.unisat?.getChain?.();
-      if (currentChain?.enum !== FRACTAL_MAINNET) {
+      if (!isSupportedMainnet(currentChain?.enum)) {
         setChain(currentChain ?? null);
         clearOwnedInscriptions();
-        throw new Error("Switch UniSat to Fractal Bitcoin mainnet, then reload your inscriptions.");
+        throw new Error("Switch UniSat to Bitcoin mainnet or Fractal Bitcoin mainnet, then reload your inscriptions.");
       }
       if (address && provider.getAccounts) {
         const currentAccounts = await provider.getAccounts();
@@ -438,7 +523,7 @@ export function UniSatWalletConnect() {
   };
 
   useEffect(() => {
-    if (!providerAvailable || !address || chain?.enum !== FRACTAL_MAINNET || inscriptionsLoaded || busy) return;
+    if (!providerAvailable || !address || !isSupportedMainnet(chain?.enum) || inscriptionsLoaded || busy) return;
     void loadInscriptions(false);
   }, [providerAvailable, address, chain?.enum, inscriptionsLoaded, busy]);
 
@@ -502,8 +587,8 @@ export function UniSatWalletConnect() {
       setTransferError("Update UniSat Wallet to enable inscription transfers.");
       return;
     }
-    if (!address || chain?.enum !== FRACTAL_MAINNET) {
-      setTransferError("Connect UniSat on Fractal Bitcoin mainnet before transferring.");
+    if (!address || !isSupportedMainnet(chain?.enum)) {
+      setTransferError("Connect UniSat on Bitcoin mainnet or Fractal Bitcoin mainnet before transferring.");
       return;
     }
     if (!selected || !INSCRIPTION_ID_PATTERN.test(selected.inscriptionId)) {
@@ -511,7 +596,7 @@ export function UniSatWalletConnect() {
       return;
     }
     if (!recipient || recipient.length > 100) {
-      setTransferError("Enter a valid Fractal Bitcoin receiving address.");
+      setTransferError(`Enter a valid ${getMempoolConfig(chain?.enum)?.label ?? "Bitcoin"} receiving address.`);
       return;
     }
     if (!confirmed) {
@@ -522,9 +607,10 @@ export function UniSatWalletConnect() {
     setTransferBusy(true);
     try {
       const currentChain = await provider.getChain();
-      if (currentChain.enum !== FRACTAL_MAINNET) {
+      const activeNetworkEnum = currentChain.enum;
+      if (!activeNetworkEnum || activeNetworkEnum !== chain?.enum || !isSupportedMainnet(activeNetworkEnum)) {
         setChain(currentChain);
-        throw new Error("The wallet network changed. Switch back to Fractal Bitcoin and review the transfer again.");
+        throw new Error("The wallet network changed. Reload inscriptions and review the transfer on the selected mainnet.");
       }
       if (provider.getAccounts) {
         const currentAccounts = await provider.getAccounts();
@@ -535,8 +621,11 @@ export function UniSatWalletConnect() {
         }
       }
 
-      await ensureFeeBalance(provider);
-      const result = await provider.sendInscription(recipient, selected.inscriptionId);
+      await validateMempoolAddress(activeNetworkEnum, recipient);
+      const feeRate = await getRecommendedFeeRate(activeNetworkEnum);
+      setMempoolFeeRate(feeRate);
+      await ensureFeeBalance(provider, activeNetworkEnum, selected);
+      const result = await provider.sendInscription(recipient, selected.inscriptionId, { feeRate });
       const returnedTxid = typeof result === "string" ? result : result?.txid;
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) {
         throw new Error("UniSat did not return a valid transaction ID. Check the wallet before retrying.");
@@ -555,7 +644,8 @@ export function UniSatWalletConnect() {
     }
   };
 
-  const connectedToFractal = Boolean(address && chain?.enum === FRACTAL_MAINNET);
+  const connectedToFractal = Boolean(address && isSupportedMainnet(chain?.enum));
+  const currentNetwork = getMempoolConfig(chain?.enum);
   const selectedInscription = inscriptions.find(item => item.inscriptionId === selectedInscriptionId);
 
   return (
@@ -564,13 +654,13 @@ export function UniSatWalletConnect() {
         <div className="min-w-0">
           <p className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#d9d3c6]">
             <Wallet size={14} className="text-[#d99a54]" />
-            {connectedToFractal ? "UniSat · Fractal Bitcoin" : "UniSat Wallet · Fractal Bitcoin"}
+            {connectedToFractal ? `UniSat · ${currentNetwork?.label}` : "UniSat Wallet · Bitcoin / Fractal"}
           </p>
           <p className="mt-1 font-mono text-[10px] text-[#7f8b99]" aria-live="polite">
             {connectedToFractal
               ? `Connected: ${shortAddress(address!)}`
               : address
-                ? `Connected to ${chain?.name ?? "another network"}; switch to Fractal to continue.`
+                ? `Connected to ${chain?.name ?? "another network"}; select Bitcoin or Fractal mainnet to continue.`
                 : providerAvailable
                   ? "Connect only when you choose. No signature is requested on connection."
                   : isMobileBrowser()
@@ -649,6 +739,11 @@ export function UniSatWalletConnect() {
           <p className="mt-1 font-mono text-[10px] leading-5 text-[#7f8b99]">
             Choose an inscription you own and enter a receiving address for this transfer. UniSat will show its transaction and network fee before you sign.
           </p>
+          <p className="mt-1 font-mono text-[10px] text-[#718092]" aria-live="polite">
+            {mempoolFeeRate
+              ? `Mempool ${currentNetwork?.label ?? "network"} fee estimate: ${mempoolFeeRate} sat/vB. UniSat recalculates and shows the final fee before approval.`
+              : `The ${currentNetwork?.label ?? "selected network"} Mempool fee estimate is fetched immediately before transfer.`}
+          </p>
           <div className="mt-3 grid gap-3 lg:grid-cols-2">
             <label className="block font-mono text-[10px] uppercase tracking-[0.1em] text-[#9ea7b3]">
               Inscription from your UniSat wallet
@@ -672,7 +767,7 @@ export function UniSatWalletConnect() {
               </select>
             </label>
             <label className="block font-mono text-[10px] uppercase tracking-[0.1em] text-[#9ea7b3]">
-              Destination address · Fractal Bitcoin
+              Destination address · {currentNetwork?.label ?? "Bitcoin / Fractal"}
               <input
                 type="text"
                 autoComplete="off"
