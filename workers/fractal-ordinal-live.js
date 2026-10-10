@@ -24,7 +24,7 @@ function cors(request) {
   const origin = request.headers.get('Origin') || '';
   const headers = {
     ...SECURITY_HEADERS,
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Accept, Content-Type',
     'Access-Control-Max-Age': '600',
     'Vary': 'Origin',
@@ -204,6 +204,34 @@ async function inscription(inscriptionId, env) {
   };
 }
 
+function validAddress(value) {
+  return typeof value === 'string' && value.length >= 14 && value.length <= 100 && /^[A-Za-z0-9]+$/.test(value);
+}
+
+function validPubkey(value) {
+  return typeof value === 'string' && /^(?:02|03|04)[a-f0-9]+$/i.test(value) && value.length <= 200;
+}
+
+async function inscribeOrder(request, env, corsHeaders) {
+  const body = await request.json();
+  const file = body?.file;
+  const feeRate = Number(body?.feeRate);
+  const outputValue = Number(body?.outputValue ?? 546);
+  if (!validAddress(body?.receiver) || !validAddress(body?.refundAddress) || !validAddress(body?.userAddress) || !validPubkey(body?.userPubkey)) throw new Error('Invalid wallet address or public key.');
+  if (!Number.isSafeInteger(feeRate) || feeRate < 1 || feeRate > 10000 || outputValue !== 546) throw new Error('Invalid inscription fee or output value.');
+  if (!file || typeof file.filename !== 'string' || file.filename.length < 1 || file.filename.length > 120 || typeof file.dataURL !== 'string' || file.dataURL.length > 520000) throw new Error('Invalid inscription file.');
+  if (!/^data:[^;,]+;base64,[A-Za-z0-9+/=]+$/.test(file.dataURL)) throw new Error('The file must be sent as a base64 data URL.');
+  const upstream = await uni('/v5/inscribe/order/create', env, { method: 'POST', body: JSON.stringify({ clientId: 'demro-labs-gallery', receiver: body.receiver, refundAddress: body.refundAddress, userAddress: body.userAddress, userPubkey: body.userPubkey, feeRate, outputValue, files: [{ filename: file.filename, dataURL: file.dataURL }] }) });
+  return Response.json({ orderId: upstream.orderId, status: upstream.status, payAddress: upstream.payAddress, amount: upstream.amount }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+}
+
+async function inscribeOrderStatus(request, env, corsHeaders) {
+  const orderId = new URL(request.url).searchParams.get('orderId') || '';
+  if (!/^[A-Za-z0-9_-]{6,160}$/.test(orderId)) return Response.json({ error: 'Invalid order ID.' }, { status: 400, headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  const result = await uni('/v5/inscribe/order/' + encodeURIComponent(orderId), env);
+  return Response.json({ orderId: result.orderId, status: result.status, amount: result.amount, balance: result.balance, files: Array.isArray(result.files) ? result.files.map(file => ({ filename: file.filename, size: file.size, inscriptionId: file.inscriptionId, txid: file.txid, status: file.status })) : [] }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+}
+
 async function edgeCachedResponse(request, headers, freshSeconds, staleSeconds, producer) {
   const cache = typeof caches === 'undefined' ? null : caches.default;
   if (!cache) {
@@ -259,10 +287,18 @@ export default {
       return new Response('Forbidden', { status: 403, headers });
     }
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+    if (request.method === 'POST' && url.pathname === '/api/inscribe/order') {
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
+      try { return await inscribeOrder(request, env, headers); } catch { return Response.json({ error: 'Unable to create the UniSat inscription order.' }, { status: 502, headers: { ...headers, 'Cache-Control': 'no-store' } }); }
+    }
+    if (request.method === 'GET' && url.pathname === '/api/inscribe/order') {
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
+      try { return await inscribeOrderStatus(request, env, headers); } catch { return Response.json({ error: 'Unable to read the UniSat inscription order.' }, { status: 502, headers: { ...headers, 'Cache-Control': 'no-store' } }); }
+    }
     if (request.method !== 'GET') {
       return new Response('Method Not Allowed', {
         status: 405,
-        headers: { ...headers, Allow: 'GET, OPTIONS', 'Cache-Control': 'no-store' },
+        headers: { ...headers, Allow: 'GET, POST, OPTIONS', 'Cache-Control': 'no-store' },
       });
     }
     if (url.pathname !== '/api/market' && url.pathname !== '/api/live-inscription') {

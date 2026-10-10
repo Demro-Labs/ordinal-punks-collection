@@ -68,13 +68,13 @@ test('rejects unlisted browser origins', async () => {
 test('supports CORS preflight only for an allowed origin', async () => {
   const response = await worker.fetch(makeRequest('/api/market', { method: 'OPTIONS' }), {});
   assert.equal(response.status, 204);
-  assert.equal(response.headers.get('access-control-allow-methods'), 'GET, OPTIONS');
+  assert.equal(response.headers.get('access-control-allow-methods'), 'GET, POST, OPTIONS');
 });
 
-test('rejects methods other than GET and OPTIONS', async () => {
+test('rejects methods other than GET, POST and OPTIONS', async () => {
   const response = await worker.fetch(makeRequest('/api/market?collectionId=opunk', { method: 'POST' }), {});
   assert.equal(response.status, 405);
-  assert.equal(response.headers.get('allow'), 'GET, OPTIONS');
+  assert.equal(response.headers.get('allow'), 'GET, POST, OPTIONS');
 });
 
 test('rejects unknown collections, invalid offsets, and oversized pages before upstream access', async () => {
