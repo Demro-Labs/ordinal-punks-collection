@@ -161,6 +161,19 @@ export function UniSatWalletConnect() {
     provider.on?.("accountsChanged", handleAccounts);
     provider.on?.("chainChanged", handleChain);
     provider.on?.("networkChanged", handleChain);
+    void (async () => {
+      try {
+        const [accounts, currentChain] = await Promise.all([
+          provider.getAccounts?.(),
+          provider.getChain?.(),
+        ]);
+        const currentAddress = accounts?.[0];
+        if (currentAddress) setAddress(currentAddress);
+        if (currentChain) setChain(currentChain);
+      } catch {
+        // The wallet may be unavailable while the extension is initializing.
+      }
+    })();
     return () => {
       provider.removeListener?.("accountsChanged", handleAccounts);
       provider.removeListener?.("chainChanged", handleChain);
@@ -249,19 +262,16 @@ export function UniSatWalletConnect() {
       const initialCursor = append ? inscriptionCursor : 0;
       let cursor = initialCursor;
       let total = 0;
-      let pageItems: UniSatInscription[] = [];
       const loaded: UniSatInscription[] = [];
       do {
         const page = await provider.getInscriptions(cursor, INSCRIPTIONS_PAGE_SIZE);
         const currentItems = Array.isArray(page.list) ? page.list : [];
-        pageItems = currentItems;
         total = Number.isFinite(page.total) ? page.total : cursor + currentItems.length;
         loaded.push(...currentItems.filter(item =>
           typeof item.inscriptionId === "string" && INSCRIPTION_ID_PATTERN.test(item.inscriptionId)
         ));
         cursor += currentItems.length;
-        const targetFound = targetId && loaded.some(item => sameInscriptionId(item.inscriptionId, targetId));
-        if (!targetId || targetFound || currentItems.length === 0 || cursor >= total) break;
+        if (currentItems.length === 0 || cursor >= total) break;
       } while (true);
 
       const valid = loaded.filter((item, index, items) =>
@@ -293,6 +303,11 @@ export function UniSatWalletConnect() {
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!providerAvailable || !address || chain?.enum !== FRACTAL_MAINNET || inscriptionsLoaded || busy) return;
+    void loadInscriptions(false);
+  }, [providerAvailable, address, chain?.enum, inscriptionsLoaded, busy]);
 
   const sendSelectedInscription = async () => {
     const provider = window.unisat;
@@ -533,7 +548,7 @@ export function UniSatWalletConnect() {
 
       {connectedToFractal && inscriptions.length === 0 && inscriptionTotal === 0 && !busy && (
         <p className="border-t border-[#2c323a] pt-3 font-mono text-[10px] text-[#7f8b99]">
-          Select “Load my inscriptions” to view Ordinals from this wallet. No assets are read until you request them.
+          Loading all Ordinals owned by this wallet automatically…
         </p>
       )}
       {connectedToFractal && inscriptions.length === 0 && inscriptionTotal > 0 && (
