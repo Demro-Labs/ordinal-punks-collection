@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ExternalLink, Wallet } from "lucide-react";
 
 type UniSatChain = {
@@ -46,6 +46,20 @@ declare global {
 }
 
 const FRACTAL_MAINNET = "FRACTAL_BITCOIN_MAINNET";
+const BITCOIN_MAINNET = "BITCOIN_MAINNET";
+const MEMPOOL_ENDPOINTS: Record<string, { api: string; explorer: string; label: string }> = {
+  [FRACTAL_MAINNET]: {
+    api: "https://mempool.fractalbitcoin.io",
+    explorer: "https://mempool.fractalbitcoin.io/tx/",
+    label: "Fractal Bitcoin",
+  },
+  [BITCOIN_MAINNET]: {
+    api: "https://mempool.space",
+    explorer: "https://mempool.space/tx/",
+    label: "Bitcoin",
+  },
+};
+type MempoolTrackingStatus = "idle" | "checking" | "pending" | "confirmed" | "timeout" | "error";
 const MARKETPLACE_URL = "https://fractal.unisat.io/market/collection?collectionId=opunk";
 const INSCRIPTIONS_PAGE_SIZE = 50;
 const INSCRIPTION_ID_PATTERN = /^[a-f0-9]{64}i\d+$/i;
@@ -96,6 +110,21 @@ export function UniSatWalletConnect() {
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferError, setTransferError] = useState("");
   const [txid, setTxid] = useState("");
+  const [mempoolStatus, setMempoolStatus] = useState<MempoolTrackingStatus>("idle");
+  const [mempoolMessage, setMempoolMessage] = useState("");
+  const [mempoolNetwork, setMempoolNetwork] = useState("");
+  const [mempoolBlockHeight, setMempoolBlockHeight] = useState<number | null>(null);
+  const [mempoolExplorerUrl, setMempoolExplorerUrl] = useState("");
+  const trackingRunRef = useRef(0);
+
+  const resetMempoolTracking = () => {
+    trackingRunRef.current += 1;
+    setMempoolStatus("idle");
+    setMempoolMessage("");
+    setMempoolNetwork("");
+    setMempoolBlockHeight(null);
+    setMempoolExplorerUrl("");
+  };
 
   useEffect(() => {
     const handleTransferRequest = (event: Event) => {
@@ -106,6 +135,7 @@ export function UniSatWalletConnect() {
       setSelectedInscriptionId(inscriptions.some(item => sameInscriptionId(item.inscriptionId, requestedId)) ? requestedId : "");
       setConfirmed(false);
       setTxid("");
+      resetMempoolTracking();
       setTransferError(
         address && chain?.enum === FRACTAL_MAINNET
           ? inscriptions.length > 0
@@ -327,6 +357,55 @@ export function UniSatWalletConnect() {
     void loadInscriptions(false);
   }, [providerAvailable, address, chain?.enum, inscriptionsLoaded, busy]);
 
+  const trackTransaction = async (transactionId: string, networkEnum?: string) => {
+    const config = MEMPOOL_ENDPOINTS[networkEnum ?? FRACTAL_MAINNET] ?? MEMPOOL_ENDPOINTS[FRACTAL_MAINNET];
+    const run = ++trackingRunRef.current;
+    setMempoolStatus("checking");
+    setMempoolMessage("Checking the transaction in Mempool…");
+    setMempoolNetwork(config.label);
+    setMempoolBlockHeight(null);
+    setMempoolExplorerUrl(`${config.explorer}${encodeURIComponent(transactionId)}`);
+
+    for (let attempt = 0; attempt < 180; attempt += 1) {
+      if (run !== trackingRunRef.current) return;
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 10_000);
+      try {
+        const response = await fetch(`${config.api}/api/tx/${encodeURIComponent(transactionId)}/status`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (response.ok) {
+          const status = (await response.json()) as { confirmed?: boolean; block_height?: number };
+          if (status.confirmed) {
+            setMempoolStatus("confirmed");
+            setMempoolMessage("Transaction confirmed on-chain.");
+            setMempoolBlockHeight(typeof status.block_height === "number" ? status.block_height : null);
+            return;
+          }
+          setMempoolStatus("pending");
+          setMempoolMessage("Transaction is visible in the mempool and is waiting for confirmation.");
+        } else if (response.status === 404) {
+          setMempoolStatus("pending");
+          setMempoolMessage("Transaction sent; waiting for Mempool to index it.");
+        } else {
+          throw new Error(`Mempool returned HTTP ${response.status}.`);
+        }
+      } catch {
+        if (run !== trackingRunRef.current) return;
+        setMempoolStatus("error");
+        setMempoolMessage("Mempool is temporarily unavailable; retrying automatically.");
+      } finally {
+        window.clearTimeout(timeout);
+      }
+      await new Promise(resolve => window.setTimeout(resolve, 10_000));
+    }
+    if (run === trackingRunRef.current) {
+      setMempoolStatus("timeout");
+      setMempoolMessage("No confirmation received after 30 minutes. Check the transaction in Mempool.");
+    }
+  };
+
   const sendSelectedInscription = async () => {
     const provider = window.unisat;
     const recipient = destination.trim();
@@ -378,6 +457,7 @@ export function UniSatWalletConnect() {
         throw new Error("UniSat did not return a valid transaction ID. Check the wallet before retrying.");
       }
       setTxid(returnedTxid);
+      void trackTransaction(returnedTxid, currentChain.enum);
       setInscriptions(previous => previous.filter(item => item.inscriptionId !== selected.inscriptionId));
       setInscriptionTotal(previous => Math.max(0, previous - 1));
       setSelectedInscriptionId("");
@@ -491,6 +571,7 @@ export function UniSatWalletConnect() {
                   setSelectedInscriptionId(event.target.value);
                   setConfirmed(false);
                   setTxid("");
+                  resetMempoolTracking();
                   setTransferError("");
                 }}
                 className="mt-2 block w-full border border-[#3b434d] bg-[#10151a] px-3 py-3 font-mono text-xs normal-case text-[#f3efe5]"
@@ -558,9 +639,18 @@ export function UniSatWalletConnect() {
           )}
           {transferError && <p className="mt-3 font-mono text-[10px] text-[#e08b7d]" role="alert">{transferError}</p>}
           {txid && (
-            <p className="mt-3 break-all font-mono text-[10px] text-[#70c7a0]" role="status">
-              UniSat returned transaction ID: {txid}. Check its on-chain status before retrying.
-            </p>
+            <>
+              <p className="mt-3 break-all font-mono text-[10px] text-[#70c7a0]" role="status">
+                UniSat returned transaction ID: {txid}.
+              </p>
+              {mempoolStatus !== "idle" && (
+                <div className="mt-2 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]" role="status" aria-live="polite">
+                  <p><span className="text-[#718092]">{mempoolNetwork} Mempool:</span> {mempoolMessage}</p>
+                  {mempoolBlockHeight !== null && <p><span className="text-[#718092]">Block:</span> {mempoolBlockHeight}</p>}
+                  {mempoolExplorerUrl && <a className="mt-1 inline-flex text-[#d99a54] underline underline-offset-2" href={mempoolExplorerUrl} target="_blank" rel="noreferrer">Open transaction in Mempool <ExternalLink size={11} /></a>}
+                </div>
+              )}
+            </>
           )}
         </section>
       )}
