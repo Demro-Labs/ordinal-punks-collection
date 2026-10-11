@@ -184,8 +184,15 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       const currentChain = await provider.getChain();
       if (currentChain.enum !== receipt.chain) throw new Error("Le réseau du wallet a changé depuis la création du reçu. Revenez au réseau indiqué sur le reçu; aucun paiement n’a été envoyé.");
       paymentCallStarted = true;
-      setMessage("UniSat va afficher le montant et les frais finaux avant signature.");
-      const payment = await provider.sendBitcoin(receipt.payAddress, receipt.amount, { feeRate: receipt.feeRate });
+      const mobileUniSat = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      setMessage(mobileUniSat
+        ? "Ouverture de l’approbation UniSat mobile… Vérifiez la fenêtre de confirmation dans l’application."
+        : "UniSat va afficher le montant et les frais finaux avant signature.");
+      // UniSat mobile peut refuser ou ignorer le troisième argument du provider.
+      // Le fee rate reste géré par UniSat mobile; Desktop reçoit l’option documentée.
+      const payment = mobileUniSat
+        ? await provider.sendBitcoin(receipt.payAddress, receipt.amount)
+        : await provider.sendBitcoin(receipt.payAddress, receipt.amount, { feeRate: receipt.feeRate });
       paymentReturned = true;
       const returnedTxid = typeof payment === "string" ? payment : payment?.txid;
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) throw new Error("UniSat n’a pas retourné de TXID vérifiable. Vérifiez l’activité du wallet avant toute nouvelle action.");
@@ -200,7 +207,7 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       setStage(mayHaveBeenSent ? "tracking" : "awaiting-approval");
       setMessage(mayHaveBeenSent
         ? `Le paiement peut déjà avoir été transmis. Ne l’envoyez pas une seconde fois. Vérifiez UniSat; le reçu reste disponible pour reprendre le suivi. ${error instanceof Error ? error.message : "Erreur de suivi."}`
-        : (error instanceof Error ? `${error.message} Aucun TXID n’a été reçu; la commande reste en attente d’approbation.` : "UniSat n’a pas confirmé l’approbation. Aucun TXID n’a été reçu; la commande reste en attente d’approbation."));
+        : (error instanceof Error ? `${error.message} Aucun TXID n’a été reçu; la commande reste en attente d’approbation. Sur mobile, vérifiez que la fenêtre UniSat est ouverte et que le réseau Fractal Bitcoin est sélectionné.` : "UniSat n’a pas confirmé l’approbation. Aucun TXID n’a été reçu; la commande reste en attente d’approbation."));
     }
   };
   const close = () => { if (["preparing", "paying"].includes(stage)) return; setOpen(false); if (stage === "tracking") return; setMessage(""); setStatus(""); setStage("idle"); setReceipt(null); setFinalReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]); };
