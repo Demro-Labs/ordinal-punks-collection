@@ -3,6 +3,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Route, Router as WouterRouter, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
+import HumanVerificationGate from "./components/HumanVerificationGate";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import NotFound from "./pages/NotFound";
@@ -26,7 +27,9 @@ export default function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <HumanVerificationGate action="ordinal-punks">
+            <Router />
+          </HumanVerificationGate>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
