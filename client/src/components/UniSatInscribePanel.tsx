@@ -20,43 +20,12 @@ function readAsDataUrl(file: File) { return new Promise<string>((resolve, reject
 function formatBytes(value: number) { return `${(value / 1024).toFixed(value < 1024 ? 1 : 0)} KB`; }
 function describeStatus(status: string) { return ({ pending: "En attente du paiement", paid: "Paiement reçu", processing: "Inscription en cours", minted: "Inscription créée", completed: "Inscription terminée", success: "Inscription terminée", failed: "Échec", cancelled: "Annulée" } as Record<string, string>)[status] ?? status; }
 function fileKind(file: File) { if (file.type.startsWith("image/")) return "Image"; if (file.type.startsWith("text/")) return "Texte"; if (file.type.startsWith("audio/")) return "Audio"; if (file.type.startsWith("video/")) return "Vidéo"; if (file.type === "application/json") return "JSON"; if (file.type === "image/svg+xml") return "SVG"; if (file.type === "application/pdf") return "PDF"; return file.type || "Binaire"; }
-function readHumanVerificationProof(action: "ordinal-punks" | "pokedex") {
-  try {
-    const key = `demro-human-verification:v1:${action}`;
-    const saved = JSON.parse(localStorage.getItem(key) ?? "null") as { proof?: string; expiresAt?: number } | null;
-    if (saved?.proof && typeof saved.expiresAt === "number" && saved.expiresAt > Date.now()) return saved.proof;
-    localStorage.removeItem(key);
-  } catch { /* verification will fail closed below */ }
-  return "";
-}
 function isWalletCancellation(error: unknown) {
   const value = error as { code?: unknown; message?: unknown } | null;
   const message = String(value?.message ?? error ?? "");
   return value?.code === 4001 || /user (rejected|denied)|cancelled by user|request rejected/i.test(message);
 }
 
-const TURNSTILE_SITE_KEY = "0x4AAAAAAFT0abg31eU-eFy5";
-const HUMAN_VERIFY_API = "https://turnstile-human-verification.servostar23.workers.dev/api";
-type TurnstileWidgetApi = {
-  render: (container: HTMLElement, options: { sitekey: string; action: "ordinal-punks" | "pokedex"; theme: "dark"; callback: (token: string) => void; "error-callback": () => void; "expired-callback": () => void }) => string;
-  reset: (widgetId?: string) => void;
-  remove: (widgetId: string) => void;
-};
-function getTurnstileApi() { return (window as Window & { turnstile?: TurnstileWidgetApi }).turnstile; }
-function loadTurnstileApi(): Promise<TurnstileWidgetApi> {
-  const available = getTurnstileApi();
-  if (available) return Promise.resolve(available);
-  return new Promise((resolve, reject) => {
-    const current = document.querySelector<HTMLScriptElement>("script[data-cloudflare-turnstile]");
-    const script = current ?? document.createElement("script");
-    const timeout = window.setTimeout(() => reject(new Error("Cloudflare Turnstile n’a pas répondu.")), 12000);
-    const onLoad = () => { window.clearTimeout(timeout); const api = getTurnstileApi(); api ? resolve(api) : reject(new Error("Turnstile ne s’est pas initialisé.")); };
-    const onError = () => { window.clearTimeout(timeout); reject(new Error("Impossible de charger Cloudflare Turnstile.")); };
-    script.addEventListener("load", onLoad, { once: true });
-    script.addEventListener("error", onError, { once: true });
-    if (!current) { script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"; script.async = true; script.defer = true; script.dataset.cloudflareTurnstile = "true"; document.head.appendChild(script); }
-  });
-}
 
 export function UniSatInscribePanel({ verificationAction }: { verificationAction: "ordinal-punks" | "pokedex" }) {
   const [address, setAddress] = useState("");
@@ -68,11 +37,6 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("");
   const [receipt, setReceipt] = useState<InscribeReceipt | null>(null);
-  const [verificationChallenge, setVerificationChallenge] = useState(false);
-  const [verificationWorking, setVerificationWorking] = useState(false);
-  const [verificationMessage, setVerificationMessage] = useState("");
-  const verificationContainerRef = useRef<HTMLDivElement>(null);
-  const turnstileWidgetIdRef = useRef<string | null>(null);
   const [txid, setTxid] = useState("");
   const [inscriptionIds, setInscriptionIds] = useState<string[]>([]);
   const [orderFiles, setOrderFiles] = useState<OrderFile[]>([]);
@@ -161,8 +125,6 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
     if (!provider?.getPublicKey) return setMessage("UniSat doit être connecté et compatible avec getPublicKey.");
     if (!address || !supported || !chain?.enum) return setMessage("Connectez UniSat sur Bitcoin mainnet ou Fractal Bitcoin mainnet.");
     if (!files.length) return setMessage("Ajoutez au moins un fichier à inscrire.");
-    const proof = readHumanVerificationProof(verificationAction);
-    if (!proof) { setVerificationMessage("Confirmez la vérification Cloudflare pour sécuriser la création de cette commande."); setVerificationChallenge(true); return setMessage("Une vérification Cloudflare est nécessaire avant d’envoyer le fichier à UniSat."); }
     const parsedFeeRate = Number(feeRate); if (!Number.isInteger(parsedFeeRate) || parsedFeeRate < 1 || parsedFeeRate > 10000) return setMessage("Le fee rate doit être un entier entre 1 et 10 000 sat/vB.");
     setStage("preparing");
     try {
@@ -171,7 +133,7 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       await loadLiveWalletData();
       let response: Response;
       try {
-        response = await fetch(`${API_BASE}/api/inscribe/order`, { mode: "cors", method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "X-Human-Action": verificationAction, "X-Human-Proof": proof }, body: JSON.stringify({ receiver: address, refundAddress: address, userAddress: address, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: chain.enum, files: encodedFiles }) });
+        response = await fetch(`${API_BASE}/api/inscribe/order`, { mode: "cors", method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ receiver: address, refundAddress: address, userAddress: address, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: chain.enum, files: encodedFiles }) });
       } catch {
         throw new Error("Le service d’inscription UniSat est inaccessible. Vérifiez la connexion réseau, puis réessayez sans fermer le wallet.");
       }
@@ -180,39 +142,6 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       setReceipt({ orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: files.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })), feeRate: liveFeeRate, chain: chain.enum, createdAt: new Date().toISOString() }); setStage("awaiting-approval"); setMessage("Reçu batch préparé. Vérifiez le réseau, le montant et les frais, puis approuvez le paiement dans UniSat.");
     } catch (error) { setStage("idle"); setMessage(error instanceof Error ? error.message : "Impossible de préparer l’inscription."); }
   };
-  const prepareOrderRef = useRef(prepareOrder);
-  prepareOrderRef.current = prepareOrder;
-  useEffect(() => {
-    if (!verificationChallenge) return;
-    let cancelled = false;
-    const verifyToken = async (token: string) => {
-      if (cancelled) return;
-      setVerificationWorking(true); setVerificationMessage("Validation sécurisée auprès de Cloudflare…");
-      try {
-        const response = await fetch(`${HUMAN_VERIFY_API}/verify`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ action: verificationAction, token }), credentials: "omit", cache: "no-store" });
-        const result = await response.json().catch(() => null) as { valid?: boolean; proof?: string; expiresAt?: number } | null;
-        if (!response.ok || !result?.valid || !result.proof || !result.expiresAt) throw new Error("La vérification Cloudflare a échoué. Réessayez.");
-        localStorage.setItem(`demro-human-verification:v1:${verificationAction}`, JSON.stringify({ proof: result.proof, expiresAt: result.expiresAt }));
-        if (cancelled) return;
-        setVerificationChallenge(false); setVerificationMessage(""); setMessage("Vérification réussie. Préparation de la commande UniSat…");
-        void prepareOrderRef.current();
-      } catch (error) {
-        if (!cancelled) { setVerificationMessage(error instanceof Error ? error.message : "La vérification Cloudflare a échoué."); const api = getTurnstileApi(); if (turnstileWidgetIdRef.current && api) api.reset(turnstileWidgetIdRef.current); }
-      } finally { if (!cancelled) setVerificationWorking(false); }
-    };
-    void loadTurnstileApi().then(api => {
-      if (cancelled || !verificationContainerRef.current) return;
-      turnstileWidgetIdRef.current = api.render(verificationContainerRef.current, {
-        sitekey: TURNSTILE_SITE_KEY,
-        action: verificationAction,
-        theme: "dark",
-        callback: token => void verifyToken(token),
-        "error-callback": () => setVerificationMessage("Le widget Cloudflare a rencontré un problème. Réessayez."),
-        "expired-callback": () => { setVerificationMessage("La vérification a expiré. Confirmez à nouveau."); if (turnstileWidgetIdRef.current) api.reset(turnstileWidgetIdRef.current); },
-      });
-    }).catch(error => { if (!cancelled) setVerificationMessage(error instanceof Error ? error.message : "Impossible de charger Cloudflare Turnstile."); });
-    return () => { cancelled = true; if (turnstileWidgetIdRef.current) getTurnstileApi()?.remove(turnstileWidgetIdRef.current); turnstileWidgetIdRef.current = null; };
-  }, [verificationAction, verificationChallenge]);
 
   const pollOrder = async (orderId: string, paymentTxid: string, orderChain: string) => {
     for (let attempt = 0; attempt < 90; attempt += 1) {
@@ -302,7 +231,6 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       {finalReceipt && <div className="mt-4 border border-[#d99a54]/70 bg-[#10151a] p-4 font-mono text-[10px] leading-5" aria-label="Reçu final live"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Reçu final live · inscription</p><p><span className="text-[#718092]">Statut :</span> {finalReceipt.message}</p><p><span className="text-[#718092]">Réseau :</span> {finalReceipt.network}</p><p className="break-all"><span className="text-[#718092]">TXID :</span> {finalReceipt.txid}</p>{finalReceipt.blockHeight !== null && <p><span className="text-[#718092]">Bloc :</span> {finalReceipt.blockHeight}</p>}<p><span className="text-[#718092]">Vérifié :</span> {new Date(finalReceipt.checkedAt).toLocaleString()}</p>{finalReceipt.explorerUrl && <a className="inline-flex items-center gap-1 text-[#d99a54] underline" href={finalReceipt.explorerUrl} target="_blank" rel="noreferrer">Ouvrir dans Mempool <ExternalLink size={11} /></a>}</div>}
       {orderFiles.length > 0 && <div className="mt-4 border border-[#3b434d] bg-[#10151a] p-4"><div className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#f2bd63]"><Activity size={14} /> Résultats live · {totalInscribed} / {orderFiles.length} créés</div><div className="mt-3 grid gap-2 sm:grid-cols-2">{orderFiles.map((file, index) => <div key={`${file.inscriptionId ?? file.filename ?? index}`} className="border border-[#2c323a] p-2 font-mono text-[9px]"><p className="truncate text-[#d9d3c6]">{file.filename ?? `Fichier ${index + 1}`}</p><p className="mt-1 break-all text-[#718092]">{file.inscriptionId ?? describeStatus(file.status ?? status)}</p></div>)}</div></div>}
       {inscriptionHistory.length > 0 && <div className="mt-4 border border-[#3b434d] bg-[#10151a] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#f2bd63]"><CheckCircle2 size={14} /> Historique du wallet · conservation 2 mois</div><div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 font-mono text-[9px] uppercase text-[#9ea7b3]">Trier par<select value={historySortKey} onChange={event => setHistorySortKey(event.target.value as HistorySortKey)} className="border border-[#3b434d] bg-[#10151a] px-2 py-1 text-[#d9d3c6]"><option value="date">Date</option><option value="filename">Filename</option><option value="inscriptionId">Inscription ID</option><option value="transactionId">Transaction ID</option><option value="orderId">Order ID</option><option value="network">Network</option></select></label><button type="button" onClick={() => setHistorySortDirection(direction => direction === "asc" ? "desc" : "asc")} className="border border-[#3b434d] px-2 py-1 font-mono text-[9px] uppercase text-[#d9d3c6]">{historySortDirection === "asc" ? "Croissant ↑" : "Décroissant ↓"}</button><button type="button" disabled={!selectedHistoryBatches.length} onClick={downloadSelectedHistoryBatches} className="border border-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#d99a54] disabled:opacity-40">Télécharger le lot coché · TXT séparé</button><button type="button" onClick={() => { setInscriptionHistory([]); setHistoryPage(0); setSelectedHistoryItem(null); setSelectedHistoryBatches([]); if (historyStorageKey) localStorage.removeItem(historyStorageKey); }} className="font-mono text-[9px] uppercase text-[#a45e54]">Effacer cet historique</button></div></div><div className="mt-3 max-h-72 overflow-x-auto overflow-y-auto border border-[#2c323a]"><div className="min-w-[1080px] font-mono text-[9px]"><div className="grid grid-cols-[150px_minmax(180px,1fr)_minmax(260px,1.5fr)_minmax(260px,1.5fr)_minmax(180px,1fr)_150px] border-b border-[#3b434d] bg-[#151a1f] px-3 py-2 uppercase tracking-[0.08em] text-[#f2bd63]"><span>Date</span><span>Filename</span><span>Inscription ID</span><span>Transaction ID</span><span>Order ID</span><span>Network</span></div>{visibleHistoryGroups.map(group => <section key={`batch-${group.orderId}`} className="border-b border-[#3b434d] last:border-b-0"><div className="sticky left-0 flex flex-wrap items-center gap-3 border-b border-[#2c323a] bg-[#151a1f] px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-[#f2bd63]"><label className="flex cursor-pointer items-center gap-2"><input type="checkbox" checked={selectedHistoryBatches.includes(group.orderId)} onChange={event => setSelectedHistoryBatches(event.target.checked ? [group.orderId] : [])} aria-label={`Sélectionner le lot ${group.orderId}`} /><span>Sélectionner ce lot · {group.items.length} transaction(s)</span></label><span className="break-all normal-case">Order ID: {group.orderId}</span></div>{group.items.map(item => <button type="button" key={`${item.inscriptionId}-${item.transactionId}`} onClick={() => setSelectedHistoryItem(item)} className={`grid w-full grid-cols-[150px_minmax(180px,1fr)_minmax(260px,1.5fr)_minmax(260px,1.5fr)_minmax(180px,1fr)_150px] border-b border-[#2c323a] px-3 py-2 text-left last:border-b-0 hover:bg-[#d99a54]/10 ${selectedHistoryItem?.inscriptionId === item.inscriptionId && selectedHistoryItem?.transactionId === item.transactionId ? "bg-[#d99a54]/10" : ""}`} aria-label={`Ouvrir la transaction ${item.transactionId}`}><span className="text-[#718092]">{new Date(item.createdAt).toLocaleString()}</span><span className="truncate pr-3 text-[#d9d3c6]" title={item.filename}>{item.filename}</span><span className="break-all pr-3 text-[#718092]">{item.inscriptionId}</span><span className="break-all pr-3 text-[#718092]">{item.transactionId}</span><span className="break-all pr-3 text-[#718092]">{item.orderId}</span><span className="truncate text-[#718092]" title={item.network}>{item.network}</span></button>)}</section>)}</div></div>{selectedHistoryItem && <div className="mt-3 border border-[#d99a54]/60 bg-[#151a1f] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#f2bd63]">Transaction sélectionnée · détail</p><div className="flex gap-3"><button type="button" onClick={() => downloadHistoryItemTxt(selectedHistoryItem)} className="font-mono text-[9px] uppercase text-[#d99a54]">Télécharger cette transaction</button><button type="button" onClick={() => setSelectedHistoryItem(null)} className="font-mono text-[9px] uppercase text-[#718092]">Fermer le détail</button></div></div><div className="mt-3 grid gap-2 font-mono text-[10px] text-[#d9d3c6] sm:grid-cols-2"><p><span className="text-[#718092]">Date :</span> {new Date(selectedHistoryItem.createdAt).toLocaleString()}</p><p className="break-all"><span className="text-[#718092]">Filename :</span> {selectedHistoryItem.filename}</p><p className="break-all"><span className="text-[#718092]">Inscription ID :</span> {selectedHistoryItem.inscriptionId}</p><p className="break-all"><span className="text-[#718092]">Transaction ID :</span> {selectedHistoryItem.transactionId}</p><p className="break-all"><span className="text-[#718092]">Payment TXID :</span> {selectedHistoryItem.paymentTxid || "Indisponible"}</p><p className="break-all"><span className="text-[#718092]">Order ID :</span> {selectedHistoryItem.orderId}</p><p><span className="text-[#718092]">Network :</span> {selectedHistoryItem.network}</p></div></div>}<div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#2c323a] pt-3"><span className="font-mono text-[9px] text-[#718092]">Page {historyPage + 1} / {historyPageCount} · {historyGroups.length} lot(s) · {inscriptionHistory.length} transaction(s)</span><div className="flex gap-2"><button type="button" onClick={() => setHistoryPage(page => Math.max(0, page - 1))} disabled={historyPage === 0} className="border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] disabled:opacity-40">Précédent</button><button type="button" onClick={() => setHistoryPage(page => Math.min(historyPageCount - 1, page + 1))} disabled={historyPage >= historyPageCount - 1} className="border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] disabled:opacity-40">Suivant</button></div></div></div>}
-      {verificationChallenge && <div className="mt-4 border border-[#3b434d] bg-[#10151a] p-4"><p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#d99a54]">Protection de l’API UniSat</p><p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">La clé API reste côté Worker Cloudflare. Cette vérification ponctuelle autorise uniquement la création de la commande.</p><div className="mt-3 flex min-h-[66px] items-center justify-center" ref={verificationContainerRef} aria-label="Vérification Cloudflare Turnstile"/><p className="mt-2 min-h-5 font-mono text-[10px] text-[#f2bd63]" role="status">{verificationWorking ? "Validation sécurisée auprès de Cloudflare…" : verificationMessage}</p><button type="button" onClick={() => setVerificationChallenge(false)} disabled={verificationWorking} className="mt-2 border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#9ea7b3] disabled:opacity-40">Annuler</button></div>}
       {message && <p className="mt-3 break-words font-mono text-[10px] leading-5 text-[#f2bd63]" role="status">{message}</p>}
       <div className="mt-5 flex flex-wrap justify-end gap-2"><button type="button" onClick={close} disabled={busy} className="border border-[#3b434d] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#9ea7b3] disabled:opacity-40">Fermer</button>{!receipt && <button type="button" onClick={() => void prepareOrder()} disabled={!files.length || busy} className="border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:opacity-40">{stage === "preparing" ? "Préparation…" : "Préparer le reçu"}</button>}{receipt && stage === "awaiting-approval" && <button type="button" onClick={() => void approvePayment()} className="border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10]">Approuver dans UniSat</button>}{receipt && stage === "tracking" && txid && <button type="button" onClick={() => void resumeOrderTracking()} className="border border-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63]">Reprendre le suivi — sans repayer</button>}</div>
       {receipt && <a className="mt-4 inline-flex items-center gap-1 font-mono text-[10px] text-[#d99a54] underline" href={`https://uniscan.cc/${chain?.enum === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : "bitcoin"}/address/${encodeURIComponent(address)}`} target="_blank" rel="noreferrer">Voir l’activité du wallet sur UniScan <ExternalLink size={11} /></a>}
