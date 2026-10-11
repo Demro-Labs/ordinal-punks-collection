@@ -196,11 +196,11 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       await pollOrder(receipt.orderId, returnedTxid, receipt.chain);
     } catch (error) {
       const canceled = isWalletCancellation(error);
-      const mayHaveBeenSent = paymentReturned || (paymentCallStarted && !canceled);
+      const mayHaveBeenSent = paymentReturned;
       setStage(mayHaveBeenSent ? "tracking" : "awaiting-approval");
       setMessage(mayHaveBeenSent
         ? `Le paiement peut déjà avoir été transmis. Ne l’envoyez pas une seconde fois. Vérifiez UniSat; le reçu reste disponible pour reprendre le suivi. ${error instanceof Error ? error.message : "Erreur de suivi."}`
-        : (error instanceof Error ? error.message : "Le paiement a été annulé dans UniSat."));
+        : (error instanceof Error ? `${error.message} Aucun TXID n’a été reçu; la commande reste en attente d’approbation.` : "UniSat n’a pas confirmé l’approbation. Aucun TXID n’a été reçu; la commande reste en attente d’approbation."));
     }
   };
   const close = () => { if (["preparing", "paying"].includes(stage)) return; setOpen(false); if (stage === "tracking") return; setMessage(""); setStatus(""); setStage("idle"); setReceipt(null); setFinalReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]); };
