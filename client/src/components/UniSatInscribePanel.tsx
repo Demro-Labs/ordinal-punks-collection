@@ -187,20 +187,22 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       if (currentChain.enum !== receipt.chain) throw new Error("Le réseau du wallet a changé depuis la création du reçu. Revenez au réseau indiqué sur le reçu; aucun paiement n’a été envoyé.");
       paymentCallStarted = true;
       const mobileUniSat = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const paymentFeeRate = await getRecommendedFeeRate(receipt.chain).catch(() => receipt.feeRate);
+      setReceipt(current => current ? { ...current, feeRate: paymentFeeRate } : current);
       setMessage(mobileUniSat
         ? "Ouverture de l’approbation UniSat mobile… Vérifiez la fenêtre de confirmation dans l’application."
         : "UniSat va afficher le montant et les frais finaux avant signature.");
-      // UniSat mobile peut refuser ou ignorer le troisième argument du provider.
-      // Le fee rate reste géré par UniSat mobile; Desktop reçoit l’option documentée.
-      const payment = mobileUniSat
-        ? await sendMobilePayment({
+      // L’API native est disponible sur le navigateur UniSat intégré et ouvre son écran
+      // d’approbation. N’utiliser le PSBT manuel qu’en secours si sendBitcoin manque.
+      const payment = provider.sendBitcoin
+        ? await provider.sendBitcoin(receipt.payAddress, receipt.amount, { feeRate: paymentFeeRate })
+        : await sendMobilePayment({
             provider: provider as unknown as MobilePaymentProvider,
             senderAddress: address,
             payAddress: receipt.payAddress,
             amount: receipt.amount,
-            feeRate: receipt.feeRate,
-          })
-        : await provider.sendBitcoin!(receipt.payAddress, receipt.amount, { feeRate: receipt.feeRate });
+            feeRate: paymentFeeRate,
+          });
       paymentReturned = true;
       const returnedTxid = typeof payment === "string" ? payment : payment?.txid;
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) throw new Error("UniSat n’a pas retourné de TXID vérifiable. Vérifiez l’activité du wallet avant toute nouvelle action.");
