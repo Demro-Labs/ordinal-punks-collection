@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-const SITE_KEY = "0x4AAAAAAFSgiNTy1R9HRN2w";
+const SITE_KEY = "0x4AAAAAAFT0abg31eU-eFy5";
 const VERIFY_API = "https://turnstile-human-verification.servostar23.workers.dev/api";
 const STORAGE_PREFIX = "demro-human-verification:v1:";
 

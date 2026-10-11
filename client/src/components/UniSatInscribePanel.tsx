@@ -35,7 +35,7 @@ function isWalletCancellation(error: unknown) {
   return value?.code === 4001 || /user (rejected|denied)|cancelled by user|request rejected/i.test(message);
 }
 
-const TURNSTILE_SITE_KEY = "0x4AAAAAAFSgiNTy1R9HRN2w";
+const TURNSTILE_SITE_KEY = "0x4AAAAAAFT0abg31eU-eFy5";
 const HUMAN_VERIFY_API = "https://turnstile-human-verification.servostar23.workers.dev/api";
 type TurnstileWidgetApi = {
   render: (container: HTMLElement, options: { sitekey: string; action: "ordinal-punks" | "pokedex"; theme: "dark"; callback: (token: string) => void; "error-callback": () => void; "expired-callback": () => void }) => string;
