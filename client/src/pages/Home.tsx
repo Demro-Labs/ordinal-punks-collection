@@ -1042,10 +1042,10 @@ export default function Home() {
                       id="security-badges-title"
                       className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7f8b99]"
                     >
-                      Security protocols
+                      Security protections
                     </p>
                     <p className="mt-1 font-sans text-xs text-[#9ea7b3]">
-                      Protections verified on this site
+                      Protections documented in the project security model
                     </p>
                   </div>
                   <svg
@@ -1060,12 +1060,22 @@ export default function Home() {
                     <path d="m8.5 12 2.2 2.2 4.8-5" />
                   </svg>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {[
-                    { label: "UniSat approval", detail: "Explicit wallet approval" },
+                    { label: "UniSat approval", detail: "Every transfer and inscription payment requires explicit wallet approval" },
+                    { label: "No silent signatures", detail: "Browsing and local metadata never request a wallet signature" },
+                    { label: "Cloudflare Worker", detail: "Live and protected API routes stay behind the server-side Worker" },
+                    { label: "API secret isolation", detail: "The UniSat API key never enters frontend code or public assets" },
+                    { label: "Safe fee UTXOs", detail: "Inscription and protocol-asset outputs are excluded from fee selection" },
+                    { label: "Asset-aware transfer", detail: "Only recognized transferable inscriptions can enter the transfer flow" },
+                    { label: "Network validation", detail: "Wallet network, address, fee and output are checked before approval" },
+                    { label: "Final review", detail: "The final UniSat confirmation screen remains authoritative" },
+                    { label: "Session clearing", detail: "Clear session removes wallet data and transfer state from the app" },
                     { label: "HTTPS / TLS", detail: "Encrypted connection" },
                     { label: "CSP", detail: "Content Security Policy" },
                     { label: "HSTS", detail: "Strict Transport Security" },
+                    { label: "CodeQL", detail: "Repository security analysis required before merge" },
+                    { label: "Dependency review", detail: "Dependency security review required before merge" },
                   ].map(protocol => (
                     <div
                       key={protocol.label}
