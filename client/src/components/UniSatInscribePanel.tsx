@@ -169,7 +169,12 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       const [encodedFiles, publicKey] = await Promise.all([Promise.all(files.map(async file => ({ filename: file.name, dataURL: await readAsDataUrl(file) }))), provider.getPublicKey()]);
       const liveFeeRate = await getRecommendedFeeRate(chain.enum).catch(() => parsedFeeRate);
       await loadLiveWalletData();
-      const response = await fetch(`${API_BASE}/api/inscribe/order`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "X-Human-Action": verificationAction, "X-Human-Proof": proof }, body: JSON.stringify({ receiver: address, refundAddress: address, userAddress: address, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: chain.enum, files: encodedFiles }) });
+      let response: Response;
+      try {
+        response = await fetch(`${API_BASE}/api/inscribe/order`, { mode: "cors", method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "X-Human-Action": verificationAction, "X-Human-Proof": proof }, body: JSON.stringify({ receiver: address, refundAddress: address, userAddress: address, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: chain.enum, files: encodedFiles }) });
+      } catch {
+        throw new Error("Le service d’inscription UniSat est inaccessible. Vérifiez la connexion réseau, puis réessayez sans fermer le wallet.");
+      }
       const created = await response.json() as { orderId?: string; payAddress?: string; amount?: number; error?: string };
       if (!response.ok || !created.orderId || !created.payAddress || !Number.isSafeInteger(created.amount)) throw new Error(created.error || "UniSat n’a pas créé la commande.");
       setReceipt({ orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: files.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })), feeRate: liveFeeRate, chain: chain.enum, createdAt: new Date().toISOString() }); setStage("awaiting-approval"); setMessage("Reçu batch préparé. Vérifiez le réseau, le montant et les frais, puis approuvez le paiement dans UniSat.");
