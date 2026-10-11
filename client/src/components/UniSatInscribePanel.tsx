@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CheckCircle2, ExternalLink, FilePlus2, Files, ShieldCheck, Upload, X } from "lucide-react";
 import { getRecommendedFeeRate, trackMempoolTransaction, type MempoolReceipt } from "@/lib/mempool";
+import { sendMobilePayment, type MobilePaymentProvider } from "@/lib/mobile-payment-psbt";
 
 const API_BASE = "https://fractal-ordinal-live.servostar23.workers.dev";
 const MAX_FILE_BYTES = 365 * 1024;
@@ -176,7 +177,8 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
   };
   const approvePayment = async () => {
     const provider = window.unisat;
-    if (!receipt || !provider?.sendBitcoin || !provider.getChain) return setMessage("UniSat ne permet pas l’approbation du paiement depuis ce navigateur.");
+    const mobileProvider = provider as unknown as MobilePaymentProvider;
+    if (!receipt || !provider?.getChain || (!provider.sendBitcoin && !(mobileProvider.signPsbt && mobileProvider.pushTx))) return setMessage("UniSat ne permet pas l’approbation du paiement depuis ce navigateur.");
     setStage("paying"); setMessage("Vérification du réseau de la commande avant d’ouvrir l’approbation UniSat…");
     let paymentCallStarted = false;
     let paymentReturned = false;
@@ -191,8 +193,14 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       // UniSat mobile peut refuser ou ignorer le troisième argument du provider.
       // Le fee rate reste géré par UniSat mobile; Desktop reçoit l’option documentée.
       const payment = mobileUniSat
-        ? await provider.sendBitcoin(receipt.payAddress, receipt.amount)
-        : await provider.sendBitcoin(receipt.payAddress, receipt.amount, { feeRate: receipt.feeRate });
+        ? await sendMobilePayment({
+            provider: provider as unknown as MobilePaymentProvider,
+            senderAddress: address,
+            payAddress: receipt.payAddress,
+            amount: receipt.amount,
+            feeRate: receipt.feeRate,
+          })
+        : await provider.sendBitcoin!(receipt.payAddress, receipt.amount, { feeRate: receipt.feeRate });
       paymentReturned = true;
       const returnedTxid = typeof payment === "string" ? payment : payment?.txid;
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) throw new Error("UniSat n’a pas retourné de TXID vérifiable. Vérifiez l’activité du wallet avant toute nouvelle action.");
