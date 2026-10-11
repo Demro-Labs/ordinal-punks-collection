@@ -289,18 +289,23 @@ async function market(collectionId, start, limit, env) {
   };
 }
 
-async function inscription(inscriptionId, env) {
+async function inscription(inscriptionId, env, chain = 'FRACTAL_BITCOIN_MAINNET') {
+  const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
   const genesisTxid = inscriptionId.split('i')[0];
-  const [info, listing, inputs] = await Promise.all([
-    uni('/v1/indexer/inscription/info/' + inscriptionId, env),
-    uni('/v3/market/collection/auction/inscription_info', env, {
+  const [infoResult, listingResult, inputsResult] = await Promise.allSettled([
+    uniNetwork(base, '/v1/indexer/inscription/info/' + inscriptionId, env),
+    uniNetwork(base, '/v3/market/collection/auction/inscription_info', env, {
       method: 'POST',
       body: JSON.stringify({ inscriptionId }),
     }),
     /^[a-f0-9]{64}$/.test(genesisTxid)
-      ? uni('/v1/indexer/tx/' + genesisTxid + '/ins?cursor=0&size=100', env)
+      ? uniNetwork(base, '/v1/indexer/tx/' + genesisTxid + '/ins?cursor=0&size=100', env)
       : Promise.resolve([]),
   ]);
+  if (infoResult.status !== 'fulfilled') throw infoResult.reason;
+  const info = infoResult.value || {};
+  const listing = listingResult.status === 'fulfilled' ? listingResult.value || {} : {};
+  const inputs = inputsResult.status === 'fulfilled' ? inputsResult.value : [];
   const owner = info.address || (info.utxo && info.utxo.address) || null;
   const creator = Array.isArray(inputs) ? ((inputs.find((item) => item && item.address) || {}).address || null) : null;
   const listed = Boolean(listing.auctionId) && listing.notOnSale !== true;
@@ -505,12 +510,21 @@ export default {
 
       const inscriptionId = url.searchParams.get('inscriptionId') || '';
       if (!/^[a-f0-9]{64}i\d+$/.test(inscriptionId)) {
-        return Response.json({ error: 'A valid Fractal inscription ID is required.' }, {
+        return Response.json({ error: 'A valid inscription ID is required.' }, {
           status: 400,
           headers: { ...headers, 'Cache-Control': 'no-store' },
         });
       }
-      return edgeCachedResponse(request, headers, 120, 300, async () => Response.json(await inscription(inscriptionId, env), { headers }));
+      const chain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
+      if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) {
+        return Response.json({ error: 'Unsupported mainnet.' }, { status: 400, headers: { ...headers, 'Cache-Control': 'no-store' } });
+      }
+      if (url.searchParams.get('refresh') === '1') {
+        return Response.json(await inscription(inscriptionId, env, chain), {
+          headers: { ...headers, 'Cache-Control': 'no-store', 'X-Edge-Cache': 'BYPASS' },
+        });
+      }
+      return edgeCachedResponse(request, headers, 120, 300, async () => Response.json(await inscription(inscriptionId, env, chain), { headers }));
     } catch {
       console.warn('Live API upstream request failed', url.pathname);
       return Response.json({ error: 'Live UniSat data is temporarily unavailable.' }, {

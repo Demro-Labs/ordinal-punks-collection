@@ -4,8 +4,17 @@ export type LiveInscription = { inscriptionId: string; owner: string | null; cre
 export const LIVE_DATA_URL = import.meta.env.VITE_LIVE_DATA_URL || "https://fractal-ordinal-live.servostar23.workers.dev/api/live-inscription";
 export const LIVE_DATA_API_BASE = LIVE_DATA_URL.replace(/\/api\/live-inscription\/?$/, "");
 
-export async function fetchLiveInscription(inscriptionId: string, signal?: AbortSignal): Promise<LiveInscription> {
-  const response = await fetch(`${LIVE_DATA_URL}?inscriptionId=${encodeURIComponent(inscriptionId)}`, { signal, cache: "no-store", headers: { Accept: "application/json" } });
+export async function fetchLiveInscription(
+  inscriptionId: string,
+  signal?: AbortSignal,
+  chain = "FRACTAL_BITCOIN_MAINNET",
+  refresh = false,
+): Promise<LiveInscription> {
+  const url = new URL(LIVE_DATA_URL);
+  url.searchParams.set("inscriptionId", inscriptionId);
+  url.searchParams.set("chain", chain);
+  if (refresh) url.searchParams.set("refresh", "1");
+  const response = await fetch(url.toString(), { signal, cache: "no-store", headers: { Accept: "application/json" } });
   if (!response.ok) throw new Error(`Live UniSat request failed (${response.status}).`);
   const payload = (await response.json()) as Partial<LiveInscription>;
   return {

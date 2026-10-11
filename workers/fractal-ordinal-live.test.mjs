@@ -142,6 +142,39 @@ test('rejects malformed inscription identifiers before upstream access', async (
   assert.equal(response.status, 400);
 });
 
+test('returns a fresh network-specific live receipt when optional UniSat market data fails', async () => {
+  const previousFetch = globalThis.fetch;
+  const inscriptionId = `${'a'.repeat(64)}i0`;
+  const genesisTxid = 'a'.repeat(64);
+  const calledUrls = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    calledUrls.push(url);
+    if (url === `https://open-api.unisat.io/v1/indexer/inscription/info/${inscriptionId}`) {
+      return Response.json({ code: 0, data: { address: 'bc1qowner' } });
+    }
+    if (url === 'https://open-api.unisat.io/v3/market/collection/auction/inscription_info') {
+      throw new Error('Optional market index temporarily unavailable');
+    }
+    if (url === `https://open-api.unisat.io/v1/indexer/tx/${genesisTxid}/ins?cursor=0&size=100`) {
+      return Response.json({ code: 0, data: [] });
+    }
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/live-inscription?inscriptionId=${inscriptionId}&chain=BITCOIN_MAINNET&refresh=1`, { ip: '192.0.2.240' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.owner, 'bc1qowner');
+    assert.equal(data.listing.listed, false);
+    assert.equal(data.creator, null);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('x-edge-cache'), 'BYPASS');
+    assert.equal(calledUrls.length, 3);
+    assert.ok(calledUrls.every(url => url.startsWith('https://open-api.unisat.io/')));
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('applies the per-isolate request ceiling and a retry hint', async () => {
   const ip = '192.0.2.200';
   for (let i = 0; i < 180; i += 1) {
