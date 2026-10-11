@@ -1062,7 +1062,7 @@ export default function Home() {
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                   {[
-                    { label: "Cloudflare Turnstile", detail: "Server-verified human check" },
+                    { label: "UniSat approval", detail: "Explicit wallet approval" },
                     { label: "HTTPS / TLS", detail: "Encrypted connection" },
                     { label: "CSP", detail: "Content Security Policy" },
                     { label: "HSTS", detail: "Strict Transport Security" },
