@@ -1,3 +1,5 @@
+import { LIVE_DATA_API_BASE } from "@/lib/live";
+
 export type MempoolConfig = { api: string; explorer: string; label: string };
 export type MempoolReceipt = {
   txid: string;
@@ -26,13 +28,36 @@ async function requestJson<T>(url: string, timeoutMs = 8_000): Promise<T> {
   } finally { window.clearTimeout(timer); }
 }
 
-export async function getRecommendedFeeRate(network: string) {
+export type FeeEstimateSource = { feeRate: number | null; available: boolean };
+export type FeeEstimate = {
+  network: string;
+  target: "halfHour";
+  feeRate: number;
+  strategy: "maximum-of-mempool-and-unisat" | "single-provider-fallback";
+  sources: { mempool: FeeEstimateSource; unisat: FeeEstimateSource };
+  sampledAt: string;
+};
+
+export function describeFeeSources(strategy: FeeEstimate["strategy"], sources: FeeEstimate["sources"]) {
+  if (strategy === "maximum-of-mempool-and-unisat") return "Mempool + UniSat (taux live le plus élevé)";
+  return sources.mempool.available ? "Mempool seul (UniSat indisponible)" : "UniSat seul (Mempool indisponible)";
+}
+
+/** Server-side consensus: compare the live Mempool and UniSat estimates without exposing the UniSat API key. */
+export async function getRecommendedFeeEstimate(network: string): Promise<FeeEstimate> {
   const config = getMempoolConfig(network);
   if (!config) throw new Error("Sélectionnez Bitcoin mainnet ou Fractal Bitcoin mainnet dans UniSat.");
-  const fees = await requestJson<{ fastestFee?: number; halfHourFee?: number; hourFee?: number; minimumFee?: number }>(`${config.api}/api/v1/fees/recommended`);
-  const value = fees.halfHourFee ?? fees.fastestFee ?? fees.hourFee ?? fees.minimumFee;
-  if (!Number.isFinite(value) || Number(value) <= 0) throw new Error("Mempool n’a pas renvoyé de fee rate valide.");
-  return Math.max(1, Math.ceil(Number(value)));
+  const query = new URLSearchParams({ chain: network, target: "halfHour" });
+  const result = await requestJson<FeeEstimate & { error?: string }>(`${LIVE_DATA_API_BASE}/api/fees/recommended?${query}`, 10_000);
+  if (!Number.isFinite(result.feeRate) || result.feeRate < 1 || result.feeRate > 10_000 || result.network !== network || result.target !== "halfHour") {
+    throw new Error(result.error || "Les estimateurs de frais Mempool/UniSat n’ont pas renvoyé de taux valide.");
+  }
+  return result;
+}
+
+export async function getRecommendedFeeRate(network: string) {
+  const estimate = await getRecommendedFeeEstimate(network);
+  return Math.ceil(estimate.feeRate);
 }
 
 export async function validateMempoolAddress(network: string, address: string) {

@@ -136,6 +136,39 @@ async function uniNetwork(base, path, env, init = {}) {
   return payload.data;
 }
 
+function selectedFeeRate(fees) {
+  const value = Number(fees?.halfHourFee ?? fees?.fastestFee ?? fees?.hourFee ?? fees?.economyFee ?? fees?.minimumFee);
+  if (!Number.isFinite(value) || value <= 0 || value > 10000) return null;
+  return Math.max(1, Math.ceil(value));
+}
+
+async function recommendedFeeEstimate(chain, env) {
+  const unisatBase = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
+  const mempoolBase = chain === 'BITCOIN_MAINNET' ? 'https://mempool.space' : 'https://mempool.fractalbitcoin.io';
+  const [unisatResult, mempoolResult] = await Promise.allSettled([
+    uniNetwork(unisatBase, '/v1/indexer/fees/recommended', env, { signal: AbortSignal.timeout(8000) }),
+    fetch(mempoolBase + '/api/v1/fees/recommended', { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) }).then(async response => {
+      if (!response.ok) throw new Error('Mempool returned HTTP ' + response.status);
+      return response.json();
+    }),
+  ]);
+  const unisatFeeRate = unisatResult.status === 'fulfilled' ? selectedFeeRate(unisatResult.value) : null;
+  const mempoolFeeRate = mempoolResult.status === 'fulfilled' ? selectedFeeRate(mempoolResult.value) : null;
+  const availableRates = [unisatFeeRate, mempoolFeeRate].filter(value => value !== null);
+  if (!availableRates.length) throw new Error('Both fee estimators are unavailable or returned invalid data.');
+  return {
+    network: chain,
+    target: 'halfHour',
+    feeRate: Math.max(...availableRates),
+    strategy: availableRates.length === 2 ? 'maximum-of-mempool-and-unisat' : 'single-provider-fallback',
+    sources: {
+      mempool: { feeRate: mempoolFeeRate, available: mempoolFeeRate !== null },
+      unisat: { feeRate: unisatFeeRate, available: unisatFeeRate !== null },
+    },
+    sampledAt: new Date().toISOString(),
+  };
+}
+
 function validWalletAddress(value) {
   return typeof value === 'string' && value.length >= 14 && value.length <= 100 && /^[A-Za-z0-9]+$/.test(value);
 }
@@ -316,18 +349,20 @@ async function inscribeOrder(request, env, corsHeaders) {
   let body;
   try { body = await request.json(); } catch { throw new InscribeRequestError('Corps JSON invalide.'); }
   const filesInput = Array.isArray(body?.files) ? body.files : (body?.file ? [body.file] : []);
-  const feeRate = Number(body?.feeRate);
+  const requestedFeeRate = body?.feeRate == null ? 0 : Number(body.feeRate);
   const outputValue = Number(body?.outputValue ?? 546);
   const chain = body?.chain || 'FRACTAL_BITCOIN_MAINNET';
   if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) throw new InscribeRequestError('Réseau d’inscription non pris en charge.');
   if (!validAddress(body?.receiver) || !validAddress(body?.refundAddress) || !validAddress(body?.userAddress) || !validPubkey(body?.userPubkey)) throw new InscribeRequestError('Adresse de wallet ou clé publique invalide.');
-  if (!Number.isSafeInteger(feeRate) || feeRate < 1 || feeRate > 10000 || outputValue !== 546) throw new InscribeRequestError('Fee rate ou valeur de sortie invalide.');
+  if ((requestedFeeRate !== 0 && (!Number.isSafeInteger(requestedFeeRate) || requestedFeeRate < 1 || requestedFeeRate > 10000)) || outputValue !== 546) throw new InscribeRequestError('Fee rate ou valeur de sortie invalide.');
   if (!filesInput.length || filesInput.length > MAX_INSCRIBE_FILES) throw new InscribeRequestError(`La commande doit contenir de 1 à ${MAX_INSCRIBE_FILES} fichiers.`);
   const files = filesInput.map(validateInscribeFile);
+  const feeEstimate = await recommendedFeeEstimate(chain, env);
+  const feeRate = feeEstimate.feeRate;
   const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
   const upstream = await uniNetwork(base, '/v5/inscribe/order/create', env, { method: 'POST', body: JSON.stringify({ clientId: 'demro-labs-gallery', receiver: body.receiver, refundAddress: body.refundAddress, userAddress: body.userAddress, userPubkey: body.userPubkey, feeRate, outputValue, files }) });
   if (!upstream?.orderId || !upstream?.payAddress || !Number.isSafeInteger(Number(upstream?.amount))) throw new Error('UniSat returned an incomplete inscription order.');
-  return Response.json({ orderId: upstream.orderId, status: upstream.status, payAddress: upstream.payAddress, amount: Number(upstream.amount), network: chain }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  return Response.json({ orderId: upstream.orderId, status: upstream.status, payAddress: upstream.payAddress, amount: Number(upstream.amount), network: chain, feeRate, feeTarget: feeEstimate.target, feeSources: feeEstimate.sources, feeStrategy: feeEstimate.strategy }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
 
 async function inscribeOrderStatus(request, env, corsHeaders) {
@@ -396,6 +431,19 @@ export default {
       return new Response('Forbidden', { status: 403, headers });
     }
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+    if (request.method === 'GET' && url.pathname === '/api/fees/recommended') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const chain = url.searchParams.get('chain') || '';
+      const target = url.searchParams.get('target') || 'halfHour';
+      if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain) || target !== 'halfHour') return Response.json({ error: 'Réseau ou objectif de confirmation invalide.' }, { status: 400, headers: noStore });
+      try {
+        const estimate = await recommendedFeeEstimate(chain, env);
+        return Response.json(estimate, { headers: noStore });
+      } catch {
+        return Response.json({ error: 'Les estimateurs Mempool et UniSat sont temporairement indisponibles. Aucun taux périmé ne sera utilisé.' }, { status: 503, headers: noStore });
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/api/spendable-utxos') {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
       try { return await spendableUtxos(request, env, headers); } catch { return Response.json({ error: 'Live UniSat data is temporarily unavailable.' }, { status: 503, headers: { ...headers, 'Cache-Control': 'no-store' } }); }
