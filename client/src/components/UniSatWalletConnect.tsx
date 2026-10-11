@@ -147,8 +147,6 @@ async function validateMempoolAddress(networkEnum: string, address: string) {
 const MARKETPLACE_URL = "https://fractal.unisat.io/market/collection?collectionId=opunk";
 const INSCRIPTIONS_PAGE_SIZE = 50;
 const INSCRIPTION_ID_PATTERN = /^[a-f0-9]{64}i\d+$/i;
-// Experimental custom PSBT path stays off until user review and wallet/manual validation.
-const CUSTOM_PSBT_TRANSFER_ENABLED = true;
 let pendingTransferRequest: string | null = null;
 
 function sameInscriptionId(left: string, right: string) {
@@ -754,7 +752,7 @@ export function UniSatWalletConnect() {
     setTxid("");
     setFinalReceipt(null);
 
-    if (!provider?.getChain || (!CUSTOM_PSBT_TRANSFER_ENABLED && !provider.sendInscription)) {
+    if (!provider?.getChain || !provider.sendInscription) {
       setTransferError("Update UniSat Wallet to enable inscription transfers.");
       return;
     }
@@ -798,52 +796,9 @@ export function UniSatWalletConnect() {
       const feeRate = await getRecommendedFeeRate(activeNetworkEnum);
       setMempoolFeeRate(feeRate);
       let returnedTxid: string | undefined;
-      if (CUSTOM_PSBT_TRANSFER_ENABLED) {
-        if (!provider.getBitcoinUtxos || !provider.getPublicKey || !provider.signPsbt || !provider.getAccounts) {
-          throw new Error("This UniSat version does not expose the experimental PSBT signing methods.");
-        }
-        const mempool = getMempoolConfig(activeNetworkEnum);
-        if (!mempool) throw new Error("No Mempool endpoint is configured for the active mainnet.");
-        const { sendOrdinalInscriptionWithCustomPsbt } = await import("@/lib/custom-ordinal-transfer");
-        const customResult = await sendOrdinalInscriptionWithCustomPsbt({
-          provider: {
-            getBitcoinUtxos: (cursor, size) => provider.getBitcoinUtxos!(cursor, size),
-            getPublicKey: () => provider.getPublicKey!(),
-            getAccounts: () => provider.getAccounts!(),
-            getChain: () => provider.getChain!(),
-            signPsbt: (psbtHex, options) => provider.signPsbt!(psbtHex, options),
-          },
-          mempool: { ...mempool, chain: activeNetworkEnum === BITCOIN_MAINNET ? "bitcoin" : "fractal" },
-          expectedNetworkEnum: activeNetworkEnum,
-          currentAddress: address,
-          recipientAddress: recipient,
-          selectedInscription: selected,
-          ownedInscriptions: inscriptions,
-          feeRateSatVb: feeRate,
-          beforeBroadcast: async (expectedPublicKeyHex) => {
-            const [chainBeforeBroadcast, accountsBeforeBroadcast, publicKeyBeforeBroadcast] = await Promise.all([
-              provider.getChain!(),
-              provider.getAccounts!(),
-              provider.getPublicKey!(),
-            ]);
-            if (chainBeforeBroadcast.enum !== activeNetworkEnum) {
-              throw new Error("UniSat's network changed during signing; the signed transaction was not broadcast.");
-            }
-            if (accountsBeforeBroadcast[0] !== address || !accountsBeforeBroadcast.includes(address)) {
-              throw new Error("UniSat's account changed during signing; the signed transaction was not broadcast.");
-            }
-            if (publicKeyBeforeBroadcast.toLowerCase() !== expectedPublicKeyHex.toLowerCase()) {
-              throw new Error("UniSat's public key changed during signing; the signed transaction was not broadcast.");
-            }
-          },
-        });
-        returnedTxid = customResult.txid;
-      } else {
-        if (!provider.sendInscription) throw new Error("UniSat does not expose sendInscription.");
-        await ensureFeeBalance(provider, activeNetworkEnum, selected, feeRate);
-        const result = await provider.sendInscription(recipient, selected.inscriptionId, { feeRate });
-        returnedTxid = typeof result === "string" ? result : result?.txid;
-      }
+      await ensureFeeBalance(provider, activeNetworkEnum, selected, feeRate);
+      const result = await provider.sendInscription(recipient, selected.inscriptionId, { feeRate });
+      returnedTxid = typeof result === "string" ? result : result?.txid;
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) {
         throw new Error("UniSat did not return a valid transaction ID. Check the wallet before retrying.");
       }

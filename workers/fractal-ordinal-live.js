@@ -11,6 +11,14 @@ const MAX_PAGE_SIZE = 20;
 const RATE_WINDOW_MS = 60000;
 const RATE_MAX_REQUESTS = 180;
 const rateBuckets = new Map();
+const INSCRIBE_RATE_WINDOW_MS = 60_000;
+const INSCRIBE_RATE_LIMIT = 5;
+const inscribeBuckets = new Map();
+const HUMAN_SESSION_URL = 'https://turnstile-human-verification.servostar23.workers.dev/api/session';
+const HUMAN_ACTIONS = new Set(['ordinal-punks', 'pokedex']);
+const MAX_INSCRIBE_FILES = 100;
+const MAX_INSCRIBE_FILE_BYTES = 365 * 1024;
+const MAX_INSCRIBE_BODY_BYTES = 50_000_000;
 
 const SECURITY_HEADERS = {
   'Content-Security-Policy': "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
@@ -26,7 +34,7 @@ function cors(request) {
   const headers = {
     ...SECURITY_HEADERS,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Accept, Content-Type',
+    'Access-Control-Allow-Headers': 'Accept, Content-Type, X-Human-Action, X-Human-Proof',
     'Access-Control-Max-Age': '600',
     'Vary': 'Origin',
   };
@@ -55,6 +63,36 @@ function isRateLimited(request) {
   if (bucket.count >= RATE_MAX_REQUESTS) return true;
   bucket.count += 1;
   return false;
+}
+
+function isInscribeRateLimited(request) {
+  const now = Date.now();
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  let bucket = inscribeBuckets.get(ip);
+  if (!bucket || bucket.expiresAt <= now) {
+    if (inscribeBuckets.size >= 10000) {
+      for (const [key, value] of inscribeBuckets) if (value.expiresAt <= now) inscribeBuckets.delete(key);
+      if (inscribeBuckets.size >= 10000) return true;
+    }
+    bucket = { count: 0, expiresAt: now + INSCRIBE_RATE_WINDOW_MS };
+    inscribeBuckets.set(ip, bucket);
+  }
+  if (bucket.count >= INSCRIBE_RATE_LIMIT) return true;
+  bucket.count += 1;
+  return false;
+}
+
+async function verifyHumanSession(action, proof) {
+  if (!HUMAN_ACTIONS.has(action) || typeof proof !== 'string' || proof.length < 1 || proof.length > 2048) return false;
+  const response = await fetch(HUMAN_SESSION_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://demro-labs.github.io' },
+    body: JSON.stringify({ action, proof }),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!response.ok) throw new Error('Cloudflare verification service unavailable');
+  const result = await response.json();
+  return result?.valid === true;
 }
 
 function parseBoundedInteger(raw, fallback, maximum) {
@@ -256,27 +294,51 @@ function validAddress(value) {
 }
 
 function validPubkey(value) {
-  return typeof value === 'string' && /^(?:02|03|04)[a-f0-9]+$/i.test(value) && value.length <= 200;
+  return typeof value === 'string' && (/^(?:02|03)[a-f0-9]{64}$/i.test(value) || /^04[a-f0-9]{128}$/i.test(value));
+}
+
+class InscribeRequestError extends Error {
+  constructor(message, status = 400) { super(message); this.status = status; }
+}
+
+function validateInscribeFile(file) {
+  if (!file || typeof file.filename !== 'string' || file.filename.length < 1 || file.filename.length > 255 || /[\/\\\u0000-\u001f\u007f]/.test(file.filename)) throw new InscribeRequestError('Nom de fichier invalide.');
+  if (typeof file.dataURL !== 'string' || file.dataURL.length > 520000 || !/^data:[^,]{1,200};base64,/.test(file.dataURL)) throw new InscribeRequestError('Le fichier doit être fourni comme URL de données base64 valide.');
+  const encoded = file.dataURL.slice(file.dataURL.indexOf(',') + 1);
+  if (encoded.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw new InscribeRequestError('Encodage base64 du fichier invalide.');
+  const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
+  const decodedSize = (encoded.length / 4) * 3 - padding;
+  if (decodedSize < 1 || decodedSize > MAX_INSCRIBE_FILE_BYTES) throw new InscribeRequestError('Chaque fichier doit mesurer entre 1 octet et 365 KiB.');
+  return { filename: file.filename, dataURL: file.dataURL };
 }
 
 async function inscribeOrder(request, env, corsHeaders) {
-  const body = await request.json();
-  const file = body?.file;
+  let body;
+  try { body = await request.json(); } catch { throw new InscribeRequestError('Corps JSON invalide.'); }
+  const filesInput = Array.isArray(body?.files) ? body.files : (body?.file ? [body.file] : []);
   const feeRate = Number(body?.feeRate);
   const outputValue = Number(body?.outputValue ?? 546);
-  if (!validAddress(body?.receiver) || !validAddress(body?.refundAddress) || !validAddress(body?.userAddress) || !validPubkey(body?.userPubkey)) throw new Error('Invalid wallet address or public key.');
-  if (!Number.isSafeInteger(feeRate) || feeRate < 1 || feeRate > 10000 || outputValue !== 546) throw new Error('Invalid inscription fee or output value.');
-  if (!file || typeof file.filename !== 'string' || file.filename.length < 1 || file.filename.length > 120 || typeof file.dataURL !== 'string' || file.dataURL.length > 520000) throw new Error('Invalid inscription file.');
-  if (!/^data:[^;,]+;base64,[A-Za-z0-9+/=]+$/.test(file.dataURL)) throw new Error('The file must be sent as a base64 data URL.');
-  const upstream = await uni('/v5/inscribe/order/create', env, { method: 'POST', body: JSON.stringify({ clientId: 'demro-labs-gallery', receiver: body.receiver, refundAddress: body.refundAddress, userAddress: body.userAddress, userPubkey: body.userPubkey, feeRate, outputValue, files: [{ filename: file.filename, dataURL: file.dataURL }] }) });
-  return Response.json({ orderId: upstream.orderId, status: upstream.status, payAddress: upstream.payAddress, amount: upstream.amount }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  const chain = body?.chain || 'FRACTAL_BITCOIN_MAINNET';
+  if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) throw new InscribeRequestError('Réseau d’inscription non pris en charge.');
+  if (!validAddress(body?.receiver) || !validAddress(body?.refundAddress) || !validAddress(body?.userAddress) || !validPubkey(body?.userPubkey)) throw new InscribeRequestError('Adresse de wallet ou clé publique invalide.');
+  if (!Number.isSafeInteger(feeRate) || feeRate < 1 || feeRate > 10000 || outputValue !== 546) throw new InscribeRequestError('Fee rate ou valeur de sortie invalide.');
+  if (!filesInput.length || filesInput.length > MAX_INSCRIBE_FILES) throw new InscribeRequestError(`La commande doit contenir de 1 à ${MAX_INSCRIBE_FILES} fichiers.`);
+  const files = filesInput.map(validateInscribeFile);
+  const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
+  const upstream = await uniNetwork(base, '/v5/inscribe/order/create', env, { method: 'POST', body: JSON.stringify({ clientId: 'demro-labs-gallery', receiver: body.receiver, refundAddress: body.refundAddress, userAddress: body.userAddress, userPubkey: body.userPubkey, feeRate, outputValue, files }) });
+  if (!upstream?.orderId || !upstream?.payAddress || !Number.isSafeInteger(Number(upstream?.amount))) throw new Error('UniSat returned an incomplete inscription order.');
+  return Response.json({ orderId: upstream.orderId, status: upstream.status, payAddress: upstream.payAddress, amount: Number(upstream.amount), network: chain }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
 
 async function inscribeOrderStatus(request, env, corsHeaders) {
-  const orderId = new URL(request.url).searchParams.get('orderId') || '';
-  if (!/^[A-Za-z0-9_-]{6,160}$/.test(orderId)) return Response.json({ error: 'Invalid order ID.' }, { status: 400, headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
-  const result = await uni('/v5/inscribe/order/' + encodeURIComponent(orderId), env);
-  return Response.json({ orderId: result.orderId, status: result.status, amount: result.amount, balance: result.balance, files: Array.isArray(result.files) ? result.files.map(file => ({ filename: file.filename, size: file.size, inscriptionId: file.inscriptionId, txid: file.txid, status: file.status })) : [] }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  const url = new URL(request.url);
+  const orderId = url.searchParams.get('orderId') || '';
+  const chain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
+  if (!/^[A-Za-z0-9_-]{6,160}$/.test(orderId)) return Response.json({ error: 'Identifiant de commande invalide.' }, { status: 400, headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Réseau d’inscription non pris en charge.' }, { status: 400, headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
+  const result = await uniNetwork(base, '/v5/inscribe/order/' + encodeURIComponent(orderId), env);
+  return Response.json({ orderId: result.orderId, status: result.status, amount: result.amount, balance: result.balance, network: chain, files: Array.isArray(result.files) ? result.files.map(file => ({ filename: file.filename, size: file.size, inscriptionId: file.inscriptionId, txid: file.txid, inscriptionTxid: file.inscriptionTxid, status: file.status })) : [] }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
 
 async function edgeCachedResponse(request, headers, freshSeconds, staleSeconds, producer) {
@@ -339,8 +401,25 @@ export default {
       try { return await spendableUtxos(request, env, headers); } catch { return Response.json({ error: 'Live UniSat data is temporarily unavailable.' }, { status: 503, headers: { ...headers, 'Cache-Control': 'no-store' } }); }
     }
     if (request.method === 'POST' && url.pathname === '/api/inscribe/order') {
-      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
-      try { return await inscribeOrder(request, env, headers); } catch { return Response.json({ error: 'Unable to create the UniSat inscription order.' }, { status: 502, headers: { ...headers, 'Cache-Control': 'no-store' } }); }
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (origin !== 'https://demro-labs.github.io') return Response.json({ error: 'Origine non autorisée pour créer une commande.' }, { status: 403, headers: noStore });
+      if (isRateLimited(request) || isInscribeRateLimited(request)) return Response.json({ error: 'Trop de commandes. Réessayez dans une minute.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      if (!(request.headers.get('Content-Type') || '').toLowerCase().includes('application/json')) return Response.json({ error: 'Content-Type JSON requis.' }, { status: 415, headers: noStore });
+      const contentLength = Number(request.headers.get('Content-Length') || 0);
+      if (Number.isFinite(contentLength) && contentLength > MAX_INSCRIBE_BODY_BYTES) return Response.json({ error: 'Le lot dépasse la taille maximale autorisée.' }, { status: 413, headers: noStore });
+      const action = request.headers.get('X-Human-Action') || '';
+      const proof = request.headers.get('X-Human-Proof') || '';
+      try {
+        if (!await verifyHumanSession(action, proof)) return Response.json({ error: 'Terminez la vérification Cloudflare du site avant de créer une commande.' }, { status: 403, headers: noStore });
+      } catch {
+        return Response.json({ error: 'Le service de vérification Cloudflare est temporairement indisponible.' }, { status: 503, headers: noStore });
+      }
+      try { return await inscribeOrder(request, env, headers); }
+      catch (error) {
+        if (error instanceof InscribeRequestError) return Response.json({ error: error.message }, { status: error.status, headers: noStore });
+        console.warn('UniSat inscription order creation failed');
+        return Response.json({ error: 'UniSat n’a pas pu créer la commande. Vérifiez le réseau, le fichier et le fee rate, puis réessayez.' }, { status: 502, headers: noStore });
+      }
     }
     if (request.method === 'GET' && url.pathname === '/api/inscribe/order') {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });

@@ -5,11 +5,12 @@ import worker from './fractal-ordinal-live.js';
 const base = 'https://fractal-ordinal-live.servostar23.workers.dev';
 const allowedOrigin = 'https://demro-labs.github.io';
 
-function makeRequest(path, { method = 'GET', origin = allowedOrigin, ip = '192.0.2.10' } = {}) {
-  const headers = {};
-  if (origin) headers.Origin = origin;
-  if (ip) headers['CF-Connecting-IP'] = ip;
-  return new Request(base + path, { method, headers });
+function makeRequest(path, { method = 'GET', origin = allowedOrigin, ip = '192.0.2.10', headers: extraHeaders = {}, body } = {}) {
+  const headers = new Headers(extraHeaders);
+  if (origin) headers.set('Origin', origin);
+  if (ip) headers.set('CF-Connecting-IP', ip);
+  if (body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  return new Request(base + path, { method, headers, ...(body === undefined ? {} : { body }) });
 }
 
 test('responses contain API security headers and allow the site origin', async () => {
@@ -69,6 +70,7 @@ test('supports CORS preflight only for an allowed origin', async () => {
   const response = await worker.fetch(makeRequest('/api/market', { method: 'OPTIONS' }), {});
   assert.equal(response.status, 204);
   assert.equal(response.headers.get('access-control-allow-methods'), 'GET, POST, OPTIONS');
+  assert.match(response.headers.get('access-control-allow-headers') || '', /X-Human-Proof/i);
 });
 
 test('rejects methods other than GET, POST and OPTIONS', async () => {
@@ -104,6 +106,87 @@ test('applies the per-isolate request ceiling and a retry hint', async () => {
   const limited = await worker.fetch(makeRequest('/api/market?collectionId=invalid', { ip }), {});
   assert.equal(limited.status, 429);
   assert.equal(limited.headers.get('retry-after'), '60');
+});
+
+
+
+test('requires a verified Cloudflare session before creating a V5 order and supports file batches', async () => {
+  const previousFetch = globalThis.fetch;
+  let createUrl = '';
+  let upstreamBody;
+  let authHeader = '';
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url === 'https://turnstile-human-verification.servostar23.workers.dev/api/session') {
+      const session = JSON.parse(init.body);
+      assert.equal(session.action, 'ordinal-punks');
+      assert.equal(session.proof, 'signed-session-proof');
+      return Response.json({ valid: true });
+    }
+    createUrl = url;
+    authHeader = new Headers(init.headers).get('Authorization') || '';
+    upstreamBody = JSON.parse(init.body);
+    return Response.json({ code: 0, data: { orderId: 'order-test-123', status: 'pending', payAddress: 'bc1qtestaddress0000000000000000000000000', amount: 12345 } });
+  };
+  try {
+    const body = JSON.stringify({
+      receiver: 'bc1qtestaddress0000000000000000000000000',
+      refundAddress: 'bc1qtestaddress0000000000000000000000000',
+      userAddress: 'bc1qtestaddress0000000000000000000000000',
+      userPubkey: '02' + 'a'.repeat(64),
+      feeRate: 5,
+      outputValue: 546,
+      chain: 'FRACTAL_BITCOIN_MAINNET',
+      files: [
+        { filename: 'one.txt', dataURL: 'data:text/plain;base64,QQ==' },
+        { filename: 'two.txt', dataURL: 'data:text/plain;base64,Qg==' },
+      ],
+    });
+    const response = await worker.fetch(makeRequest('/api/inscribe/order', {
+      method: 'POST', ip: '192.0.2.221',
+      headers: { 'X-Human-Action': 'ordinal-punks', 'X-Human-Proof': 'signed-session-proof' },
+      body,
+    }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.orderId, 'order-test-123');
+    assert.match(createUrl, /^https:\/\/open-api-fractal\.unisat\.io\/v5\/inscribe\/order\/create$/);
+    assert.equal(authHeader, 'Bearer test-only');
+    assert.equal(upstreamBody.files.length, 2);
+    assert.equal(upstreamBody.clientId, 'demro-labs-gallery');
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('rejects an Inscribe request without a valid session before touching the UniSat API', async () => {
+  const previousFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async (input) => {
+    if (String(input).includes('turnstile-human-verification')) return Response.json({ valid: false });
+    upstreamCalls += 1;
+    return Response.json({ code: 0, data: {} });
+  };
+  try {
+    const response = await worker.fetch(makeRequest('/api/inscribe/order', {
+      method: 'POST', ip: '192.0.2.222',
+      body: JSON.stringify({}),
+    }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(response.status, 403);
+    assert.equal(upstreamCalls, 0);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('routes Bitcoin order status to the Bitcoin API rather than Fractal', async () => {
+  const previousFetch = globalThis.fetch;
+  let statusUrl = '';
+  globalThis.fetch = async (input) => {
+    statusUrl = String(input);
+    return Response.json({ code: 0, data: { orderId: 'order-test-456', status: 'pending', files: [] } });
+  };
+  try {
+    const response = await worker.fetch(makeRequest('/api/inscribe/order?orderId=order-test-456&chain=BITCOIN_MAINNET', { ip: '192.0.2.223' }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(response.status, 200);
+    assert.match(statusUrl, /^https:\/\/open-api\.unisat\.io\/v5\/inscribe\/order\/order-test-456$/);
+  } finally { globalThis.fetch = previousFetch; }
 });
 
 test('caps the per-isolate client table under rotating IPs', async () => {
