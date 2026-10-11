@@ -61,7 +61,6 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
   const [historySortKey, setHistorySortKey] = useState<HistorySortKey>("date");
   const [historySortDirection, setHistorySortDirection] = useState<"asc" | "desc">("desc");
   const [finalReceipt, setFinalReceipt] = useState<MempoolReceipt | null>(null);
-  const supported = chain?.enum === "BITCOIN_MAINNET" || chain?.enum === "FRACTAL_BITCOIN_MAINNET";
   const totalBytes = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
   const totalInscribed = orderFiles.filter(file => file.inscriptionId).length;
   const historyGroups = useMemo(() => {
@@ -96,7 +95,7 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
     try { localStorage.setItem(historyStorageKey, JSON.stringify(merged)); } catch { /* private mode or storage quota */ }
   };
   const refreshWallet = async () => { try { const [accounts, currentChain] = await Promise.all([window.unisat?.getAccounts?.(), window.unisat?.getChain?.()]); setAddress(accounts?.[0] ?? ""); setChain(currentChain ?? null); } catch { setAddress(""); setChain(null); } };
-  const loadLiveWalletData = async () => {
+  const loadLiveWalletData = async (networkEnum = chain?.enum) => {
     const provider = window.unisat;
     if (!provider) return null;
     const publicKeyResult = await Promise.allSettled([provider.getPublicKey?.()]);
@@ -105,7 +104,7 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
     const balance = balanceResult[0]?.status === "fulfilled" ? balanceResult[0].value as { available?: number; confirmed?: number; total?: number } : null;
     const available = balance?.available ?? balance?.confirmed ?? null;
     const total = balance?.total ?? available;
-    const data = { publicKey, available: typeof available === "number" ? available : null, total: typeof total === "number" ? total : null, asset: chain?.enum === "FRACTAL_BITCOIN_MAINNET" ? "FB" : "BTC", refreshedAt: new Date().toISOString() };
+    const data = { publicKey, available: typeof available === "number" ? available : null, total: typeof total === "number" ? total : null, asset: networkEnum === "FRACTAL_BITCOIN_MAINNET" ? "FB" : "BTC", refreshedAt: new Date().toISOString() };
     setLiveWallet(data);
     return data;
   };
@@ -136,24 +135,37 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
   const prepareOrder = async () => {
     const provider = window.unisat; setMessage(""); setStatus(""); setReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]);
     if (!provider?.getPublicKey) return setMessage("UniSat doit être connecté et compatible avec getPublicKey.");
-    if (!address || !supported || !chain?.enum) return setMessage("Connectez UniSat sur Bitcoin mainnet ou Fractal Bitcoin mainnet.");
     if (!files.length) return setMessage("Ajoutez au moins un fichier à inscrire.");
     setStage("preparing");
     try {
+      const [accounts, currentChain] = await Promise.all([
+        provider.getAccounts ? provider.getAccounts() : Promise.resolve(undefined),
+        provider.getChain ? provider.getChain() : Promise.resolve(undefined),
+      ]);
+      const activeAddress = provider.getAccounts ? accounts?.[0] ?? "" : address;
+      const activeChain = provider.getChain ? currentChain ?? null : chain;
+      setAddress(activeAddress);
+      setChain(activeChain);
+      const activeChainEnum = activeChain?.enum;
+      if (!activeAddress) { setStage("idle"); return setMessage("UniSat ne renvoie aucun compte connecté. Reconnectez votre adresse dans le wallet puis réessayez."); }
+      if (activeChainEnum !== "BITCOIN_MAINNET" && activeChainEnum !== "FRACTAL_BITCOIN_MAINNET") {
+        setStage("idle");
+        return setMessage("Réseau UniSat non pris en charge. Sélectionnez Bitcoin mainnet ou Fractal Bitcoin mainnet dans le wallet.");
+      }
       const [encodedFiles, publicKey] = await Promise.all([Promise.all(files.map(async file => ({ filename: file.name, dataURL: await readAsDataUrl(file) }))), provider.getPublicKey()]);
-      const feeEstimate = await getRecommendedFeeEstimate(chain.enum);
+      const feeEstimate = await getRecommendedFeeEstimate(activeChainEnum);
       const liveFeeRate = feeEstimate.feeRate;
-      await loadLiveWalletData();
+      await loadLiveWalletData(activeChainEnum);
       let response: Response;
       try {
-        response = await fetch(`${API_BASE}/api/inscribe/order`, { mode: "cors", method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ receiver: address, refundAddress: address, userAddress: address, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: chain.enum, files: encodedFiles }) });
+        response = await fetch(`${API_BASE}/api/inscribe/order`, { mode: "cors", method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ receiver: activeAddress, refundAddress: activeAddress, userAddress: activeAddress, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: activeChainEnum, files: encodedFiles }) });
       } catch {
         throw new Error("Le service d’inscription UniSat est inaccessible. Vérifiez la connexion réseau, puis réessayez sans fermer le wallet.");
       }
       const created = await response.json() as { orderId?: string; payAddress?: string; amount?: number; feeRate?: number; feeSources?: FeeEstimate["sources"]; feeStrategy?: FeeEstimate["strategy"]; error?: string };
       if (!response.ok || !created.orderId || !created.payAddress || !Number.isSafeInteger(created.amount) || !Number.isSafeInteger(created.feeRate) || Number(created.feeRate) < 1) throw new Error(created.error || "UniSat n’a pas créé la commande avec un fee rate vérifiable.");
       const feeSourceLabel = describeFeeSources(created.feeStrategy ?? feeEstimate.strategy, created.feeSources ?? feeEstimate.sources);
-      setReceipt({ orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: files.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })), feeRate: Number(created.feeRate), feeSourceLabel, chain: chain.enum, createdAt: new Date().toISOString() }); setStage("awaiting-approval"); setMessage(`Taux live ${feeSourceLabel}. Vérifiez le réseau, le montant et les frais, puis approuvez dans UniSat.`);
+      setReceipt({ orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: files.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })), feeRate: Number(created.feeRate), feeSourceLabel, chain: activeChainEnum, createdAt: new Date().toISOString() }); setStage("awaiting-approval"); setMessage(`Taux live ${feeSourceLabel}. Vérifiez le réseau, le montant et les frais, puis approuvez dans UniSat.`);
     } catch (error) { setStage("idle"); setMessage(error instanceof Error ? error.message : "Impossible de préparer l’inscription."); }
   };
 
