@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, Wallet } from "lucide-react";
 import { fetchLiveInscription, type LiveInscription } from "@/lib/live";
 import { describeFeeSources, getRecommendedFeeEstimate } from "@/lib/mempool";
+import { sendOrdinalInscriptionWithCustomPsbt, type UniSatCustomTransferProvider } from "@/lib/custom-ordinal-transfer";
 
 type UniSatChain = {
   enum?: string;
@@ -726,8 +727,13 @@ export function UniSatWalletConnect() {
     setTxid("");
     setFinalReceipt(null);
 
-    if (!provider?.getChain || !provider.sendInscription) {
+    const mobile = isMobileBrowser();
+    if (!provider?.getChain || (!mobile && !provider.sendInscription)) {
       setTransferError("Update UniSat Wallet to enable inscription transfers.");
+      return;
+    }
+    if (mobile && (!provider.getBitcoinUtxos || !provider.getAccounts || !provider.getPublicKey || !provider.signPsbt)) {
+      setTransferError("Update UniSat Wallet to enable secure mobile transfers with PSBT signing.");
       return;
     }
     if (!address || !isSupportedMainnet(chain?.enum)) {
@@ -772,9 +778,28 @@ export function UniSatWalletConnect() {
       setFeeSourceLabel(describeFeeSources(feeEstimate.strategy, feeEstimate.sources));
       setMempoolFeeRate(feeRate);
       let returnedTxid: string | undefined;
-      await ensureFeeBalance(provider, activeNetworkEnum, selected, feeRate);
-      const result = await provider.sendInscription(recipient, selected.inscriptionId, { feeRate });
-      returnedTxid = typeof result === "string" ? result : result?.txid;
+      if (mobile) {
+        const mempool = getMempoolConfig(activeNetworkEnum)!;
+        const result = await sendOrdinalInscriptionWithCustomPsbt({
+          provider: provider as UniSatCustomTransferProvider,
+          mempool: {
+            api: mempool.api,
+            label: mempool.label,
+            chain: activeNetworkEnum === BITCOIN_MAINNET ? "bitcoin" : "fractal",
+          },
+          expectedNetworkEnum: activeNetworkEnum,
+          currentAddress: address,
+          recipientAddress: recipient,
+          selectedInscription: selected,
+          ownedInscriptions: inscriptions,
+          feeRateSatVb: feeRate,
+        });
+        returnedTxid = result.txid;
+      } else {
+        await ensureFeeBalance(provider, activeNetworkEnum, selected, feeRate);
+        const result = await provider.sendInscription!(recipient, selected.inscriptionId, { feeRate });
+        returnedTxid = typeof result === "string" ? result : result?.txid;
+      }
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) {
         throw new Error("UniSat did not return a valid transaction ID. Check the wallet before retrying.");
       }
