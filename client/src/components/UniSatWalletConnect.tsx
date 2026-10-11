@@ -663,6 +663,31 @@ export function UniSatWalletConnect() {
     return () => window.clearInterval(timer);
   }, [address, chain?.enum, inscriptions.length, inscriptionTotal]);
 
+  const refreshConfirmedLiveData = async (transactionId: string, inscriptionId: string, networkEnum: string, run: number) => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (run !== trackingRunRef.current) return;
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 8_000);
+      try {
+        const liveAfter = await fetchLiveInscription(inscriptionId, controller.signal, networkEnum, true);
+        if (run !== trackingRunRef.current) return;
+        setFinalReceipt(current => current && current.txid === transactionId
+          ? { ...current, status: "confirmed", message: "Transaction confirmée on-chain. Données live actualisées.", checkedAt: new Date().toISOString(), liveAfter }
+          : current);
+        return;
+      } catch {
+        // Keep Mempool confirmation authoritative while the optional UniSat indexer is retried.
+      } finally {
+        window.clearTimeout(timeout);
+      }
+      if (attempt < 4) await new Promise(resolve => window.setTimeout(resolve, 5_000));
+    }
+    if (run !== trackingRunRef.current) return;
+    setFinalReceipt(current => current && current.txid === transactionId
+      ? { ...current, status: "confirmed", message: "Transaction confirmée on-chain. Les données UniSat live restent indisponibles; la confirmation Mempool est conservée.", checkedAt: new Date().toISOString() }
+      : current);
+  };
+
   const trackTransaction = async (transactionId: string, networkEnum?: string, liveBefore?: LiveInscription | null) => {
     const config = MEMPOOL_ENDPOINTS[networkEnum ?? FRACTAL_MAINNET] ?? MEMPOOL_ENDPOINTS[FRACTAL_MAINNET];
     const run = ++trackingRunRef.current;
@@ -685,11 +710,11 @@ export function UniSatWalletConnect() {
         if (response.ok) {
           const status = (await response.json()) as { confirmed?: boolean; block_height?: number };
           if (status.confirmed) {
-            const liveAfter = liveBefore ? await fetchLiveInscription(liveBefore.inscriptionId).catch(() => null) : null;
             setMempoolStatus("confirmed");
             setMempoolMessage("Transaction confirmed on-chain.");
             setMempoolBlockHeight(typeof status.block_height === "number" ? status.block_height : null);
-            setFinalReceipt(current => current ? { ...current, status: "confirmed", message: "Transaction confirmée on-chain.", blockHeight: typeof status.block_height === "number" ? status.block_height : null, checkedAt: new Date().toISOString(), liveAfter } : current);
+            setFinalReceipt(current => current ? { ...current, status: "confirmed", message: liveBefore ? "Transaction confirmée on-chain. Synchronisation des données UniSat en cours…" : "Transaction confirmée on-chain.", blockHeight: typeof status.block_height === "number" ? status.block_height : null, checkedAt: new Date().toISOString() } : current);
+            if (liveBefore) void refreshConfirmedLiveData(transactionId, liveBefore.inscriptionId, networkEnum ?? FRACTAL_MAINNET, run);
             return;
           }
           setMempoolStatus("pending");
@@ -768,7 +793,7 @@ export function UniSatWalletConnect() {
         }
       }
 
-      const liveBefore = transferLiveData ?? await fetchLiveInscription(selected.inscriptionId);
+      const liveBefore = transferLiveData ?? await fetchLiveInscription(selected.inscriptionId, undefined, activeNetworkEnum);
       setTransferLiveData(liveBefore);
       await validateMempoolAddress(activeNetworkEnum, recipient);
       const feeEstimate = await getRecommendedFeeEstimate(activeNetworkEnum);
@@ -839,9 +864,9 @@ export function UniSatWalletConnect() {
     if (!selectedInscriptionId) { setTransferLiveData(null); setTransferLiveError(""); return; }
     let active = true;
     setTransferLiveLoading(true); setTransferLiveError("");
-    void fetchLiveInscription(selectedInscriptionId).then(data => { if (active) setTransferLiveData(data); }).catch(error => { if (active) setTransferLiveError(error instanceof Error ? error.message : "Live UniSat data unavailable."); }).finally(() => { if (active) setTransferLiveLoading(false); });
+    void fetchLiveInscription(selectedInscriptionId, undefined, chain?.enum ?? FRACTAL_MAINNET).then(data => { if (active) setTransferLiveData(data); }).catch(error => { if (active) setTransferLiveError(error instanceof Error ? error.message : "Live UniSat data unavailable."); }).finally(() => { if (active) setTransferLiveLoading(false); });
     return () => { active = false; };
-  }, [selectedInscriptionId]);
+  }, [selectedInscriptionId, chain?.enum]);
   const uniScanUrl = chain?.enum === FRACTAL_MAINNET
     ? `https://uniscan.cc/fractal/address/${encodeURIComponent(address ?? "")}`
     : `https://uniscan.cc/bitcoin/address/${encodeURIComponent(address ?? "")}`;
