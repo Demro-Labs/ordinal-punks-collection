@@ -942,7 +942,7 @@ export default function Home() {
                           </a>
                           <button
                             type="button"
-                            className="mt-2 inline-flex items-center gap-1.5 border border-[#c8663d] px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#aa4f2f] transition-colors hover:bg-[#c8663d]/10"
+                            className="mt-3 inline-flex min-h-12 items-center justify-center gap-2 border border-[#d99a54] px-5 font-mono text-xs uppercase tracking-[0.14em] text-[#f2bd63] transition-colors hover:bg-[#d99a54]/10"
                             onClick={event => {
                               event.stopPropagation();
                               requestUniSatTransfer(record.id);
