@@ -226,22 +226,18 @@ async function ensureFeeBalance(
 
 const WALLET_REQUEST_TIMEOUT_MS = 30_000;
 const UNISAT_MOBILE_APP_NAME = "Ordinal Punks";
-const UNISAT_MOBILE_CONTEXT_PARAM = "unisatMobile";
 
 function isMobileBrowser() {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
-function isUniSatMobileContext() {
-  return new URLSearchParams(window.location.search).get(UNISAT_MOBILE_CONTEXT_PARAM) === "1";
-}
-
 function openUniSatMobileWallet() {
   if (!isMobileBrowser()) return false;
-  // UniSat supports mobile dApps in its in-app browser via the official openDapp flow.
-  const dappUrl = new URL(window.location.href);
-  dappUrl.searchParams.set(UNISAT_MOBILE_CONTEXT_PARAM, "1");
-  const data = btoa(JSON.stringify([dappUrl.toString()]));
+  // UniSat's mobile connect deeplink returns to a custom app scheme, which
+  // Safari/Chrome cannot receive. The official openDapp flow loads this site
+  // inside UniSat's in-app browser where window.unisat is injected.
+  const dappUrl = window.location.href;
+  const data = btoa(JSON.stringify([dappUrl]));
   const query = new URLSearchParams({
     method: "openDapp",
     from: UNISAT_MOBILE_APP_NAME,
@@ -730,8 +726,8 @@ export function UniSatWalletConnect() {
     setTxid("");
     setFinalReceipt(null);
 
-    if (isMobileBrowser() && !isUniSatMobileContext()) {
-      setTransferError("Open this page in UniSat's in-app browser with the button below. Safari/Chrome mobile pages cannot use UniSat's supported dApp signing context; no signature or broadcast was requested.");
+    if (isMobileBrowser()) {
+      setTransferError("UniSat mobile returned `toAddress` as undefined. Mobile transfer is paused; no signature or broadcast will be requested. Use UniSat's native desktop transfer. Inscribe is unaffected.");
       return;
     }
     if (!provider?.getChain || !provider.sendInscription) {
@@ -1024,24 +1020,15 @@ export function UniSatWalletConnect() {
                 />
                 <span>I checked this inscription and destination. I understand the on-chain transfer cannot be reversed.</span>
               </label>
-              {isMobileBrowser() && !isUniSatMobileContext() && (
-                <button
-                  type="button"
-                  onClick={() => openUniSatMobileWallet()}
-                  className="mt-3 border border-[#3b434d] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#d9d3c6] hover:border-[#d99a54]"
-                >
-                  Open this page in UniSat
-                </button>
-              )}
               <button
                 type="button"
                 onClick={() => void sendSelectedInscription()}
-                disabled={(isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable)) || !confirmed || transferBusy || busy || transferLiveLoading}
+                disabled={isMobileBrowser() || !confirmed || transferBusy || busy || transferLiveLoading}
                 className="mt-3 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {isMobileBrowser() && !isUniSatMobileContext() ? "Open in UniSat first" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
+                {isMobileBrowser() ? "Mobile transfer paused — UniSat error" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
               </button>
-              {isMobileBrowser() && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">Mobile transfers use only UniSat’s native `sendInscription` approval in its in-app browser. No custom PSBT is constructed; review the destination and transaction in UniSat before approving.</p>}
+              {isMobileBrowser() && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">UniSat mobile failed to provide the documented `toAddress` parameter. The site will not retry with a custom PSBT. Use the native desktop transfer; Inscribe is unaffected.</p>}
             </div>
           )}
           {inscriptionCursor < inscriptionTotal && (
