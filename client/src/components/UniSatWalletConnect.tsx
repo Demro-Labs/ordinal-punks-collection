@@ -14,6 +14,7 @@ type UniSatInscription = {
   output?: string;
   content?: string;
   preview?: string;
+  contentType?: string;
   outputValue?: string | number;
   offset?: string | number;
 };
@@ -165,6 +166,28 @@ export function requestUniSatTransfer(inscriptionId: string) {
 function shortAddress(address: string) {
   return `${address.slice(0, 8)}…${address.slice(-6)}`;
 }
+const FRACTAL_STATIC_BASE = "https://fractal-static.unisat.space";
+function absoluteInscriptionUrl(value: string | undefined) {
+  if (!value) return "";
+  if (value.startsWith("data:") || value.startsWith("blob:") || /^https?:\/\//i.test(value)) return value;
+  if (value.startsWith("/")) return `${FRACTAL_STATIC_BASE}${value}`;
+  return "";
+}
+function inscriptionImageCandidates(item: UniSatInscription, localImage?: string) {
+  return [
+    localImage ?? "",
+    `${FRACTAL_STATIC_BASE}/content/${item.inscriptionId}`,
+    absoluteInscriptionUrl(item.preview),
+    absoluteInscriptionUrl(item.content),
+  ].filter((value, index, values) => value && values.indexOf(value) === index);
+}
+function InscriptionPreview({ item, localImage }: { item: UniSatInscription; localImage?: string }) {
+  const candidates = inscriptionImageCandidates(item, localImage);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const source = candidates[candidateIndex];
+  if (!source) return <div className="flex h-full items-center justify-center px-3 text-center font-mono text-[9px] uppercase text-[#718092]">Image preview unavailable</div>;
+  return <img src={source} alt={`Preview ${item.inscriptionId}`} className="h-full w-full object-contain" loading="lazy" onError={() => setCandidateIndex(index => index + 1)} />;
+}
 
 async function ensureFeeBalance(
   provider: UniSatProvider,
@@ -312,11 +335,30 @@ export function UniSatWalletConnect() {
   const [mempoolFeeRate, setMempoolFeeRate] = useState<number | null>(null);
   const trackingRunRef = useRef(0);
   const autoLoadKeyRef = useRef("");
+  const [localInscriptionImages, setLocalInscriptionImages] = useState<Record<string, string>>({});
+  const [walletInscriptionsPage, setWalletInscriptionsPage] = useState(0);
+  const destinationInputRef = useRef<HTMLInputElement>(null);
   const [walletDashboard, setWalletDashboard] = useState<{
     confirmed: number | null; unconfirmed: number | null; total: number | null;
     available: number | null; unavailable: number | null; publicKey: string | null;
     utxoCount: number; utxoSats: number; refreshedAt: string;
   } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`${import.meta.env.BASE_URL}assets/ordinal-punks/collection-data.json`, { cache: "force-cache" })
+      .then(response => response.ok ? response.json() as Promise<Array<{ id?: string; fileName?: string }>> : [])
+      .then(records => {
+        if (!active) return;
+        const images: Record<string, string> = {};
+        for (const record of records) {
+          if (record.id && record.fileName) images[record.id.toLowerCase()] = `${import.meta.env.BASE_URL}assets/ordinal-punks/images/${encodeURIComponent(record.fileName)}`;
+        }
+        setLocalInscriptionImages(images);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   const resetMempoolTracking = () => {
     trackingRunRef.current += 1;
@@ -407,6 +449,7 @@ export function UniSatWalletConnect() {
     setInscriptionsLoaded(false);
     setInscriptionTotal(0);
     setInscriptionCursor(0);
+    setWalletInscriptionsPage(0);
     setSelectedInscriptionId("");
     setConfirmed(false);
     setTxid("");
@@ -785,6 +828,25 @@ export function UniSatWalletConnect() {
 
   const connectedToFractal = Boolean(address && isSupportedMainnet(chain?.enum));
   const currentNetwork = getMempoolConfig(chain?.enum);
+  const walletPageSize = 10;
+  const walletPageCount = Math.max(1, Math.ceil(inscriptions.length / walletPageSize));
+  const walletPageItems = inscriptions.slice(walletInscriptionsPage * walletPageSize, walletInscriptionsPage * walletPageSize + walletPageSize);
+  useEffect(() => {
+    if (!selectedInscriptionId) return;
+    const selectedIndex = inscriptions.findIndex(item => sameInscriptionId(item.inscriptionId, selectedInscriptionId));
+    if (selectedIndex >= 0) setWalletInscriptionsPage(Math.floor(selectedIndex / walletPageSize));
+  }, [selectedInscriptionId, inscriptions]);
+  const selectInscriptionForTransfer = (inscriptionId: string) => {
+    setSelectedInscriptionId(inscriptionId);
+    setConfirmed(false);
+    setTxid("");
+    resetMempoolTracking();
+    setTransferError("Enter a receiving address to generate the live pre-confirmation receipt.");
+    window.setTimeout(() => {
+      document.getElementById("ordinal-punks-transfer-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      destinationInputRef.current?.focus();
+    }, 80);
+  };
   const selectedInscription = inscriptions.find(item => item.inscriptionId === selectedInscriptionId);
   const uniScanUrl = chain?.enum === FRACTAL_MAINNET
     ? `https://uniscan.cc/fractal/address/${encodeURIComponent(address ?? "")}`
@@ -882,7 +944,14 @@ export function UniSatWalletConnect() {
         </section>
       )}
       {connectedToFractal && inscriptions.length > 0 && (
-        <section className="border-t border-[#2c323a] pt-4" aria-labelledby="ordinal-transfer-title">
+        <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-gallery-title">
+          <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#d99a54]">Live wallet collection</p><h2 id="wallet-gallery-title" className="mt-1 font-display text-xl text-[#f3efe5]">My inscriptions</h2><p className="mt-1 font-mono text-[10px] text-[#718092]">Live data from the connected UniSat wallet · 10 per page</p></div><span className="font-mono text-[10px] text-[#718092]">Page {walletInscriptionsPage + 1} / {walletPageCount}</span></div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">{walletPageItems.map(item => { const isSelected = sameInscriptionId(item.inscriptionId, selectedInscriptionId); return <article key={item.inscriptionId} className={`min-w-0 border bg-[#10151a] p-3 ${isSelected ? "border-[#d99a54]" : "border-[#2c323a]"}`}><div className="aspect-square overflow-hidden border border-[#2c323a] bg-[#14191f]"><InscriptionPreview item={item} localImage={localInscriptionImages[item.inscriptionId.toLowerCase()]} /></div><p className="mt-3 truncate font-mono text-[10px] text-[#f2bd63]">{item.inscriptionNumber != null ? `#${item.inscriptionNumber}` : "Inscription"}</p><p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#d9d3c6]">{item.inscriptionId}</p><p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#718092]">{item.location ?? "Location unavailable"}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => selectInscriptionForTransfer(item.inscriptionId)} disabled={busy || transferBusy} className={`flex-1 border px-2 py-2 font-mono text-[9px] uppercase tracking-[0.08em] disabled:opacity-40 ${isSelected ? "border-[#d99a54] bg-[#d99a54] text-[#0b0d10]" : "border-[#d99a54] text-[#f2bd63] hover:bg-[#d99a54]/10"}`}>Transfer</button><a href={`https://fractal.unisat.io/inscription/${encodeURIComponent(item.inscriptionId)}`} target="_blank" rel="noreferrer" className="border border-[#3b434d] px-2 py-2 font-mono text-[9px] uppercase text-[#9ea7b3] hover:border-[#d99a54]">Live details</a></div></article>; })}</div>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-3"><button type="button" onClick={() => setWalletInscriptionsPage(page => Math.max(0, page - 1))} disabled={walletInscriptionsPage === 0} className="border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#9ea7b3] disabled:opacity-30">Previous</button><span className="font-mono text-[10px] text-[#718092]">{walletPageItems.length} shown · {inscriptions.length} total loaded</span><button type="button" onClick={() => setWalletInscriptionsPage(page => Math.min(walletPageCount - 1, page + 1))} disabled={walletInscriptionsPage >= walletPageCount - 1} className="border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#9ea7b3] disabled:opacity-30">Next</button></div>
+        </section>
+      )}
+      {connectedToFractal && inscriptions.length > 0 && (
+        <section id="ordinal-punks-transfer-form" className="border-t border-[#2c323a] pt-4" aria-labelledby="ordinal-transfer-title">
           <h3 id="ordinal-transfer-title" className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#d9d3c6]">
             On-chain Ordinal transfer · peer to peer
           </h3>
@@ -922,6 +991,7 @@ export function UniSatWalletConnect() {
                 type="text"
                 autoComplete="off"
                 spellCheck={false}
+                ref={destinationInputRef}
                 value={destination}
                 onChange={event => {
                   setDestination(event.target.value);
