@@ -334,6 +334,7 @@ export function UniSatWalletConnect() {
   const [mempoolBlockHeight, setMempoolBlockHeight] = useState<number | null>(null);
   const [mempoolExplorerUrl, setMempoolExplorerUrl] = useState("");
   const [mempoolFeeRate, setMempoolFeeRate] = useState<number | null>(null);
+  const [finalReceipt, setFinalReceipt] = useState<{ txid: string; network: string; status: string; message: string; blockHeight: number | null; explorerUrl: string; checkedAt: string } | null>(null);
   const trackingRunRef = useRef(0);
   const inscriptionLoadRunRef = useRef(0);
   const inscriptionLoadControllerRef = useRef<AbortController | null>(null);
@@ -693,6 +694,7 @@ export function UniSatWalletConnect() {
     setMempoolNetwork(config.label);
     setMempoolBlockHeight(null);
     setMempoolExplorerUrl(`${config.explorer}${encodeURIComponent(transactionId)}`);
+    setFinalReceipt({ txid: transactionId, network: config.label, status: "checking", message: "Recherche de la transaction dans Mempool…", blockHeight: null, explorerUrl: `${config.explorer}${encodeURIComponent(transactionId)}`, checkedAt: new Date().toISOString() });
 
     for (let attempt = 0; attempt < 180; attempt += 1) {
       if (run !== trackingRunRef.current) return;
@@ -709,10 +711,12 @@ export function UniSatWalletConnect() {
             setMempoolStatus("confirmed");
             setMempoolMessage("Transaction confirmed on-chain.");
             setMempoolBlockHeight(typeof status.block_height === "number" ? status.block_height : null);
+            setFinalReceipt(current => current ? { ...current, status: "confirmed", message: "Transaction confirmée on-chain.", blockHeight: typeof status.block_height === "number" ? status.block_height : null, checkedAt: new Date().toISOString() } : current);
             return;
           }
           setMempoolStatus("pending");
           setMempoolMessage("Transaction is visible in the mempool and is waiting for confirmation.");
+          setFinalReceipt(current => current ? { ...current, status: "pending", message: "Transaction visible dans le mempool, en attente de confirmation.", checkedAt: new Date().toISOString() } : current);
         } else if (response.status === 404) {
           setMempoolStatus("pending");
           setMempoolMessage("Transaction sent; waiting for Mempool to index it.");
@@ -723,6 +727,7 @@ export function UniSatWalletConnect() {
         if (run !== trackingRunRef.current) return;
         setMempoolStatus("error");
         setMempoolMessage("Mempool is temporarily unavailable; retrying automatically.");
+        setFinalReceipt(current => current ? { ...current, status: "error", message: "Mempool est temporairement indisponible ; nouvelle tentative automatique.", checkedAt: new Date().toISOString() } : current);
       } finally {
         window.clearTimeout(timeout);
       }
@@ -731,6 +736,7 @@ export function UniSatWalletConnect() {
     if (run === trackingRunRef.current) {
       setMempoolStatus("timeout");
       setMempoolMessage("No confirmation received after 30 minutes. Check the transaction in Mempool.");
+      setFinalReceipt(current => current ? { ...current, status: "timeout", message: "Aucune confirmation après 30 minutes.", checkedAt: new Date().toISOString() } : current);
     }
   };
 
@@ -1089,7 +1095,8 @@ export function UniSatWalletConnect() {
               <p className="mt-3 break-all font-mono text-[10px] text-[#70c7a0]" role="status">
                 UniSat returned transaction ID: {txid}.
               </p>
-              {mempoolStatus !== "idle" && (
+              {finalReceipt && <div className="mt-4 border border-[#d99a54]/70 bg-[#10151a] p-4 font-mono text-[10px] leading-5" aria-label="Reçu final live du transfert"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Reçu final live · transfert</p><p><span className="text-[#718092]">Statut :</span> {finalReceipt.message}</p><p><span className="text-[#718092]">Réseau :</span> {finalReceipt.network}</p><p className="break-all"><span className="text-[#718092]">TXID :</span> {finalReceipt.txid}</p>{finalReceipt.blockHeight !== null && <p><span className="text-[#718092]">Bloc :</span> {finalReceipt.blockHeight}</p>}<p><span className="text-[#718092]">Vérifié :</span> {new Date(finalReceipt.checkedAt).toLocaleString()}</p><a className="mt-1 inline-flex items-center gap-1 text-[#d99a54] underline" href={finalReceipt.explorerUrl} target="_blank" rel="noreferrer">Ouvrir dans Mempool <ExternalLink size={11} /></a></div>}
+          {mempoolStatus !== "idle" && (
                 <div className="mt-2 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]" role="status" aria-live="polite">
                   <p><span className="text-[#718092]">{mempoolNetwork} Mempool:</span> {mempoolMessage}</p>
                   {mempoolBlockHeight !== null && <p><span className="text-[#718092]">Block:</span> {mempoolBlockHeight}</p>}
