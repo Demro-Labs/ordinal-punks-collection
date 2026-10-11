@@ -726,11 +726,6 @@ export function UniSatWalletConnect() {
     setTxid("");
     setFinalReceipt(null);
 
-    const mobile = isMobileBrowser();
-    if (mobile) {
-      setTransferError("Mobile inscription transfers are temporarily paused because UniSat's mobile signing screen flags the site-built PSBT. No signature or broadcast will be requested. Use UniSat's native transfer from a desktop extension; Inscribe is unaffected.");
-      return;
-    }
     if (!provider?.getChain || !provider.sendInscription) {
       setTransferError("Update UniSat Wallet to enable inscription transfers.");
       return;
@@ -1024,12 +1019,11 @@ export function UniSatWalletConnect() {
               <button
                 type="button"
                 onClick={() => void sendSelectedInscription()}
-                disabled={isMobileBrowser() || !confirmed || transferBusy || busy || transferLiveLoading}
+                disabled={!confirmed || transferBusy || busy || transferLiveLoading}
                 className="mt-3 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {isMobileBrowser() ? "Mobile transfer temporarily paused" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
+                {transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
               </button>
-              {isMobileBrowser() && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">UniSat mobile currently flags the site-built PSBT. For safety, this button will not request a signature or broadcast. Use the native UniSat desktop transfer. Inscribe is unaffected.</p>}
             </div>
           )}
           {inscriptionCursor < inscriptionTotal && (
