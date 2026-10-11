@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, Wallet } from "lucide-react";
 import { fetchLiveInscription, type LiveInscription } from "@/lib/live";
 import { describeFeeSources, getRecommendedFeeEstimate } from "@/lib/mempool";
-import { sendOrdinalInscriptionWithCustomPsbt, type UniSatCustomTransferProvider } from "@/lib/custom-ordinal-transfer";
 
 type UniSatChain = {
   enum?: string;
@@ -728,12 +727,12 @@ export function UniSatWalletConnect() {
     setFinalReceipt(null);
 
     const mobile = isMobileBrowser();
-    if (!provider?.getChain || (!mobile && !provider.sendInscription)) {
-      setTransferError("Update UniSat Wallet to enable inscription transfers.");
+    if (mobile) {
+      setTransferError("Mobile inscription transfers are temporarily paused because UniSat's mobile signing screen flags the site-built PSBT. No signature or broadcast will be requested. Use UniSat's native transfer from a desktop extension; Inscribe is unaffected.");
       return;
     }
-    if (mobile && (!provider.getBitcoinUtxos || !provider.getAccounts || !provider.getPublicKey || !provider.signPsbt)) {
-      setTransferError("Update UniSat Wallet to enable secure mobile transfers with PSBT signing.");
+    if (!provider?.getChain || !provider.sendInscription) {
+      setTransferError("Update UniSat Wallet to enable inscription transfers.");
       return;
     }
     if (!address || !isSupportedMainnet(chain?.enum)) {
@@ -777,29 +776,9 @@ export function UniSatWalletConnect() {
       const feeRate = feeEstimate.feeRate;
       setFeeSourceLabel(describeFeeSources(feeEstimate.strategy, feeEstimate.sources));
       setMempoolFeeRate(feeRate);
-      let returnedTxid: string | undefined;
-      if (mobile) {
-        const mempool = getMempoolConfig(activeNetworkEnum)!;
-        const result = await sendOrdinalInscriptionWithCustomPsbt({
-          provider: provider as UniSatCustomTransferProvider,
-          mempool: {
-            api: mempool.api,
-            label: mempool.label,
-            chain: activeNetworkEnum === BITCOIN_MAINNET ? "bitcoin" : "fractal",
-          },
-          expectedNetworkEnum: activeNetworkEnum,
-          currentAddress: address,
-          recipientAddress: recipient,
-          selectedInscription: selected,
-          ownedInscriptions: inscriptions,
-          feeRateSatVb: feeRate,
-        });
-        returnedTxid = result.txid;
-      } else {
-        await ensureFeeBalance(provider, activeNetworkEnum, selected, feeRate);
-        const result = await provider.sendInscription!(recipient, selected.inscriptionId, { feeRate });
-        returnedTxid = typeof result === "string" ? result : result?.txid;
-      }
+      await ensureFeeBalance(provider, activeNetworkEnum, selected, feeRate);
+      const result = await provider.sendInscription(recipient, selected.inscriptionId, { feeRate });
+      const returnedTxid = typeof result === "string" ? result : result?.txid;
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) {
         throw new Error("UniSat did not return a valid transaction ID. Check the wallet before retrying.");
       }
@@ -1045,11 +1024,12 @@ export function UniSatWalletConnect() {
               <button
                 type="button"
                 onClick={() => void sendSelectedInscription()}
-                disabled={!confirmed || transferBusy || busy || transferLiveLoading}
+                disabled={isMobileBrowser() || !confirmed || transferBusy || busy || transferLiveLoading}
                 className="mt-3 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
+                {isMobileBrowser() ? "Mobile transfer temporarily paused" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
               </button>
+              {isMobileBrowser() && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">UniSat mobile currently flags the site-built PSBT. For safety, this button will not request a signature or broadcast. Use the native UniSat desktop transfer. Inscribe is unaffected.</p>}
             </div>
           )}
           {inscriptionCursor < inscriptionTotal && (
