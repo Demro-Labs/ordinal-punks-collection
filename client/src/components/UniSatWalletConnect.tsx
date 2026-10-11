@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, Wallet } from "lucide-react";
+import { fetchLiveInscription, type LiveInscription } from "@/lib/live";
 
 type UniSatChain = {
   enum?: string;
@@ -87,6 +88,7 @@ const MEMPOOL_ENDPOINTS: Record<string, { api: string; explorer: string; label: 
   },
 };
 type MempoolTrackingStatus = "idle" | "checking" | "pending" | "confirmed" | "timeout" | "error";
+type TransferReceipt = { txid: string; network: string; status: string; message: string; blockHeight: number | null; explorerUrl: string; checkedAt: string; liveBefore?: LiveInscription | null; liveAfter?: LiveInscription | null };
 
 function getMempoolConfig(networkEnum?: string) {
   return networkEnum ? MEMPOOL_ENDPOINTS[networkEnum] : undefined;
@@ -334,7 +336,10 @@ export function UniSatWalletConnect() {
   const [mempoolBlockHeight, setMempoolBlockHeight] = useState<number | null>(null);
   const [mempoolExplorerUrl, setMempoolExplorerUrl] = useState("");
   const [mempoolFeeRate, setMempoolFeeRate] = useState<number | null>(null);
-  const [finalReceipt, setFinalReceipt] = useState<{ txid: string; network: string; status: string; message: string; blockHeight: number | null; explorerUrl: string; checkedAt: string } | null>(null);
+  const [finalReceipt, setFinalReceipt] = useState<TransferReceipt | null>(null);
+  const [transferLiveData, setTransferLiveData] = useState<LiveInscription | null>(null);
+  const [transferLiveLoading, setTransferLiveLoading] = useState(false);
+  const [transferLiveError, setTransferLiveError] = useState("");
   const trackingRunRef = useRef(0);
   const inscriptionLoadRunRef = useRef(0);
   const inscriptionLoadControllerRef = useRef<AbortController | null>(null);
@@ -686,7 +691,7 @@ export function UniSatWalletConnect() {
     return () => window.clearInterval(timer);
   }, [address, chain?.enum, inscriptions.length, inscriptionTotal]);
 
-  const trackTransaction = async (transactionId: string, networkEnum?: string) => {
+  const trackTransaction = async (transactionId: string, networkEnum?: string, liveBefore?: LiveInscription | null) => {
     const config = MEMPOOL_ENDPOINTS[networkEnum ?? FRACTAL_MAINNET] ?? MEMPOOL_ENDPOINTS[FRACTAL_MAINNET];
     const run = ++trackingRunRef.current;
     setMempoolStatus("checking");
@@ -694,7 +699,7 @@ export function UniSatWalletConnect() {
     setMempoolNetwork(config.label);
     setMempoolBlockHeight(null);
     setMempoolExplorerUrl(`${config.explorer}${encodeURIComponent(transactionId)}`);
-    setFinalReceipt({ txid: transactionId, network: config.label, status: "checking", message: "Recherche de la transaction dans Mempool…", blockHeight: null, explorerUrl: `${config.explorer}${encodeURIComponent(transactionId)}`, checkedAt: new Date().toISOString() });
+    setFinalReceipt({ txid: transactionId, network: config.label, status: "checking", message: "Recherche de la transaction dans Mempool…", blockHeight: null, explorerUrl: `${config.explorer}${encodeURIComponent(transactionId)}`, checkedAt: new Date().toISOString(), liveBefore });
 
     for (let attempt = 0; attempt < 180; attempt += 1) {
       if (run !== trackingRunRef.current) return;
@@ -708,10 +713,11 @@ export function UniSatWalletConnect() {
         if (response.ok) {
           const status = (await response.json()) as { confirmed?: boolean; block_height?: number };
           if (status.confirmed) {
+            const liveAfter = liveBefore ? await fetchLiveInscription(liveBefore.inscriptionId).catch(() => null) : null;
             setMempoolStatus("confirmed");
             setMempoolMessage("Transaction confirmed on-chain.");
             setMempoolBlockHeight(typeof status.block_height === "number" ? status.block_height : null);
-            setFinalReceipt(current => current ? { ...current, status: "confirmed", message: "Transaction confirmée on-chain.", blockHeight: typeof status.block_height === "number" ? status.block_height : null, checkedAt: new Date().toISOString() } : current);
+            setFinalReceipt(current => current ? { ...current, status: "confirmed", message: "Transaction confirmée on-chain.", blockHeight: typeof status.block_height === "number" ? status.block_height : null, checkedAt: new Date().toISOString(), liveAfter } : current);
             return;
           }
           setMempoolStatus("pending");
@@ -746,6 +752,7 @@ export function UniSatWalletConnect() {
     const selected = inscriptions.find(item => item.inscriptionId === selectedInscriptionId);
     setTransferError("");
     setTxid("");
+    setFinalReceipt(null);
 
     if (!provider?.getChain || (!CUSTOM_PSBT_TRANSFER_ENABLED && !provider.sendInscription)) {
       setTransferError("Update UniSat Wallet to enable inscription transfers.");
@@ -785,6 +792,8 @@ export function UniSatWalletConnect() {
         }
       }
 
+      const liveBefore = transferLiveData ?? await fetchLiveInscription(selected.inscriptionId);
+      setTransferLiveData(liveBefore);
       await validateMempoolAddress(activeNetworkEnum, recipient);
       const feeRate = await getRecommendedFeeRate(activeNetworkEnum);
       setMempoolFeeRate(feeRate);
@@ -839,7 +848,7 @@ export function UniSatWalletConnect() {
         throw new Error("UniSat did not return a valid transaction ID. Check the wallet before retrying.");
       }
       setTxid(returnedTxid);
-      void trackTransaction(returnedTxid, currentChain.enum);
+      void trackTransaction(returnedTxid, currentChain.enum, liveBefore);
       setInscriptions(previous => previous.filter(item => item.inscriptionId !== selected.inscriptionId));
       setInscriptionTotal(previous => Math.max(0, previous - 1));
       setSelectedInscriptionId("");
@@ -891,6 +900,14 @@ export function UniSatWalletConnect() {
     }, 80);
   };
   const selectedInscription = inscriptions.find(item => item.inscriptionId === selectedInscriptionId);
+
+  useEffect(() => {
+    if (!selectedInscriptionId) { setTransferLiveData(null); setTransferLiveError(""); return; }
+    let active = true;
+    setTransferLiveLoading(true); setTransferLiveError("");
+    void fetchLiveInscription(selectedInscriptionId).then(data => { if (active) setTransferLiveData(data); }).catch(error => { if (active) setTransferLiveError(error instanceof Error ? error.message : "Live UniSat data unavailable."); }).finally(() => { if (active) setTransferLiveLoading(false); });
+    return () => { active = false; };
+  }, [selectedInscriptionId]);
   const uniScanUrl = chain?.enum === FRACTAL_MAINNET
     ? `https://uniscan.cc/fractal/address/${encodeURIComponent(address ?? "")}`
     : `https://uniscan.cc/bitcoin/address/${encodeURIComponent(address ?? "")}`;
@@ -1059,7 +1076,7 @@ export function UniSatWalletConnect() {
             <div className="mt-3 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">
               <p><span className="text-[#718092]">Asset:</span> {selectedInscription.inscriptionId}</p>
               <p className="break-all"><span className="text-[#718092]">Recipient:</span> {destination.trim()}</p>
-              <div className="mt-3 border border-[#d99a54]/60 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]" aria-label="Transfer pre-confirmation receipt"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live pre-confirmation receipt</p><p><span className="text-[#718092]">Network:</span> {currentNetwork?.label}</p><p className="break-all"><span className="text-[#718092]">Wallet:</span> {address}</p><p className="break-all"><span className="text-[#718092]">Inscription:</span> {selectedInscription.inscriptionId}</p><p className="break-all"><span className="text-[#718092]">Location:</span> {selectedInscription.location ?? "Not provided by UniSat"}</p><p className="break-all"><span className="text-[#718092]">Recipient:</span> {destination.trim()}</p><p><span className="text-[#718092]">Fee estimate:</span> {mempoolFeeRate ? `${mempoolFeeRate} sat/vB · fetched live before signing` : "Fetched live immediately before wallet approval"}</p><p className="mt-1 text-[#a45e54]">The transfer is irreversible after signing and broadcast. UniSat will show the final transaction before approval.</p></div>
+              <div className="mt-3 border border-[#d99a54]/60 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]" aria-label="Transfer pre-confirmation receipt"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live pre-confirmation receipt</p><p><span className="text-[#718092]">Network:</span> {currentNetwork?.label}</p><p className="break-all"><span className="text-[#718092]">Wallet:</span> {address}</p><p className="break-all"><span className="text-[#718092]">Inscription:</span> {selectedInscription.inscriptionId}</p><p className="break-all"><span className="text-[#718092]">Location:</span> {selectedInscription.location ?? "Not provided by UniSat"}</p><p className="break-all"><span className="text-[#718092]">Recipient:</span> {destination.trim()}</p><p><span className="text-[#718092]">Fee estimate:</span> {mempoolFeeRate ? `${mempoolFeeRate} sat/vB · fetched live before signing` : "Fetched live immediately before wallet approval"}</p>{transferLiveLoading && <p><span className="text-[#718092]">Live inscription data:</span> synchronizing…</p>}{transferLiveData && <><p><span className="text-[#718092]">Current owner:</span> {transferLiveData.owner ?? "Unavailable"}</p><p><span className="text-[#718092]">Listing:</span> {transferLiveData.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Live refresh:</span> {new Date(transferLiveData.refreshedAt).toLocaleString()}</p></>}{transferLiveError && <p className="text-[#e08b7d]"><span className="text-[#718092]">Live data:</span> {transferLiveError}</p>}<p className="mt-1 text-[#a45e54]">The transfer is irreversible after signing and broadcast. UniSat will show the final transaction before approval.</p></div>
             <label className="mt-3 flex cursor-pointer items-start gap-2 text-[#d9d3c6]">
                 <input
                   type="checkbox"
@@ -1072,7 +1089,7 @@ export function UniSatWalletConnect() {
               <button
                 type="button"
                 onClick={() => void sendSelectedInscription()}
-                disabled={!confirmed || transferBusy || busy}
+                disabled={!confirmed || transferBusy || busy || transferLiveLoading}
                 className="mt-3 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
@@ -1095,7 +1112,7 @@ export function UniSatWalletConnect() {
               <p className="mt-3 break-all font-mono text-[10px] text-[#70c7a0]" role="status">
                 UniSat returned transaction ID: {txid}.
               </p>
-              {finalReceipt && <div className="mt-4 border border-[#d99a54]/70 bg-[#10151a] p-4 font-mono text-[10px] leading-5" aria-label="Reçu final live du transfert"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Reçu final live · transfert</p><p><span className="text-[#718092]">Statut :</span> {finalReceipt.message}</p><p><span className="text-[#718092]">Réseau :</span> {finalReceipt.network}</p><p className="break-all"><span className="text-[#718092]">TXID :</span> {finalReceipt.txid}</p>{finalReceipt.blockHeight !== null && <p><span className="text-[#718092]">Bloc :</span> {finalReceipt.blockHeight}</p>}<p><span className="text-[#718092]">Vérifié :</span> {new Date(finalReceipt.checkedAt).toLocaleString()}</p><a className="mt-1 inline-flex items-center gap-1 text-[#d99a54] underline" href={finalReceipt.explorerUrl} target="_blank" rel="noreferrer">Ouvrir dans Mempool <ExternalLink size={11} /></a></div>}
+              {finalReceipt && <div className="mt-4 border border-[#d99a54]/70 bg-[#10151a] p-4 font-mono text-[10px] leading-5" aria-label="Reçu final live du transfert"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Reçu final live · transfert</p><p><span className="text-[#718092]">Statut :</span> {finalReceipt.message}</p><p><span className="text-[#718092]">Réseau :</span> {finalReceipt.network}</p><p className="break-all"><span className="text-[#718092]">TXID :</span> {finalReceipt.txid}</p>{finalReceipt.blockHeight !== null && <p><span className="text-[#718092]">Bloc :</span> {finalReceipt.blockHeight}</p>}<p><span className="text-[#718092]">Vérifié :</span> {new Date(finalReceipt.checkedAt).toLocaleString()}</p>{finalReceipt.liveBefore && <div className="mt-2 border-t border-[#2c323a] pt-2"><p className="uppercase text-[#f2bd63]">Live data avant confirmation</p><p className="break-all"><span className="text-[#718092]">Owner :</span> {finalReceipt.liveBefore.owner ?? "Indisponible"}</p><p><span className="text-[#718092]">Listing :</span> {finalReceipt.liveBefore.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Rafraîchi :</span> {new Date(finalReceipt.liveBefore.refreshedAt).toLocaleString()}</p></div>}{finalReceipt.liveAfter && <div className="mt-2 border-t border-[#2c323a] pt-2"><p className="uppercase text-[#f2bd63]">Live data après confirmation</p><p className="break-all"><span className="text-[#718092]">Owner :</span> {finalReceipt.liveAfter.owner ?? "Indisponible"}</p><p><span className="text-[#718092]">Listing :</span> {finalReceipt.liveAfter.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Rafraîchi :</span> {new Date(finalReceipt.liveAfter.refreshedAt).toLocaleString()}</p></div>}<a className="mt-1 inline-flex items-center gap-1 text-[#d99a54] underline" href={finalReceipt.explorerUrl} target="_blank" rel="noreferrer">Ouvrir dans Mempool <ExternalLink size={11} /></a></div>}
           {mempoolStatus !== "idle" && (
                 <div className="mt-2 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]" role="status" aria-live="polite">
                   <p><span className="text-[#718092]">{mempoolNetwork} Mempool:</span> {mempoolMessage}</p>
