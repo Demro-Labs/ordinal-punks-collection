@@ -60,6 +60,50 @@ export async function getRecommendedFeeRate(network: string) {
   return Math.ceil(estimate.feeRate);
 }
 
+export type SpendableUtxo = { address: string; txid: string; vout: number; satoshi: number; scriptPk: string };
+
+/** Fetch only confirmed, non-asset UTXOs verified by the server-side UniSat indexer. */
+export async function getSpendableUtxos(network: string, address: string, minimumSats: number): Promise<SpendableUtxo[]> {
+  const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
+  if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0) {
+    throw new Error("Réseau, adresse ou montant invalide pour vérifier les UTXO dépensables.");
+  }
+
+  const collected: SpendableUtxo[] = [];
+  let cursor: number = 0;
+  for (let pageNumber = 0; pageNumber < 10; pageNumber += 1) {
+    const query: URLSearchParams = new URLSearchParams({ chain, address, cursor: String(cursor), size: "50" });
+    type SpendableUtxoPage = {
+      chain?: string; address?: string; nextCursor?: number; total?: number; scannedCount?: number;
+      utxo?: Array<Record<string, unknown>>;
+    };
+    const page: SpendableUtxoPage = await requestJson<SpendableUtxoPage>(`${LIVE_DATA_API_BASE}/api/spendable-utxos?${query}`, 15_000);
+    if (page.chain !== chain || page.address !== address || !Array.isArray(page.utxo)) {
+      throw new Error("Le serveur n’a pas confirmé la liste d’UTXO sûre pour cette adresse.");
+    }
+
+    const safe = page.utxo.filter((item): item is SpendableUtxo =>
+      item.address === address && typeof item.txid === "string" && /^[a-f0-9]{64}$/i.test(item.txid) &&
+      typeof item.vout === "number" && Number.isSafeInteger(item.vout) && item.vout >= 0 &&
+      typeof item.satoshi === "number" && Number.isSafeInteger(item.satoshi) && item.satoshi >= 600 &&
+      typeof item.scriptPk === "string" && /^(?:[a-f0-9]{2})+$/i.test(item.scriptPk) &&
+      item.protocolAssetsChecked === true && item.isLowFee !== true && item.isOpInRBF !== true &&
+      Array.isArray(item.inscriptions) && item.inscriptions.length === 0
+    );
+    collected.push(...safe);
+    if (collected.reduce((sum, item) => sum + item.satoshi, 0) >= minimumSats) return collected;
+
+    const nextCursor = Number(page.nextCursor);
+    const total = Number(page.total);
+    if (!Number.isSafeInteger(nextCursor) || nextCursor <= cursor || !Number.isSafeInteger(total) || nextCursor >= total || Number(page.scannedCount) <= 0) break;
+    cursor = nextCursor;
+  }
+  if (collected.reduce((sum, item) => sum + item.satoshi, 0) < minimumSats) {
+    throw new Error("Le serveur UniSat n’a pas confirmé assez d’UTXO sûrs pour couvrir le montant et les frais. Aucun paiement n’a été lancé.");
+  }
+  return collected;
+}
+
 export async function validateMempoolAddress(network: string, address: string) {
   const config = getMempoolConfig(network);
   if (!config) throw new Error("Réseau principal non pris en charge.");
