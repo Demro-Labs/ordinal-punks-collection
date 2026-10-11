@@ -863,7 +863,7 @@ export function UniSatWalletConnect() {
   const walletGalleryClassName = walletDisplayMode === "list"
     ? "mt-4 grid grid-cols-1 gap-3"
     : walletDisplayMode === "compact"
-      ? "mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
+      ? "mt-4 grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2"
       : "mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5";
   const walletPreviewClassName = walletDisplayMode === "list"
     ? "aspect-[5/1] overflow-hidden border border-[#2c323a] bg-[#14191f] sm:aspect-[7/1]"
