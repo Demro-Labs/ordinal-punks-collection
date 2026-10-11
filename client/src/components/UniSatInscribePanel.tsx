@@ -22,9 +22,22 @@ function formatBytes(value: number) { return `${(value / 1024).toFixed(value < 1
 function describeStatus(status: string) { return ({ pending: "En attente du paiement", paid: "Paiement reçu", processing: "Inscription en cours", minted: "Inscription créée", completed: "Inscription terminée", success: "Inscription terminée", failed: "Échec", cancelled: "Annulée" } as Record<string, string>)[status] ?? status; }
 function fileKind(file: File) { if (file.type.startsWith("image/")) return "Image"; if (file.type.startsWith("text/")) return "Texte"; if (file.type.startsWith("audio/")) return "Audio"; if (file.type.startsWith("video/")) return "Vidéo"; if (file.type === "application/json") return "JSON"; if (file.type === "image/svg+xml") return "SVG"; if (file.type === "application/pdf") return "PDF"; return file.type || "Binaire"; }
 function isWalletCancellation(error: unknown) {
-  const value = error as { code?: unknown; message?: unknown } | null;
-  const message = String(value?.message ?? error ?? "");
+  const value = error as { code?: unknown } | null;
+  const message = walletErrorMessage(error);
   return value?.code === 4001 || /user (rejected|denied)|cancelled by user|request rejected/i.test(message);
+}
+
+function walletErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error.trim();
+  if (error && typeof error === "object") {
+    const value = error as { message?: unknown; shortMessage?: unknown; reason?: unknown; code?: unknown };
+    for (const detail of [value.message, value.shortMessage, value.reason]) {
+      if (typeof detail === "string" && detail.trim()) return detail.trim();
+    }
+    if (typeof value.code === "string" || typeof value.code === "number") return `Erreur UniSat (${String(value.code)})`;
+  }
+  return "Erreur inconnue retournée par UniSat";
 }
 
 
@@ -185,7 +198,6 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
     try {
       const currentChain = await provider.getChain();
       if (currentChain.enum !== receipt.chain) throw new Error("Le réseau du wallet a changé depuis la création du reçu. Revenez au réseau indiqué sur le reçu; aucun paiement n’a été envoyé.");
-      paymentCallStarted = true;
       const mobileUniSat = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
       const paymentFeeRate = await getRecommendedFeeRate(receipt.chain).catch(() => receipt.feeRate);
       setReceipt(current => current ? { ...current, feeRate: paymentFeeRate } : current);
@@ -194,6 +206,7 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
         : "UniSat va afficher le montant et les frais finaux avant signature.");
       // L’API native est disponible sur le navigateur UniSat intégré et ouvre son écran
       // d’approbation. N’utiliser le PSBT manuel qu’en secours si sendBitcoin manque.
+      paymentCallStarted = true;
       const payment = provider.sendBitcoin
         ? await provider.sendBitcoin(receipt.payAddress, receipt.amount, { feeRate: paymentFeeRate })
         : await sendMobilePayment({
@@ -213,11 +226,12 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       await pollOrder(receipt.orderId, returnedTxid, receipt.chain);
     } catch (error) {
       const canceled = isWalletCancellation(error);
-      const mayHaveBeenSent = paymentReturned;
+      const detail = walletErrorMessage(error);
+      const mayHaveBeenSent = paymentReturned || (paymentCallStarted && !canceled);
       setStage(mayHaveBeenSent ? "tracking" : "awaiting-approval");
       setMessage(mayHaveBeenSent
-        ? `Le paiement peut déjà avoir été transmis. Ne l’envoyez pas une seconde fois. Vérifiez UniSat; le reçu reste disponible pour reprendre le suivi. ${error instanceof Error ? error.message : "Erreur de suivi."}`
-        : (error instanceof Error ? `${error.message} Aucun TXID n’a été reçu; la commande reste en attente d’approbation. Sur mobile, vérifiez que la fenêtre UniSat est ouverte et que le réseau Fractal Bitcoin est sélectionné.` : "UniSat n’a pas confirmé l’approbation. Aucun TXID n’a été reçu; la commande reste en attente d’approbation."));
+        ? `Le paiement a peut-être été transmis. Ne cliquez pas à nouveau avant d’avoir vérifié l’activité UniSat. Aucun TXID n’a été récupéré. Détail UniSat : ${detail}`
+        : `${canceled ? "Approbation annulée dans UniSat." : "UniSat a refusé ou n’a pas terminé l’approbation."} Aucun TXID n’a été reçu; vérifiez le réseau ${receipt.chain}. Détail UniSat : ${detail}`);
     }
   };
   const close = () => { if (["preparing", "paying"].includes(stage)) return; setOpen(false); if (stage === "tracking") return; setMessage(""); setStatus(""); setStage("idle"); setReceipt(null); setFinalReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]); };
