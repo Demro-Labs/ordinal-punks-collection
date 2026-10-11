@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, Wallet } from "lucide-react";
 import { fetchLiveInscription, type LiveInscription } from "@/lib/live";
+import { describeFeeSources, getRecommendedFeeEstimate } from "@/lib/mempool";
 
 type UniSatChain = {
   enum?: string;
@@ -96,34 +97,6 @@ function getMempoolConfig(networkEnum?: string) {
 
 function isSupportedMainnet(networkEnum?: string) {
   return Boolean(getMempoolConfig(networkEnum));
-}
-
-async function getRecommendedFeeRate(networkEnum: string) {
-  const config = getMempoolConfig(networkEnum);
-  if (!config) throw new Error("Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat.");
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 8_000);
-  try {
-    const response = await fetch(`${config.api}/api/v1/fees/recommended`, {
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`Mempool fee API returned HTTP ${response.status}.`);
-    const fees = (await response.json()) as {
-      fastestFee?: number;
-      halfHourFee?: number;
-      hourFee?: number;
-      minimumFee?: number;
-    };
-    const selected = fees.halfHourFee ?? fees.fastestFee ?? fees.hourFee ?? fees.minimumFee;
-    const feeRate = Number(selected);
-    if (!Number.isFinite(feeRate) || feeRate <= 0) {
-      throw new Error("Mempool did not return a valid fee rate.");
-    }
-    return Math.max(1, Math.ceil(feeRate));
-  } finally {
-    window.clearTimeout(timeout);
-  }
 }
 
 async function validateMempoolAddress(networkEnum: string, address: string) {
@@ -334,6 +307,7 @@ export function UniSatWalletConnect() {
   const [mempoolBlockHeight, setMempoolBlockHeight] = useState<number | null>(null);
   const [mempoolExplorerUrl, setMempoolExplorerUrl] = useState("");
   const [mempoolFeeRate, setMempoolFeeRate] = useState<number | null>(null);
+  const [feeSourceLabel, setFeeSourceLabel] = useState("");
   const [finalReceipt, setFinalReceipt] = useState<TransferReceipt | null>(null);
   const [transferLiveData, setTransferLiveData] = useState<LiveInscription | null>(null);
   const [transferLiveLoading, setTransferLiveLoading] = useState(false);
@@ -793,7 +767,9 @@ export function UniSatWalletConnect() {
       const liveBefore = transferLiveData ?? await fetchLiveInscription(selected.inscriptionId);
       setTransferLiveData(liveBefore);
       await validateMempoolAddress(activeNetworkEnum, recipient);
-      const feeRate = await getRecommendedFeeRate(activeNetworkEnum);
+      const feeEstimate = await getRecommendedFeeEstimate(activeNetworkEnum);
+      const feeRate = feeEstimate.feeRate;
+      setFeeSourceLabel(describeFeeSources(feeEstimate.strategy, feeEstimate.sources));
       setMempoolFeeRate(feeRate);
       let returnedTxid: string | undefined;
       await ensureFeeBalance(provider, activeNetworkEnum, selected, feeRate);
@@ -981,8 +957,8 @@ export function UniSatWalletConnect() {
           </p>
           <p className="mt-1 font-mono text-[10px] text-[#718092]" aria-live="polite">
             {mempoolFeeRate
-              ? `Mempool ${currentNetwork?.label ?? "network"} fee estimate: ${mempoolFeeRate} sat/vB. UniSat recalculates and shows the final fee before approval.`
-              : `The ${currentNetwork?.label ?? "selected network"} Mempool fee estimate is fetched immediately before transfer.`}
+              ? `${feeSourceLabel || "Live fee estimate"}: ${mempoolFeeRate} sat/vB. UniSat shows the final fee before approval.`
+              : `Live fee estimate for ${currentNetwork?.label ?? "the selected network"} is fetched immediately before transfer.`}
           </p>
           <div className="mt-3 grid gap-3 lg:grid-cols-2">
             <label className="block font-mono text-[10px] uppercase tracking-[0.1em] text-[#9ea7b3]">
@@ -1031,7 +1007,7 @@ export function UniSatWalletConnect() {
             <div className="mt-3 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">
               <p><span className="text-[#718092]">Asset:</span> {selectedInscription.inscriptionId}</p>
               <p className="break-all"><span className="text-[#718092]">Recipient:</span> {destination.trim()}</p>
-              <div className="mt-3 border border-[#d99a54]/60 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]" aria-label="Transfer pre-confirmation receipt"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live pre-confirmation receipt</p><p><span className="text-[#718092]">Network:</span> {currentNetwork?.label}</p><p className="break-all"><span className="text-[#718092]">Wallet:</span> {address}</p><p className="break-all"><span className="text-[#718092]">Inscription:</span> {selectedInscription.inscriptionId}</p><p className="break-all"><span className="text-[#718092]">Location:</span> {selectedInscription.location ?? "Not provided by UniSat"}</p><p className="break-all"><span className="text-[#718092]">Recipient:</span> {destination.trim()}</p><p><span className="text-[#718092]">Fee estimate:</span> {mempoolFeeRate ? `${mempoolFeeRate} sat/vB · fetched live before signing` : "Fetched live immediately before wallet approval"}</p>{transferLiveLoading && <p><span className="text-[#718092]">Live inscription data:</span> synchronizing…</p>}{transferLiveData && <><p><span className="text-[#718092]">Current owner:</span> {transferLiveData.owner ?? "Unavailable"}</p><p><span className="text-[#718092]">Listing:</span> {transferLiveData.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Live refresh:</span> {new Date(transferLiveData.refreshedAt).toLocaleString()}</p></>}{transferLiveError && <p className="text-[#e08b7d]"><span className="text-[#718092]">Live data:</span> {transferLiveError}</p>}<p className="mt-1 text-[#a45e54]">The transfer is irreversible after signing and broadcast. UniSat will show the final transaction before approval.</p></div>
+              <div className="mt-3 border border-[#d99a54]/60 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]" aria-label="Transfer pre-confirmation receipt"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live pre-confirmation receipt</p><p><span className="text-[#718092]">Network:</span> {currentNetwork?.label}</p><p className="break-all"><span className="text-[#718092]">Wallet:</span> {address}</p><p className="break-all"><span className="text-[#718092]">Inscription:</span> {selectedInscription.inscriptionId}</p><p className="break-all"><span className="text-[#718092]">Location:</span> {selectedInscription.location ?? "Not provided by UniSat"}</p><p className="break-all"><span className="text-[#718092]">Recipient:</span> {destination.trim()}</p><p><span className="text-[#718092]">Fee estimate:</span> {mempoolFeeRate ? `${feeSourceLabel || "Live fee source"}: ${mempoolFeeRate} sat/vB · refreshed before signing` : "Live fee source estimate refreshed immediately before wallet approval"}</p>{transferLiveLoading && <p><span className="text-[#718092]">Live inscription data:</span> synchronizing…</p>}{transferLiveData && <><p><span className="text-[#718092]">Current owner:</span> {transferLiveData.owner ?? "Unavailable"}</p><p><span className="text-[#718092]">Listing:</span> {transferLiveData.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Live refresh:</span> {new Date(transferLiveData.refreshedAt).toLocaleString()}</p></>}{transferLiveError && <p className="text-[#e08b7d]"><span className="text-[#718092]">Live data:</span> {transferLiveError}</p>}<p className="mt-1 text-[#a45e54]">The transfer is irreversible after signing and broadcast. UniSat will show the final transaction before approval.</p></div>
             <label className="mt-3 flex cursor-pointer items-start gap-2 text-[#d9d3c6]">
                 <input
                   type="checkbox"

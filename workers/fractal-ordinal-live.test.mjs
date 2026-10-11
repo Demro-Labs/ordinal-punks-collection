@@ -22,6 +22,51 @@ test('responses contain API security headers and allow the site origin', async (
   assert.match(response.headers.get('content-security-policy') || '', /default-src 'none'/);
 });
 
+test('returns the higher live Mempool/UniSat half-hour fee without exposing the API key', async () => {
+  const previousFetch = globalThis.fetch;
+  let unisatAuth = '';
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url === 'https://open-api-fractal.unisat.io/v1/indexer/fees/recommended') {
+      unisatAuth = new Headers(init.headers).get('Authorization') || '';
+      return Response.json({ code: 0, data: { halfHourFee: 4, fastestFee: 5 } });
+    }
+    if (url === 'https://mempool.fractalbitcoin.io/api/v1/fees/recommended') return Response.json({ halfHourFee: 7, fastestFee: 9 });
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest('/api/fees/recommended?chain=FRACTAL_BITCOIN_MAINNET', { ip: '192.0.2.80' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.feeRate, 7);
+    assert.equal(data.strategy, 'maximum-of-mempool-and-unisat');
+    assert.equal(data.sources.mempool.feeRate, 7);
+    assert.equal(data.sources.unisat.feeRate, 4);
+    assert.equal(data.network, 'FRACTAL_BITCOIN_MAINNET');
+    assert.equal(unisatAuth, 'Bearer test-only');
+    assert.equal(JSON.stringify(data).includes('test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('uses the remaining live estimator if one fee source is unavailable', async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url === 'https://open-api.unisat.io/v1/indexer/fees/recommended') throw new Error('UniSat temporarily unavailable');
+    if (url === 'https://mempool.space/api/v1/fees/recommended') return Response.json({ halfHourFee: 3 });
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest('/api/fees/recommended?chain=BITCOIN_MAINNET', { ip: '192.0.2.81' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.feeRate, 3);
+    assert.equal(data.strategy, 'single-provider-fallback');
+    assert.equal(data.sources.unisat.available, false);
+    assert.equal(data.sources.mempool.available, true);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('caches successful public market responses at the edge', async () => {
   const previousCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
   const previousFetch = globalThis.fetch;
@@ -123,6 +168,8 @@ test('requires a verified Cloudflare session before creating a V5 order and supp
       assert.equal(session.proof, 'signed-session-proof');
       return Response.json({ valid: true });
     }
+    if (url.endsWith('/v1/indexer/fees/recommended')) return Response.json({ code: 0, data: { halfHourFee: 6 } });
+    if (url === 'https://mempool.fractalbitcoin.io/api/v1/fees/recommended') return Response.json({ halfHourFee: 5 });
     createUrl = url;
     authHeader = new Headers(init.headers).get('Authorization') || '';
     upstreamBody = JSON.parse(init.body);
@@ -150,6 +197,10 @@ test('requires a verified Cloudflare session before creating a V5 order and supp
     const data = await response.json();
     assert.equal(response.status, 200);
     assert.equal(data.orderId, 'order-test-123');
+    assert.equal(data.feeRate, 6);
+    assert.equal(data.feeStrategy, 'maximum-of-mempool-and-unisat');
+    assert.equal(data.feeSources.mempool.feeRate, 5);
+    assert.equal(data.feeSources.unisat.feeRate, 6);
     assert.match(createUrl, /^https:\/\/open-api-fractal\.unisat\.io\/v5\/inscribe\/order\/create$/);
     assert.equal(authHeader, 'Bearer test-only');
     assert.equal(upstreamBody.files.length, 2);

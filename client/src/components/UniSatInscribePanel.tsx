@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CheckCircle2, ExternalLink, FilePlus2, Files, ShieldCheck, Upload, X } from "lucide-react";
-import { getRecommendedFeeRate, trackMempoolTransaction, type MempoolReceipt } from "@/lib/mempool";
+import { describeFeeSources, getRecommendedFeeEstimate, getRecommendedFeeRate, trackMempoolTransaction, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
 import { sendMobilePayment, type MobilePaymentProvider } from "@/lib/mobile-payment-psbt";
 
 const API_BASE = "https://fractal-ordinal-live.servostar23.workers.dev";
@@ -8,7 +8,7 @@ const MAX_FILE_BYTES = 365 * 1024;
 const MAX_FILES = 100;
 type Chain = { enum?: string; name?: string };
 type InscribeFile = { filename: string; size: number; type: string; dataURL?: string };
-type InscribeReceipt = { orderId: string; payAddress: string; amount: number; files: InscribeFile[]; feeRate: number; chain: string; createdAt: string };
+type InscribeReceipt = { orderId: string; payAddress: string; amount: number; files: InscribeFile[]; feeRate: number; feeSourceLabel: string; chain: string; createdAt: string };
 type InscribeStage = "idle" | "preparing" | "awaiting-approval" | "paying" | "tracking" | "completed";
 type OrderFile = { inscriptionId?: string; filename?: string; status?: string; txid?: string; inscriptionTxid?: string };
 type LiveWalletData = { publicKey: string; available: number | null; total: number | null; asset: string; refreshedAt: string };
@@ -46,7 +46,6 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
   const [chain, setChain] = useState<Chain | null>(null);
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
-  const [feeRate, setFeeRate] = useState("5");
   const [stage, setStage] = useState<InscribeStage>("idle");
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("");
@@ -139,11 +138,11 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
     if (!provider?.getPublicKey) return setMessage("UniSat doit être connecté et compatible avec getPublicKey.");
     if (!address || !supported || !chain?.enum) return setMessage("Connectez UniSat sur Bitcoin mainnet ou Fractal Bitcoin mainnet.");
     if (!files.length) return setMessage("Ajoutez au moins un fichier à inscrire.");
-    const parsedFeeRate = Number(feeRate); if (!Number.isInteger(parsedFeeRate) || parsedFeeRate < 1 || parsedFeeRate > 10000) return setMessage("Le fee rate doit être un entier entre 1 et 10 000 sat/vB.");
     setStage("preparing");
     try {
       const [encodedFiles, publicKey] = await Promise.all([Promise.all(files.map(async file => ({ filename: file.name, dataURL: await readAsDataUrl(file) }))), provider.getPublicKey()]);
-      const liveFeeRate = await getRecommendedFeeRate(chain.enum).catch(() => parsedFeeRate);
+      const feeEstimate = await getRecommendedFeeEstimate(chain.enum);
+      const liveFeeRate = feeEstimate.feeRate;
       await loadLiveWalletData();
       let response: Response;
       try {
@@ -151,9 +150,10 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       } catch {
         throw new Error("Le service d’inscription UniSat est inaccessible. Vérifiez la connexion réseau, puis réessayez sans fermer le wallet.");
       }
-      const created = await response.json() as { orderId?: string; payAddress?: string; amount?: number; error?: string };
-      if (!response.ok || !created.orderId || !created.payAddress || !Number.isSafeInteger(created.amount)) throw new Error(created.error || "UniSat n’a pas créé la commande.");
-      setReceipt({ orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: files.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })), feeRate: liveFeeRate, chain: chain.enum, createdAt: new Date().toISOString() }); setStage("awaiting-approval"); setMessage("Reçu batch préparé. Vérifiez le réseau, le montant et les frais, puis approuvez le paiement dans UniSat.");
+      const created = await response.json() as { orderId?: string; payAddress?: string; amount?: number; feeRate?: number; feeSources?: FeeEstimate["sources"]; feeStrategy?: FeeEstimate["strategy"]; error?: string };
+      if (!response.ok || !created.orderId || !created.payAddress || !Number.isSafeInteger(created.amount) || !Number.isSafeInteger(created.feeRate) || Number(created.feeRate) < 1) throw new Error(created.error || "UniSat n’a pas créé la commande avec un fee rate vérifiable.");
+      const feeSourceLabel = describeFeeSources(created.feeStrategy ?? feeEstimate.strategy, created.feeSources ?? feeEstimate.sources);
+      setReceipt({ orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: files.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })), feeRate: Number(created.feeRate), feeSourceLabel, chain: chain.enum, createdAt: new Date().toISOString() }); setStage("awaiting-approval"); setMessage(`Taux live ${feeSourceLabel}. Vérifiez le réseau, le montant et les frais, puis approuvez dans UniSat.`);
     } catch (error) { setStage("idle"); setMessage(error instanceof Error ? error.message : "Impossible de préparer l’inscription."); }
   };
 
@@ -199,7 +199,7 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       const currentChain = await provider.getChain();
       if (currentChain.enum !== receipt.chain) throw new Error("Le réseau du wallet a changé depuis la création du reçu. Revenez au réseau indiqué sur le reçu; aucun paiement n’a été envoyé.");
       const mobileUniSat = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      const paymentFeeRate = await getRecommendedFeeRate(receipt.chain).catch(() => receipt.feeRate);
+      const paymentFeeRate = await getRecommendedFeeRate(receipt.chain);
       setReceipt(current => current ? { ...current, feeRate: paymentFeeRate } : current);
       setMessage(mobileUniSat
         ? "Ouverture de l’approbation UniSat mobile… Vérifiez la fenêtre de confirmation dans l’application."
@@ -257,7 +257,7 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       <div className="mt-5 grid gap-2 sm:grid-cols-4"><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Fichiers</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{files.length} / {MAX_FILES}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Taille totale</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{formatBytes(totalBytes)}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Réseau</p><p className="mt-1 truncate font-mono text-xs text-[#f2bd63]">{chain?.name ?? chain?.enum}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Statut live</p><p className="mt-1 font-mono text-xs text-[#f2bd63]">{status ? describeStatus(status) : "Prêt"}</p></div></div>
       <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); chooseFiles(Array.from(event.dataTransfer.files ?? [])); }} className="mt-5 flex cursor-pointer flex-col items-center justify-center border border-dashed border-[#d99a54]/70 bg-[#10151a] px-5 py-8 text-center hover:bg-[#d99a54]/5"><Upload size={22} className="text-[#d99a54]" /><span className="mt-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#d9d3c6]">Déplacer ou ajouter les fichiers à minter</span><span className="mt-2 font-mono text-[10px] text-[#718092]">Maximum {MAX_FILES} fichiers · 365 KB par fichier · sélection multiple</span><input type="file" multiple accept="*/*" className="sr-only" disabled={busy || stage === "awaiting-approval"} onChange={event => chooseFiles(Array.from(event.target.files ?? []))} /></label>
       {files.length > 0 && <div className="mt-4 overflow-hidden border border-[#3b434d] bg-[#10151a]"><div className="flex items-center justify-between border-b border-[#3b434d] px-3 py-2"><span className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#d9d3c6]"><Files size={13} /> File queue</span><button type="button" disabled={busy} onClick={() => setFiles([])} className="font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">Vider</button></div><div className="max-h-48 overflow-y-auto">{files.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 border-b border-[#2c323a] px-3 py-2 last:border-b-0"><div className="min-w-0"><p className="truncate font-mono text-[10px] text-[#d9d3c6]">{index + 1}. {file.name}</p><p className="font-mono text-[9px] text-[#718092]">{fileKind(file)} · {formatBytes(file.size)}</p></div><button type="button" disabled={busy} onClick={() => removeFile(index)} className="shrink-0 font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">Retirer</button></div>)}</div></div>}
-      <label className="mt-4 block font-mono text-[10px] uppercase tracking-[0.1em] text-[#9ea7b3]">Fee rate (sat/vB)<input value={feeRate} onChange={event => setFeeRate(event.target.value)} disabled={busy || stage === "awaiting-approval"} inputMode="numeric" className="mt-2 block w-full border border-[#3b434d] bg-[#10151a] px-3 py-2 font-mono text-xs text-[#f3efe5]" /></label>
+      <p className="mt-4 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">Fee rate dynamique · cible 30 min · consensus côté serveur = maximum des recommandations Mempool et UniSat. Si les estimateurs sont indisponibles, aucune valeur manuelle ancienne n’est utilisée. UniSat affiche toujours le coût final avant votre signature.</p>
       {(receipt || busy || stage === "completed") && <div className="mt-5 border border-[#d99a54]/60 bg-[#10151a] p-4"><div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f2bd63]"><ShieldCheck size={14} /> Reçu de précommande et approbation wallet</div>{receipt && <div className="mt-3 grid gap-2 font-mono text-[10px] text-[#d9d3c6] sm:grid-cols-2"><div className="border border-[#d99a54]/40 bg-[#151a1f] p-3 sm:col-span-2"><p className="flex items-center gap-2 uppercase tracking-[0.1em] text-[#f2bd63]"><Activity size={12} /> Données live UniSat · synchronisées avant le reçu</p><div className="mt-2 grid gap-2 sm:grid-cols-2"><p className="break-all"><span className="text-[#718092]">Adresse :</span> {address}</p><p><span className="text-[#718092]">Réseau :</span> {chain?.name ?? chain?.enum}</p><p><span className="text-[#718092]">Solde disponible :</span> {liveWallet?.available != null ? `${liveWallet.available.toLocaleString()} ${liveWallet.asset}` : "Indisponible"}</p><p><span className="text-[#718092]">Solde total :</span> {liveWallet?.total != null ? `${liveWallet.total.toLocaleString()} ${liveWallet.asset}` : "Indisponible"}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Clé publique :</span> {liveWallet?.publicKey || "Indisponible"}</p><p><span className="text-[#718092]">Synchronisé :</span> {liveWallet ? new Date(liveWallet.refreshedAt).toLocaleTimeString() : "Indisponible"}</p></div></div><p><span className="text-[#718092]">Fichiers :</span> {receipt.files.length} · {formatBytes(receipt.files.reduce((sum, file) => sum + file.size, 0))}</p><p><span className="text-[#718092]">Montant :</span> {receipt.amount.toLocaleString()} sats</p><p><span className="text-[#718092]">Réseau :</span> {chain?.name ?? chain?.enum}</p><p><span className="text-[#718092]">Fee rate :</span> {receipt.feeRate} sat/vB</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Receiver :</span> {address}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Order ID :</span> {receipt.orderId}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Adresse paiement :</span> {receipt.payAddress}</p>{txid && <p className="break-all sm:col-span-2"><span className="text-[#718092]">Payment TXID :</span> {txid}</p>}</div>}</div>}
       {finalReceipt && <div className="mt-4 border border-[#d99a54]/70 bg-[#10151a] p-4 font-mono text-[10px] leading-5" aria-label="Reçu final live"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Reçu final live · inscription</p><p><span className="text-[#718092]">Statut :</span> {finalReceipt.message}</p><p><span className="text-[#718092]">Réseau :</span> {finalReceipt.network}</p><p className="break-all"><span className="text-[#718092]">TXID :</span> {finalReceipt.txid}</p>{finalReceipt.blockHeight !== null && <p><span className="text-[#718092]">Bloc :</span> {finalReceipt.blockHeight}</p>}<p><span className="text-[#718092]">Vérifié :</span> {new Date(finalReceipt.checkedAt).toLocaleString()}</p>{finalReceipt.explorerUrl && <a className="inline-flex items-center gap-1 text-[#d99a54] underline" href={finalReceipt.explorerUrl} target="_blank" rel="noreferrer">Ouvrir dans Mempool <ExternalLink size={11} /></a>}</div>}
       {orderFiles.length > 0 && <div className="mt-4 border border-[#3b434d] bg-[#10151a] p-4"><div className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#f2bd63]"><Activity size={14} /> Résultats live · {totalInscribed} / {orderFiles.length} créés</div><div className="mt-3 grid gap-2 sm:grid-cols-2">{orderFiles.map((file, index) => <div key={`${file.inscriptionId ?? file.filename ?? index}`} className="border border-[#2c323a] p-2 font-mono text-[9px]"><p className="truncate text-[#d9d3c6]">{file.filename ?? `Fichier ${index + 1}`}</p><p className="mt-1 break-all text-[#718092]">{file.inscriptionId ?? describeStatus(file.status ?? status)}</p></div>)}</div></div>}
