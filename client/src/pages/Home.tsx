@@ -936,7 +936,7 @@ export default function Home() {
                             target="_blank"
                             rel="noreferrer"
                             onClick={event => event.stopPropagation()}
-                            className="mt-3 inline-flex items-center gap-1.5 bg-[#d99a54] px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#0b0d10] transition-transform duration-150 hover:-translate-y-0.5 hover:bg-[#c77e3b] active:scale-[0.97]"
+                            className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 bg-[#d99a54] px-5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#0b0d10] transition-transform duration-150 hover:-translate-y-0.5 hover:bg-[#c77e3b] active:scale-[0.97]"
                           >
                             View inscription <ExternalLink size={11} />
                           </a>
