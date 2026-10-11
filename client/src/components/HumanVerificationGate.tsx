@@ -43,6 +43,10 @@ function loadTurnstile(): Promise<TurnstileApi> {
   });
 }
 
+function isUniSatEmbeddedBrowser() {
+  return /unisat/i.test(navigator.userAgent);
+}
+
 async function postJson(path: string, body: Record<string, string>) {
   const response = await fetch(`${VERIFY_API}/${path}`, {
     method: "POST",
@@ -87,6 +91,12 @@ export default function HumanVerificationGate({ action, children }: { action: Ac
 
     const start = async () => {
       setMessage("Vérification en cours…");
+      // Le WebView UniSat doit pouvoir charger la PWA et l’ajouter à l’écran d’accueil.
+      // La vérification reste obligatoire dans UniSatInscribePanel avant toute inscription.
+      if (isUniSatEmbeddedBrowser()) {
+        if (!cancelled) setVerified(true);
+        return;
+      }
       try {
         const saved = localStorage.getItem(storageKey);
         if (saved) {
