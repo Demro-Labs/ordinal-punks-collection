@@ -191,31 +191,38 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
   const approvePayment = async () => {
     const provider = window.unisat;
     const mobileProvider = provider as unknown as MobilePaymentProvider;
-    if (!receipt || !provider?.getChain || (!provider.sendBitcoin && !(mobileProvider.signPsbt && mobileProvider.pushTx))) return setMessage("UniSat ne permet pas l’approbation du paiement depuis ce navigateur.");
+    const mobileUniSat = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const mobilePsbtAvailable = Boolean(mobileProvider?.signPsbt && (mobileProvider.pushPsbt || mobileProvider.pushTx));
+    if (!receipt) return setMessage("Aucune commande d’inscription n’est en attente d’approbation.");
+    if (!provider?.getChain) return setMessage("UniSat ne permet pas l’approbation du paiement depuis ce navigateur.");
+    if (mobileUniSat && !mobilePsbtAvailable) return setMessage("UniSat mobile doit fournir signPsbt et pushPsbt/pushTx. Aucun paiement n’a été lancé; mettez UniSat à jour ou ouvrez le site dans son navigateur intégré.");
+    if (!mobileUniSat && !provider.sendBitcoin && !mobilePsbtAvailable) return setMessage("UniSat ne permet pas l’approbation du paiement depuis ce navigateur.");
     setStage("paying"); setMessage("Vérification du réseau de la commande avant d’ouvrir l’approbation UniSat…");
     let paymentCallStarted = false;
     let paymentReturned = false;
     try {
       const currentChain = await provider.getChain();
       if (currentChain.enum !== receipt.chain) throw new Error("Le réseau du wallet a changé depuis la création du reçu. Revenez au réseau indiqué sur le reçu; aucun paiement n’a été envoyé.");
-      const mobileUniSat = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
       const paymentFeeRate = await getRecommendedFeeRate(receipt.chain);
       setReceipt(current => current ? { ...current, feeRate: paymentFeeRate } : current);
       setMessage(mobileUniSat
-        ? "Ouverture de l’approbation UniSat mobile… Vérifiez la fenêtre de confirmation dans l’application."
+        ? "Préparation d’une PSBT avec des UTXO sûrs vérifiés. UniSat affichera les détails à confirmer avant signature."
         : "UniSat va afficher le montant et les frais finaux avant signature.");
-      // L’API native est disponible sur le navigateur UniSat intégré et ouvre son écran
-      // d’approbation. N’utiliser le PSBT manuel qu’en secours si sendBitcoin manque.
-      paymentCallStarted = true;
-      const payment = provider.sendBitcoin
-        ? await provider.sendBitcoin(receipt.payAddress, receipt.amount, { feeRate: paymentFeeRate })
-        : await sendMobilePayment({
-            provider: provider as unknown as MobilePaymentProvider,
-            senderAddress: address,
-            payAddress: receipt.payAddress,
-            amount: receipt.amount,
-            feeRate: paymentFeeRate,
-          });
+      let payment: string | { txid?: string };
+      if (mobileUniSat || !provider.sendBitcoin) {
+        payment = await sendMobilePayment({
+          provider: mobileProvider,
+          senderAddress: address,
+          payAddress: receipt.payAddress,
+          amount: receipt.amount,
+          feeRate: paymentFeeRate,
+          chain: receipt.chain,
+          onApprovalStarted: () => { paymentCallStarted = true; },
+        });
+      } else {
+        paymentCallStarted = true;
+        payment = await provider.sendBitcoin(receipt.payAddress, receipt.amount, { feeRate: paymentFeeRate });
+      }
       paymentReturned = true;
       const returnedTxid = typeof payment === "string" ? payment : payment?.txid;
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) throw new Error("UniSat n’a pas retourné de TXID vérifiable. Vérifiez l’activité du wallet avant toute nouvelle action.");
@@ -231,7 +238,7 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       setStage(mayHaveBeenSent ? "tracking" : "awaiting-approval");
       setMessage(mayHaveBeenSent
         ? `Le paiement a peut-être été transmis. Ne cliquez pas à nouveau avant d’avoir vérifié l’activité UniSat. Aucun TXID n’a été récupéré. Détail UniSat : ${detail}`
-        : `${canceled ? "Approbation annulée dans UniSat." : "UniSat a refusé ou n’a pas terminé l’approbation."} Aucun TXID n’a été reçu; vérifiez le réseau ${receipt.chain}. Détail UniSat : ${detail}`);
+        : `${canceled ? "Approbation annulée dans UniSat." : paymentCallStarted ? "UniSat n’a pas terminé l’approbation." : "La préparation a échoué avant l’approbation; aucun paiement n’a été lancé."} Aucun TXID n’a été reçu; vérifiez le réseau ${receipt.chain}. Détail UniSat : ${detail}`);
     }
   };
   const close = () => { if (["preparing", "paying"].includes(stage)) return; setOpen(false); if (stage === "tracking") return; setMessage(""); setStatus(""); setStage("idle"); setReceipt(null); setFinalReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]); };

@@ -1,43 +1,19 @@
 import * as bitcoin from "bitcoinjs-lib";
 import ecc from "@bitcoinerlab/secp256k1";
+import { getSpendableUtxos } from "@/lib/mempool";
 
 bitcoin.initEccLib(ecc);
 
-type RawProviderUtxo = {
-  txid?: unknown;
-  vout?: unknown;
-  value?: unknown;
-  satoshis?: unknown;
-  amount?: unknown;
-  inscriptions?: unknown;
-  inscription?: unknown;
-};
-
 export type MobilePaymentProvider = {
-  getBitcoinUtxos?: (cursor: number, size: number) => Promise<unknown>;
   signPsbt?: (psbtHex: string, options?: { autoFinalized?: boolean; toSignInputs?: Array<{ index: number; address?: string }> }) => Promise<string>;
+  pushPsbt?: (psbtHex: string) => Promise<string | { txid?: string }>;
   pushTx?: (options: { rawtx: string }) => Promise<string | { txid?: string }>;
 };
 
 const DUST = 546;
-const MAX_UTXOS = 100;
 
-function extractUtxos(value: unknown): RawProviderUtxo[] {
-  if (Array.isArray(value)) return value.filter(item => item && typeof item === "object") as RawProviderUtxo[];
-  if (!value || typeof value !== "object") return [];
-  const object = value as Record<string, unknown>;
-  if (Array.isArray(object.list)) return object.list.filter(item => item && typeof item === "object") as RawProviderUtxo[];
-  if (Array.isArray(object.utxos)) return object.utxos.filter(item => item && typeof item === "object") as RawProviderUtxo[];
-  return [];
-}
-
-function numberValue(value: RawProviderUtxo) {
-  const result = Number(value.value ?? value.satoshis ?? value.amount ?? 0);
-  return Number.isSafeInteger(result) ? result : 0;
-}
-
-function isInscribed(value: RawProviderUtxo) {
-  return Boolean(value.inscription) || (Array.isArray(value.inscriptions) && value.inscriptions.length > 0);
+function sameScript(left: Uint8Array, right: Uint8Array) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export async function sendMobilePayment(params: {
@@ -46,29 +22,35 @@ export async function sendMobilePayment(params: {
   payAddress: string;
   amount: number;
   feeRate: number;
+  chain: string;
+  onApprovalStarted?: () => void;
 }) {
-  const { provider, senderAddress, payAddress, amount, feeRate } = params;
-  if (!provider.getBitcoinUtxos || !provider.signPsbt || !provider.pushTx) {
-    throw new Error("Cette version d’UniSat mobile ne fournit pas signPsbt/pushTx dans le navigateur intégré.");
+  const { provider, senderAddress, payAddress, amount, feeRate, chain, onApprovalStarted } = params;
+  if (!provider.signPsbt || (!provider.pushPsbt && !provider.pushTx)) {
+    throw new Error("Ce navigateur UniSat ne fournit pas la signature PSBT et la diffusion nécessaires. Aucun paiement n’a été envoyé.");
   }
   if (!Number.isSafeInteger(amount) || amount <= 0 || !Number.isFinite(feeRate) || feeRate <= 0) {
-    throw new Error("Montant ou fee rate invalide pour la transaction mobile.");
+    throw new Error("Montant ou fee rate invalide pour la transaction mobile. Aucun paiement n’a été envoyé.");
   }
 
   const network = bitcoin.networks.bitcoin;
   const senderScript = bitcoin.address.toOutputScript(senderAddress, network);
-  const raw = await provider.getBitcoinUtxos(0, MAX_UTXOS);
-  const candidates = extractUtxos(raw)
-    .filter(item => !isInscribed(item))
+  const minimumSats = amount + Math.ceil((10 + 110 + 2 * 34) * feeRate);
+  const safeUtxos = await getSpendableUtxos(chain, senderAddress, minimumSats);
+  const candidates = safeUtxos
     .map(item => ({
-      txid: typeof item.txid === "string" ? item.txid.toLowerCase() : "",
-      vout: Number(item.vout),
-      value: numberValue(item),
+      txid: item.txid.toLowerCase(),
+      vout: item.vout,
+      value: item.satoshi,
+      script: Uint8Array.from(item.scriptPk.match(/.{2}/g) ?? [], byte => Number.parseInt(byte, 16)),
     }))
-    .filter(item => /^[a-f0-9]{64}$/.test(item.txid) && Number.isSafeInteger(item.vout) && item.vout >= 0 && item.value >= DUST)
+    .filter(item =>
+      /^[a-f0-9]{64}$/.test(item.txid) && Number.isSafeInteger(item.vout) && item.vout >= 0 &&
+      Number.isSafeInteger(item.value) && item.value >= 600 && sameScript(item.script, senderScript)
+    )
     .sort((left, right) => right.value - left.value);
 
-  if (!candidates.length) throw new Error("UniSat mobile n’a retourné aucun UTXO disponible pour payer la commande.");
+  if (!candidates.length) throw new Error("Aucun UTXO sûr vérifié n’est disponible pour cette adresse. Aucun paiement n’a été envoyé.");
 
   let selected: typeof candidates = [];
   let change = 0;
@@ -93,18 +75,19 @@ export async function sendMobilePayment(params: {
   }
 
   if (!selected.length || !funded) {
-    throw new Error("Solde UniSat mobile insuffisant après exclusion des UTXO contenant des inscriptions.");
+    throw new Error("Le solde des UTXO sûrs est insuffisant après calcul des frais. Aucun paiement n’a été envoyé.");
   }
 
   const psbt = new bitcoin.Psbt({ network });
   selected.forEach(item => psbt.addInput({
     hash: item.txid,
     index: item.vout,
-    witnessUtxo: { script: senderScript, value: BigInt(item.value) },
+    witnessUtxo: { script: item.script, value: BigInt(item.value) },
   }));
   psbt.addOutput({ address: payAddress, value: BigInt(amount) });
   if (change >= DUST) psbt.addOutput({ address: senderAddress, value: BigInt(change) });
 
+  onApprovalStarted?.();
   const signedHex = await provider.signPsbt(psbt.toHex(), {
     autoFinalized: true,
     toSignInputs: selected.map((_, index) => ({ index, address: senderAddress })),
@@ -115,7 +98,9 @@ export async function sendMobilePayment(params: {
 
   const signed = bitcoin.Psbt.fromHex(signedHex, { network });
   const rawTx = signed.extractTransaction().toHex();
-  const pushed = await provider.pushTx({ rawtx: rawTx });
+  const pushed = provider.pushPsbt
+    ? await provider.pushPsbt(signed.toHex())
+    : await provider.pushTx!({ rawtx: rawTx });
   const txid = typeof pushed === "string" ? pushed : pushed?.txid;
   if (!txid || !/^[a-f0-9]{64}$/i.test(txid)) throw new Error("UniSat mobile n’a pas retourné de TXID après diffusion.");
   return txid;
