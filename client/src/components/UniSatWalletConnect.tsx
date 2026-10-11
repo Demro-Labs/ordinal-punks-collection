@@ -316,6 +316,7 @@ export function UniSatWalletConnect() {
   const [address, setAddress] = useState<string | null>(null);
   const [chain, setChain] = useState<UniSatChain | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadingInscriptions, setLoadingInscriptions] = useState(false);
   const [error, setError] = useState("");
   const [inscriptions, setInscriptions] = useState<UniSatInscription[]>([]);
   const [inscriptionsLoaded, setInscriptionsLoaded] = useState(false);
@@ -334,7 +335,8 @@ export function UniSatWalletConnect() {
   const [mempoolExplorerUrl, setMempoolExplorerUrl] = useState("");
   const [mempoolFeeRate, setMempoolFeeRate] = useState<number | null>(null);
   const trackingRunRef = useRef(0);
-  const autoLoadKeyRef = useRef("");
+  const inscriptionLoadRunRef = useRef(0);
+  const inscriptionLoadControllerRef = useRef<AbortController | null>(null);
   const [localInscriptionImages, setLocalInscriptionImages] = useState<Record<string, string>>({});
   const [walletInscriptionsPage, setWalletInscriptionsPage] = useState(0);
   const destinationInputRef = useRef<HTMLInputElement>(null);
@@ -417,9 +419,6 @@ export function UniSatWalletConnect() {
             : "Load your UniSat inscriptions first; the transfer will only use an inscription owned by this account."
           : "Connect UniSat on Bitcoin or Fractal mainnet, then load your inscriptions before transferring."
       );
-      if (address && isSupportedMainnet(chain?.enum) && !busy && (!inscriptionsLoaded || !inscriptions.some(item => sameInscriptionId(item.inscriptionId, requestedId)))) {
-        void loadInscriptions(false, requestedId);
-      }
       if (!address && providerAvailable && !busy) {
         void connect();
       }
@@ -442,9 +441,29 @@ export function UniSatWalletConnect() {
     }
   }, [inscriptions]);
 
+  const stopLoadingInscriptions = () => {
+    inscriptionLoadRunRef.current += 1;
+    inscriptionLoadControllerRef.current?.abort();
+    inscriptionLoadControllerRef.current = null;
+    setLoadingInscriptions(false);
+    setBusy(false);
+  };
+  const disconnectWallet = async () => {
+    stopLoadingInscriptions();
+    const provider = window.unisat as (typeof window.unisat & { disconnect?: () => Promise<void> }) | undefined;
+    try { await provider?.disconnect?.(); } catch { /* local session still clears */ }
+    setAddress(null);
+    setChain(null);
+    setWalletDashboard(null);
+    setDestination("");
+    setError("");
+    setTransferError("");
+    clearOwnedInscriptions();
+  };
   const clearOwnedInscriptions = () => {
+    stopLoadingInscriptions();
+    setWalletDashboard(null);
     setMempoolFeeRate(null);
-    autoLoadKeyRef.current = "";
     setInscriptions([]);
     setInscriptionsLoaded(false);
     setInscriptionTotal(0);
@@ -470,7 +489,6 @@ export function UniSatWalletConnect() {
       if (nextAddress) {
         void provider.getChain?.().then(nextChain => {
           setChain(nextChain);
-          if (isSupportedMainnet(nextChain.enum)) void loadInscriptions(false, undefined, nextAddress);
         }).catch(() => setChain(null));
       }
     };
@@ -547,8 +565,6 @@ export function UniSatWalletConnect() {
       if (!isSupportedMainnet(selectedChain.enum)) {
         setError("Wallet connected, but select Bitcoin mainnet or Fractal Bitcoin mainnet to continue.");
       } else {
-        // Do not wait for a later React effect: refresh the account immediately after connection.
-        await loadInscriptions(false, undefined, selectedAddress);
       }
     } catch (cause) {
       setError(describeWalletError(cause, "UniSat connection was cancelled or failed."));
@@ -571,9 +587,6 @@ export function UniSatWalletConnect() {
       clearOwnedInscriptions();
       if (selectedChain.enum !== FRACTAL_MAINNET) {
         setError("UniSat did not confirm Fractal Bitcoin mainnet.");
-      } else if (address) {
-        // Switching to Fractal changes the wallet asset view; reload it immediately.
-        await loadInscriptions(false, undefined, address);
       }
     } catch (cause) {
       setError(describeWalletError(cause, "Network switch was cancelled or failed."));
@@ -588,10 +601,16 @@ export function UniSatWalletConnect() {
       setTransferError("Update UniSat Wallet to view inscriptions from this site.");
       return;
     }
+    const loadRun = ++inscriptionLoadRunRef.current;
+    inscriptionLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    inscriptionLoadControllerRef.current = controller;
+    setLoadingInscriptions(true);
     setBusy(true);
     setTransferError("");
     try {
       const currentChain = await window.unisat?.getChain?.();
+      if (controller.signal.aborted || loadRun !== inscriptionLoadRunRef.current) return;
       if (!isSupportedMainnet(currentChain?.enum)) {
         setChain(currentChain ?? null);
         clearOwnedInscriptions();
@@ -611,6 +630,7 @@ export function UniSatWalletConnect() {
       const loaded: UniSatInscription[] = [];
       do {
         const page = await provider.getInscriptions(cursor, INSCRIPTIONS_PAGE_SIZE);
+        if (controller.signal.aborted || loadRun !== inscriptionLoadRunRef.current) return;
         const currentItems = Array.isArray(page.list) ? page.list : [];
         total = Number.isFinite(page.total) ? page.total : cursor + currentItems.length;
         loaded.push(...currentItems.filter(item =>
@@ -644,19 +664,17 @@ export function UniSatWalletConnect() {
         setTransferError("UniSat returned no usable inscription IDs. Refresh the wallet and try again.");
       }
     } catch (cause) {
-      setTransferError(describeWalletError(cause, "Could not load inscriptions from UniSat."));
+      if (!controller.signal.aborted && loadRun === inscriptionLoadRunRef.current) {
+        setTransferError(describeWalletError(cause, "Could not load inscriptions from UniSat."));
+      }
     } finally {
-      setBusy(false);
+      if (loadRun === inscriptionLoadRunRef.current) {
+        inscriptionLoadControllerRef.current = null;
+        setLoadingInscriptions(false);
+        setBusy(false);
+      }
     }
   };
-
-  useEffect(() => {
-    if (!providerAvailable || !address || !isSupportedMainnet(chain?.enum) || inscriptionsLoaded) return;
-    const sessionKey = `${address}:${chain?.enum}`;
-    if (autoLoadKeyRef.current === sessionKey) return;
-    autoLoadKeyRef.current = sessionKey;
-    void loadInscriptions(false, undefined, address);
-  }, [providerAvailable, address, chain?.enum, inscriptionsLoaded]);
 
   useEffect(() => {
     if (!address || !isSupportedMainnet(chain?.enum)) { setWalletDashboard(null); return; }
@@ -885,23 +903,29 @@ export function UniSatWalletConnect() {
               <button
                 type="button"
                 onClick={() => void loadInscriptions()}
-                disabled={busy || transferBusy}
+                disabled={busy || transferBusy || loadingInscriptions}
                 className="border border-[#d99a54] bg-[#d99a54] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:opacity-50"
               >
-                {busy ? "Loading wallet…" : "Load my inscriptions"}
+                {loadingInscriptions ? "Loading wallet…" : "Load my inscriptions"}
+              </button>
+              {loadingInscriptions && (
+                <button type="button" onClick={stopLoadingInscriptions} disabled={transferBusy} className="border border-[#a45e54] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#e08b7d] hover:bg-[#a45e54]/10 disabled:opacity-50">
+                  Stop loading
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => void disconnectWallet()}
+                disabled={transferBusy}
+                className="border border-[#3b434d] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#d9d3c6] hover:border-[#d99a54] disabled:opacity-50"
+              >
+                Disconnect UniSat
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setAddress(null);
-                  setChain(null);
-                  setDestination("");
-                  clearOwnedInscriptions();
-                  setError("");
-                  setTransferError("");
-                }}
-                disabled={busy || transferBusy}
-                className="border border-[#3b434d] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#d9d3c6] hover:border-[#d99a54] disabled:opacity-50"
+                onClick={() => void disconnectWallet()}
+                disabled={transferBusy}
+                className="border border-[#a45e54] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#e08b7d] hover:bg-[#a45e54]/10 disabled:opacity-50"
               >
                 Clear session
               </button>
