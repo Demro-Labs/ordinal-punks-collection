@@ -29,6 +29,14 @@ import { COLLECTION_DATA_URL, COLLECTION_GENERATED_AT, INSCRIPTION_BASE_URL } fr
 import { cacheCollectionResponse, readCachedCollection } from "@/lib/collection-cache";
 import { requestUniSatTransfer } from "@/components/UniSatWalletConnect";
 
+const BUILD_META = import.meta.env as ImportMetaEnv & {
+  readonly VITE_GITHUB_SHA?: string;
+  readonly VITE_GITHUB_COMMIT_DATE?: string;
+};
+const GITHUB_BUILD_SHA = BUILD_META.VITE_GITHUB_SHA ?? "";
+const GITHUB_BUILD_DATE = BUILD_META.VITE_GITHUB_COMMIT_DATE ?? "";
+const GITHUB_REPOSITORY_URL = "https://github.com/Demro-Labs/ordinal-punks-collection";
+
 const PER_PAGE = 20;
 const TOTAL_ITEMS = 10000;
 const ASSET_BASE = import.meta.env.BASE_URL;
@@ -1167,6 +1175,19 @@ export default function Home() {
                   Copyright © 2026 Ordinal Punks Ledger. All rights reserved.
                 </p>
                 <p>Built for Fractal Bitcoin / Collection ID: opunk</p>
+                <p>
+                  Version GitHub: {" "}
+                  <a
+                    href={GITHUB_BUILD_SHA ? `${GITHUB_REPOSITORY_URL}/commit/${GITHUB_BUILD_SHA}` : GITHUB_REPOSITORY_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={GITHUB_BUILD_SHA ? `Voir le commit ${GITHUB_BUILD_SHA}` : "Dépôt GitHub"}
+                    className="text-[#d9d3c6] underline decoration-[#d99a54] underline-offset-2"
+                  >
+                    #{GITHUB_BUILD_SHA ? GITHUB_BUILD_SHA.slice(0, 7) : "dev"}
+                  </a>
+                  {GITHUB_BUILD_DATE && <> · <time dateTime={GITHUB_BUILD_DATE}>{GITHUB_BUILD_DATE}</time></>}
+                </p>
               </div>
             </div>
           </footer>
