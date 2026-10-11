@@ -281,7 +281,7 @@ function DetailPanel({
             </a>
             <button
               type="button"
-              className="mt-3 inline-flex min-h-12 items-center justify-center gap-2 border border-[#d99a54] px-5 font-mono text-xs uppercase tracking-[0.14em] text-[#f2bd63] transition-colors hover:bg-[#d99a54]/10"
+              className="mt-2 flex w-full items-center justify-center gap-1 border border-[#d99a54]/70 py-2 font-mono text-[9px] uppercase tracking-[0.1em] text-[#f2bd63] hover:bg-[#d99a54]/10"
               onClick={() => onTransfer(record.id)}
             >
               Transfer this inscription
