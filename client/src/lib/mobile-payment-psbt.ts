@@ -1,4 +1,7 @@
 import * as bitcoin from "bitcoinjs-lib";
+import ecc from "@bitcoinerlab/secp256k1";
+
+bitcoin.initEccLib(ecc);
 
 type RawProviderUtxo = {
   txid?: unknown;
@@ -69,6 +72,7 @@ export async function sendMobilePayment(params: {
 
   let selected: typeof candidates = [];
   let change = 0;
+  let funded = false;
   for (const candidate of candidates) {
     selected = [...selected, candidate];
     const estimatedVbytes = 10 + selected.length * 110 + 2 * 34;
@@ -76,17 +80,19 @@ export async function sendMobilePayment(params: {
     const possibleChange = selected.reduce((sum, item) => sum + item.value, 0) - amount - fee;
     if (possibleChange >= DUST) {
       change = possibleChange;
+      funded = true;
       break;
     }
     const feeWithoutChange = Math.ceil((10 + selected.length * 110 + 34) * feeRate);
     const remainder = selected.reduce((sum, item) => sum + item.value, 0) - amount - feeWithoutChange;
     if (remainder >= 0 && remainder <= Math.max(200, Math.ceil(feeRate * 25))) {
       change = 0;
+      funded = true;
       break;
     }
   }
 
-  if (!selected.length || (change === 0 && selected.reduce((sum, item) => sum + item.value, 0) < amount)) {
+  if (!selected.length || !funded) {
     throw new Error("Solde UniSat mobile insuffisant après exclusion des UTXO contenant des inscriptions.");
   }
 
