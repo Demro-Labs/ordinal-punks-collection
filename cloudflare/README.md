@@ -1,18 +1,7 @@
-# Turnstile verification Worker
+# Worker Turnstile historique (inutilisé par les sites)
 
-Shared server-side verifier used by the Ordinal Punks and Pokédex GitHub Pages apps.
+Depuis la suppression de Turnstile des sites Ordinal Punks et Pokedex, ni leurs interfaces ni le Worker `fractal-ordinal-live` n’appellent le vérificateur décrit ici. L’endpoint d’inscription ne demande plus de session ni de preuve Turnstile.
 
-- Production endpoint: `https://turnstile-human-verification.servostar23.workers.dev/api`
-- Widget hostname: `demro-labs.github.io`
-- Allowed actions: `ordinal-punks` and `pokedex`
-- API routes: `POST /verify` validates a Turnstile response with Cloudflare Siteverify and returns an HMAC-signed 12-hour session; `POST /session` validates that session and its action.
-- Worker secrets are Cloudflare secret bindings named `TURNSTILE_SECRET` and `SESSION_SECRET`. Never add their values to this repository.
-- The sitekey in each app is public by design; server validation binds tokens to the expected hostname and action.
+La ressource Cloudflare autonome `turnstile-human-verification` et son code source sont conservés, mais elle est désormais inutilisée par ces deux sites. Elle n’a pas été supprimée ni reconfigurée, car elle pourrait être appelée par un autre consommateur. Ne pas la déployer comme dépendance de ces sites.
 
-To deploy changes, upload `turnstile-verification-worker.js` as the `turnstile-human-verification` Worker module, preserve the two secret bindings, and keep its `workers.dev` subdomain enabled. Run the local test suite with:
-
-```sh
-node --test cloudflare/turnstile-verification-worker.test.mjs
-```
-
-The sites remain hosted on GitHub Pages. The gate protects normal application rendering after server validation; it does not prevent direct requests to GitHub Pages static assets.
+Le code historique et ses tests restent présents pour référence ou restauration explicite. Les bindings Cloudflare `TURNSTILE_SECRET` et `SESSION_SECRET` ne doivent jamais être ajoutés à ce dépôt ni affichés.

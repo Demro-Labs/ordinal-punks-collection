@@ -60,7 +60,7 @@ function walletErrorMessage(error: unknown) {
 }
 
 
-export function UniSatInscribePanel({ verificationAction }: { verificationAction: "ordinal-punks" | "pokedex" }) {
+export function UniSatInscribePanel() {
   const [address, setAddress] = useState("");
   const [chain, setChain] = useState<Chain | null>(null);
   const [open, setOpen] = useState(false);
@@ -203,7 +203,12 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
       await loadLiveWalletData(activeChainEnum);
       let response: Response;
       try {
-        response = await fetch(`${API_BASE}/api/inscribe/order`, { mode: "cors", method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ receiver: activeAddress, refundAddress: activeAddress, userAddress: activeAddress, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: activeChainEnum, files: encodedFiles }) });
+        response = await fetch(`${API_BASE}/api/inscribe/order`, {
+          mode: "cors",
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ receiver: activeAddress, refundAddress: activeAddress, userAddress: activeAddress, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: activeChainEnum, files: encodedFiles }),
+        });
       } catch {
         throw new Error("Le service d’inscription UniSat est inaccessible. Vérifiez la connexion réseau, puis réessayez sans fermer le wallet.");
       }
