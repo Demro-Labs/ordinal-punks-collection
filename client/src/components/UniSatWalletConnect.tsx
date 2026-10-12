@@ -226,9 +226,15 @@ async function ensureFeeBalance(
 
 const WALLET_REQUEST_TIMEOUT_MS = 30_000;
 const UNISAT_MOBILE_APP_NAME = "Ordinal Punks";
+const UNISAT_MOBILE_CONTEXT_PARAM = "unisatMobile";
 
 function isMobileBrowser() {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function isUniSatMobileContext() {
+  return new URLSearchParams(window.location.search).get(UNISAT_MOBILE_CONTEXT_PARAM) === "1"
+    || Boolean(window.unisat);
 }
 
 function openUniSatMobileWallet() {
@@ -236,8 +242,9 @@ function openUniSatMobileWallet() {
   // UniSat's mobile connect deeplink returns to a custom app scheme, which
   // Safari/Chrome cannot receive. The official openDapp flow loads this site
   // inside UniSat's in-app browser where window.unisat is injected.
-  const dappUrl = window.location.href;
-  const data = btoa(JSON.stringify([dappUrl]));
+  const dappUrl = new URL(window.location.href);
+  dappUrl.searchParams.set(UNISAT_MOBILE_CONTEXT_PARAM, "1");
+  const data = btoa(JSON.stringify([dappUrl.toString()]));
   const query = new URLSearchParams({
     method: "openDapp",
     from: UNISAT_MOBILE_APP_NAME,
@@ -277,6 +284,9 @@ function describeWalletError(cause: unknown, fallback: string) {
     code = typeof details.code === "string" || typeof details.code === "number"
       ? ` (code ${details.code})`
       : "";
+  }
+  if (/toAddress/i.test(message) && /undefined/i.test(message)) {
+    return `${message}${code}. UniSat Mobile returned an incomplete transfer response. Do not retry until you check UniSat activity and Mempool for a possible broadcast. Update UniSat Wallet, reopen this page in its in-app browser, and review the destination and final approval screen. Ordinal Punks does not build a custom PSBT.`;
   }
   if (/dust|0-fee/i.test(message)) {
     return `${message}${code}. The network relay policy rejected a transaction that contains a dust output while paying a non-zero fee. The offending output may be the inscription sent to the recipient or the wallet's change; adding BTC/FB only helps if it removes a dust change output. UniSat sendInscription exposes a fee rate but no output-value control, and a Mempool or Cloudflare API key cannot override this policy.`;
@@ -751,8 +761,8 @@ export function UniSatWalletConnect() {
     setTxid("");
     setFinalReceipt(null);
 
-    if (isMobileBrowser()) {
-      setTransferError("UniSat mobile returned `toAddress` as undefined. Mobile transfer is paused; no signature or broadcast will be requested. Use UniSat's native desktop transfer. Inscribe is unaffected.");
+    if (isMobileBrowser() && !isUniSatMobileContext()) {
+      setTransferError("Open this page in UniSat's in-app browser before transferring. No transfer request was sent.");
       return;
     }
     if (!provider?.getChain || !provider.sendInscription) {
@@ -1036,7 +1046,7 @@ export function UniSatWalletConnect() {
               <p><span className="text-[#718092]">Asset:</span> {selectedInscription.inscriptionId}</p>
               <p className="break-all"><span className="text-[#718092]">Recipient:</span> {destination.trim()}</p>
               <div className="mt-3 border border-[#d99a54]/60 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]" aria-label="Transfer pre-confirmation receipt"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live pre-confirmation receipt</p><p><span className="text-[#718092]">Network:</span> {currentNetwork?.label}</p><p className="break-all"><span className="text-[#718092]">Wallet:</span> {address}</p><p className="break-all"><span className="text-[#718092]">Inscription:</span> {selectedInscription.inscriptionId}</p><p className="break-all"><span className="text-[#718092]">Location:</span> {selectedInscription.location ?? "Not provided by UniSat"}</p><p className="break-all"><span className="text-[#718092]">Recipient:</span> {destination.trim()}</p><p><span className="text-[#718092]">Fee estimate:</span> {mempoolFeeRate ? `${feeSourceLabel || "Live fee source"}: ${mempoolFeeRate} sat/vB · refreshed before signing` : "Live fee source estimate refreshed immediately before wallet approval"}</p>{transferLiveLoading && <p><span className="text-[#718092]">Live inscription data:</span> synchronizing…</p>}{transferLiveData && <><p><span className="text-[#718092]">Current owner:</span> {transferLiveData.owner ?? "Unavailable"}</p><p><span className="text-[#718092]">Listing:</span> {transferLiveData.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Live refresh:</span> {new Date(transferLiveData.refreshedAt).toLocaleString()}</p></>}{transferLiveError && <p className="text-[#e08b7d]"><span className="text-[#718092]">Live data:</span> {transferLiveError}</p>}<p className="mt-1 text-[#a45e54]">The transfer is irreversible after signing and broadcast. UniSat will show the final transaction before approval.</p></div>
-            <label className="mt-3 flex cursor-pointer items-start gap-2 text-[#d9d3c6]">
+              <label className="mt-3 flex cursor-pointer items-start gap-2 text-[#d9d3c6]">
                 <input
                   type="checkbox"
                   checked={confirmed}
@@ -1045,15 +1055,24 @@ export function UniSatWalletConnect() {
                 />
                 <span>I checked this inscription and destination. I understand the on-chain transfer cannot be reversed.</span>
               </label>
+              {isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) && (
+                <button
+                  type="button"
+                  onClick={() => openUniSatMobileWallet()}
+                  className="mt-3 border border-[#3b434d] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#d9d3c6] hover:border-[#d99a54]"
+                >
+                  Open this page in UniSat
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => void sendSelectedInscription()}
-                disabled={isMobileBrowser() || !confirmed || transferBusy || busy || transferLiveLoading}
+                disabled={(isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable)) || !confirmed || transferBusy || busy || transferLiveLoading}
                 className="mt-3 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {isMobileBrowser() ? "Mobile transfer paused — UniSat error" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
+                {isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
               </button>
-              {isMobileBrowser() && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">UniSat mobile failed to provide the documented `toAddress` parameter. The site will not retry with a custom PSBT. Use the native desktop transfer; Inscribe is unaffected.</p>}
+              {isMobileBrowser() && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">Mobile transfer uses only UniSat’s native `sendInscription` approval inside the UniSat in-app browser. Check the inscription, network, recipient and final wallet confirmation. This site does not construct a custom PSBT.</p>}
             </div>
           )}
           {inscriptionCursor < inscriptionTotal && (
