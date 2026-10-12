@@ -340,7 +340,36 @@ test('fails closed when a protocol balance response is missing or malformed', as
   try {
     const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.231' }), { UNISAT_API_KEY: 'test-only' });
     assert.equal(response.status, 503);
-    assert.match((await response.json()).error, /temporarily unavailable/i);
+    const data = await response.json();
+    assert.match(data.error, /temporarily unavailable/i);
+    assert.equal(data.code, 'RUNES_INVALID_RESPONSE');
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('returns a stage-specific UniSat error code without echoing the wallet address', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  globalThis.fetch = async () => new Response('upstream unavailable', { status: 429 });
+  try {
+    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=bitcoin&address=${address}&cursor=0&size=25`, { ip: '192.0.2.235' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(data.code, 'UTXO_LIST_UNISAT_HTTP_429');
+    assert.equal(JSON.stringify(data).includes(address), false);
+    assert.equal(JSON.stringify(data).includes('test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('returns 400 for an invalid spendable UTXO query without calling UniSat', async () => {
+  const previousFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => { upstreamCalls += 1; throw new Error('Unexpected upstream call'); };
+  try {
+    const response = await worker.fetch(makeRequest('/api/spendable-utxos?chain=unknown&address=bc1qtestaddress0000000000000000000000000', { ip: '192.0.2.236' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 400);
+    assert.equal(data.code, 'INVALID_QUERY');
+    assert.equal(upstreamCalls, 0);
   } finally { globalThis.fetch = previousFetch; }
 });
 
@@ -371,6 +400,7 @@ test('rejects an oversized UniSat page instead of skipping uninspected outpoints
   try {
     const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.232' }), { UNISAT_API_KEY: 'test-only' });
     assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, 'UTXO_PAGE_OVERSIZED');
     assert.equal(detailLookups, 0);
   } finally { globalThis.fetch = previousFetch; }
 });

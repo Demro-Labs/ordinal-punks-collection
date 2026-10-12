@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CheckCircle2, ExternalLink, FilePlus2, Files, ShieldCheck, Upload, X } from "lucide-react";
 import { describeFeeSources, getRecommendedFeeEstimate, getRecommendedFeeRate, trackMempoolTransaction, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
 import { sendMobilePayment, type MobilePaymentProvider } from "@/lib/mobile-payment-psbt";
+import { getHumanVerificationHeaders } from "@/lib/human-verification";
 
 const API_BASE = "https://fractal-ordinal-live.servostar23.workers.dev";
 const MAX_FILE_BYTES = 365 * 1024;
@@ -197,13 +198,25 @@ export function UniSatInscribePanel({ verificationAction }: { verificationAction
         setStage("idle");
         return setMessage("Réseau UniSat non pris en charge. Sélectionnez Bitcoin mainnet ou Fractal Bitcoin mainnet dans le wallet.");
       }
+      let storedVerificationSession: string | null = null;
+      try { storedVerificationSession = window.localStorage.getItem(`demro-human-verification:v1:${verificationAction}`); } catch { /* Storage may be disabled. */ }
+      const verificationHeaders = getHumanVerificationHeaders(verificationAction, storedVerificationSession);
+      if (!verificationHeaders) {
+        setStage("idle");
+        return setMessage("La session Cloudflare Turnstile est absente ou expirée. Ouvrez le site dans un navigateur où vous pouvez terminer la vérification, puis réessayez.");
+      }
       const [encodedFiles, publicKey] = await Promise.all([Promise.all(files.map(async file => ({ filename: file.name, dataURL: await readAsDataUrl(file) }))), provider.getPublicKey()]);
       const feeEstimate = await getRecommendedFeeEstimate(activeChainEnum);
       const liveFeeRate = feeEstimate.feeRate;
       await loadLiveWalletData(activeChainEnum);
       let response: Response;
       try {
-        response = await fetch(`${API_BASE}/api/inscribe/order`, { mode: "cors", method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ receiver: activeAddress, refundAddress: activeAddress, userAddress: activeAddress, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: activeChainEnum, files: encodedFiles }) });
+        response = await fetch(`${API_BASE}/api/inscribe/order`, {
+          mode: "cors",
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json", ...verificationHeaders },
+          body: JSON.stringify({ receiver: activeAddress, refundAddress: activeAddress, userAddress: activeAddress, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: activeChainEnum, files: encodedFiles }),
+        });
       } catch {
         throw new Error("Le service d’inscription UniSat est inaccessible. Vérifiez la connexion réseau, puis réessayez sans fermer le wallet.");
       }

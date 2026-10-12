@@ -23,7 +23,15 @@ async function requestJson<T>(url: string, timeoutMs = 8_000): Promise<T> {
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { cache: "no-store", signal: controller.signal, headers: { Accept: "application/json" } });
-    if (!response.ok) throw new Error(`Mempool HTTP ${response.status}`);
+    if (!response.ok) {
+      if (new URL(url).origin === new URL(LIVE_DATA_API_BASE).origin) {
+        const failure = await response.json().catch(() => null) as { error?: unknown; code?: unknown } | null;
+        const message = typeof failure?.error === "string" ? failure.error : `Live API HTTP ${response.status}`;
+        const code = typeof failure?.code === "string" && /^[A-Z0-9_]{1,80}$/.test(failure.code) ? ` [${failure.code}]` : "";
+        throw new Error(`${message}${code}`);
+      }
+      throw new Error(`Mempool HTTP ${response.status}`);
+    }
     return await response.json() as T;
   } finally { window.clearTimeout(timer); }
 }

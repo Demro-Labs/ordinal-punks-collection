@@ -173,17 +173,45 @@ function validWalletAddress(value) {
   return typeof value === 'string' && value.length >= 14 && value.length <= 100 && /^[A-Za-z0-9]+$/.test(value);
 }
 
+class SpendableUtxoError extends Error {
+  constructor(code, status = 503) {
+    super(code);
+    this.name = 'SpendableUtxoError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+function safeUniSatFailureCode(error) {
+  const message = error instanceof Error ? error.message : '';
+  if (message === 'UniSat server binding is missing') return 'UNISAT_KEY_MISSING';
+  const status = message.match(/^UniSat upstream returned (\d{3})$/);
+  if (status) return `UNISAT_HTTP_${status[1]}`;
+  if (message === 'UniSat upstream rejected the request') return 'UNISAT_REJECTED';
+  return 'UPSTREAM_CONNECTION_OR_RESPONSE';
+}
+
+async function spendableUtxoStage(stage, operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof SpendableUtxoError) throw error;
+    throw new SpendableUtxoError(`${stage}_${safeUniSatFailureCode(error)}`);
+  }
+}
+
 async function spendableUtxos(request, env, corsHeaders) {
   const url = new URL(request.url);
   const chain = url.searchParams.get('chain') || '';
   const address = url.searchParams.get('address') || '';
   const cursor = parseBoundedInteger(url.searchParams.get('cursor'), 0, 1000000);
   const requestedSize = parseBoundedInteger(url.searchParams.get('size'), 25, 25);
-  if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new Error('Invalid spendable UTXO query.');
+  if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new SpendableUtxoError('INVALID_QUERY', 400);
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
-  const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}`, env);
-  const raw = Array.isArray(source?.utxo) ? source.utxo : [];
-  if (raw.length > requestedSize) throw new Error('UniSat returned an oversized spendable UTXO page.');
+  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
+  if (!Array.isArray(source?.utxo)) throw new SpendableUtxoError('UTXO_LIST_INVALID_RESPONSE');
+  const raw = source.utxo;
+  if (raw.length > requestedSize) throw new SpendableUtxoError('UTXO_PAGE_OVERSIZED');
   const checked = [];
   for (const item of raw.slice(0, 25)) {
     const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
@@ -192,14 +220,14 @@ async function spendableUtxos(request, env, corsHeaders) {
     const scriptPk = typeof item?.scriptPk === 'string' ? item.scriptPk.toLowerCase() : '';
     const height = Number(item?.height);
     if (item?.address !== address || !/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !Number.isSafeInteger(satoshi) || satoshi < 600 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) || !Number.isSafeInteger(height) || height <= 0 || item?.isLowFee !== false || item?.isOpInRBF !== false || !Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0) continue;
-    const detail = await uniNetwork(base, `/v1/indexer/utxo/${txid}/${vout}`, env);
+    const detail = await spendableUtxoStage('UTXO_DETAIL', () => uniNetwork(base, `/v1/indexer/utxo/${txid}/${vout}`, env));
     if (String(detail?.txid || '').toLowerCase() !== txid || Number(detail?.vout) !== vout || detail?.address !== address || Number(detail?.satoshi) !== satoshi || String(detail?.scriptPk || '').toLowerCase() !== scriptPk || !Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0 || detail?.isSpent !== false || detail?.isOpInRBF !== false || !Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0) continue;
-    const runes = await uniNetwork(base, `/v1/indexer/runes/utxo/${txid}/${vout}/balance`, env);
-    if (!Array.isArray(runes)) throw new Error('UniSat returned an incomplete Rune balance response.');
+    const runes = await spendableUtxoStage('RUNES_BALANCE', () => uniNetwork(base, `/v1/indexer/runes/utxo/${txid}/${vout}/balance`, env));
+    if (!Array.isArray(runes)) throw new SpendableUtxoError('RUNES_INVALID_RESPONSE');
     if (runes.length !== 0) continue;
     if (chain === 'fractal') {
-      const alkanes = await uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env);
-      if (!Array.isArray(alkanes)) throw new Error('UniSat returned an incomplete Alkane balance response.');
+      const alkanes = await spendableUtxoStage('ALKANES_BALANCE', () => uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env));
+      if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
       if (alkanes.length !== 0) continue;
     }
     checked.push({ address, txid, vout, satoshi, scriptPk, height, isLowFee: false, isOpInRBF: false, inscriptions: [], inscriptionsRunesAlkanesChecked: true });
@@ -460,7 +488,12 @@ export default {
     }
     if (request.method === 'GET' && url.pathname === '/api/spendable-utxos') {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
-      try { return await spendableUtxos(request, env, headers); } catch { return Response.json({ error: 'Live UniSat data is temporarily unavailable.' }, { status: 503, headers: { ...headers, 'Cache-Control': 'no-store' } }); }
+      try { return await spendableUtxos(request, env, headers); } catch (error) {
+        const failure = error instanceof SpendableUtxoError ? error : new SpendableUtxoError('UTXO_SCAN_FAILED');
+        const message = failure.status === 400 ? 'Invalid spendable UTXO query.' : 'Live UniSat data is temporarily unavailable.';
+        if (failure.status !== 400) console.warn('Spendable UTXO lookup failed', { chain: url.searchParams.get('chain') || 'unknown', code: failure.code });
+        return Response.json({ error: message, code: failure.code }, { status: failure.status, headers: { ...headers, 'Cache-Control': 'no-store' } });
+      }
     }
     if (request.method === 'POST' && url.pathname === '/api/inscribe/order') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
