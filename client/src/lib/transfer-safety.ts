@@ -29,15 +29,16 @@ function getErrorMessage(value: unknown): string {
 }
 
 /**
- * A wallet response error after sendInscription may occur after broadcast.
- * Treat these cases as indeterminate until the user checks wallet history and
- * the selected network's mempool; do not offer an immediate retry.
+ * A wallet response error or an interrupted Mempool broadcast may occur after
+ * the transaction was accepted. Treat these cases as indeterminate until the
+ * user checks wallet history and the selected network's mempool.
  */
 export function isTransferOutcomeUnclear(value: unknown): boolean {
   const message = getErrorMessage(value);
   return (
     (/toAddress/i.test(message) && /undefined/i.test(message)) ||
     /returned an incomplete transfer response/i.test(message) ||
-    /did not return a valid transaction id/i.test(message)
+    /did not return a valid transaction id/i.test(message) ||
+    /BROADCAST_OUTCOME_UNCLEAR|broadcast outcome is uncertain/i.test(message)
   );
 }

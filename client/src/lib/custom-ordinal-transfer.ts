@@ -5,6 +5,7 @@ import {
   buildOrdinalTransferPsbt,
   extractAndVerifySignedOrdinalTransaction,
   type OrdinalLocation,
+  type OrdinalTransferPlan,
   type PreviousOutputRef,
 } from "./ordinal-transfer-psbt";
 
@@ -88,7 +89,7 @@ export function assertProtocolAssetScanPassed(
   if (
     !value ||
     typeof value !== "object" ||
-    (value as Record<string, unknown>).protocolAssetsChecked !== true
+    (value as Record<string, unknown>).inscriptionsRunesAlkanesChecked !== true
   ) {
     throw new Error(
       "The UniSat safe-UTXO service did not verify inscriptions, Runes, and Alkanes for this output."
@@ -367,6 +368,7 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
   selectedInscription: OrdinalLocation;
   ownedInscriptions: OrdinalLocation[];
   feeRateSatVb: number;
+  beforeSign?: (plan: OrdinalTransferPlan) => Promise<boolean>;
   beforeBroadcast?: (publicKeyHex: string) => Promise<void>;
 }) {
   const {
@@ -435,6 +437,18 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
     feeRateSatVb,
   });
 
+  if (params.beforeSign && !(await params.beforeSign(plan))) {
+    throw new Error(
+      "Transfer cancelled before signing; no transaction was signed or broadcast."
+    );
+  }
+  await assertWalletSession(
+    provider,
+    currentAddress,
+    expectedNetworkEnum,
+    publicKeyHex
+  );
+
   const signedPsbtHex = await provider.signPsbt(plan.psbtHex, {
     autoFinalized: false,
     toSignInputs: plan.inputs.map((input, index) => ({
@@ -461,18 +475,26 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
   );
   if (params.beforeBroadcast) await params.beforeBroadcast(publicKeyHex);
 
-  const broadcastResult = await fetchText(`${mempool.api}/api/tx`, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain" },
-    body: rawTxHex,
-  });
   const expectedTxid = bitcoin.Transaction.fromHex(rawTxHex)
     .getId()
     .toLowerCase();
-  const returnedTxid = broadcastResult.replace(/^"|"$/g, "").toLowerCase();
+  let broadcastResult: string;
+  try {
+    broadcastResult = await fetchText(`${mempool.api}/api/tx`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: rawTxHex,
+    });
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `BROADCAST_OUTCOME_UNCLEAR: ${detail}. Check the Fractal Mempool for ${expectedTxid} before retrying.`
+    );
+  }
+  const returnedTxid = broadcastResult.replace(/^\"|\"$/g, "").toLowerCase();
   if (returnedTxid !== expectedTxid) {
     throw new Error(
-      "Mempool did not confirm the expected transaction ID; check the wallet before retrying."
+      `BROADCAST_OUTCOME_UNCLEAR: Mempool did not confirm expected transaction ${expectedTxid}; check Fractal Mempool before retrying.`
     );
   }
   return { txid: returnedTxid, plan };
