@@ -765,6 +765,10 @@ export function UniSatWalletConnect() {
       setTransferError("Open this page in UniSat's in-app browser before transferring. No transfer request was sent.");
       return;
     }
+    if (isMobileBrowser() && chain?.enum === FRACTAL_MAINNET) {
+      setTransferError("Mobile transfers on Fractal Bitcoin are temporarily paused after UniSat Mobile returned `toAddress` undefined on iOS 1.7.20. Use UniSat on desktop; do not retry on mobile until UniSat fixes this native method. No custom PSBT is used.");
+      return;
+    }
     if (!provider?.getChain || !provider.sendInscription) {
       setTransferError("Update UniSat Wallet to enable inscription transfers.");
       return;
@@ -793,6 +797,10 @@ export function UniSatWalletConnect() {
       if (!activeNetworkEnum || activeNetworkEnum !== chain?.enum || !isSupportedMainnet(activeNetworkEnum)) {
         setChain(currentChain);
         throw new Error("The wallet network changed. Reload inscriptions and review the transfer on the selected mainnet.");
+      }
+      if (isMobileBrowser() && activeNetworkEnum === FRACTAL_MAINNET) {
+        setTransferError("Mobile transfers on Fractal Bitcoin are temporarily paused after UniSat Mobile returned `toAddress` undefined. Use UniSat on desktop; no custom PSBT is used.");
+        return;
       }
       if (provider.getAccounts) {
         const currentAccounts = await provider.getAccounts();
@@ -832,6 +840,7 @@ export function UniSatWalletConnect() {
 
   const connectedToFractal = Boolean(address && isSupportedMainnet(chain?.enum));
   const currentNetwork = getMempoolConfig(chain?.enum);
+  const mobileFractalTransferPaused = isMobileBrowser() && chain?.enum === FRACTAL_MAINNET;
   const walletPageSize = 10;
   const normalizedInscriptionSearch = inscriptionSearch.trim().toLowerCase();
   const filteredInscriptions = normalizedInscriptionSearch
@@ -1067,12 +1076,12 @@ export function UniSatWalletConnect() {
               <button
                 type="button"
                 onClick={() => void sendSelectedInscription()}
-                disabled={(isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable)) || !confirmed || transferBusy || busy || transferLiveLoading}
+                disabled={mobileFractalTransferPaused || (isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable)) || !confirmed || transferBusy || busy || transferLiveLoading}
                 className="mt-3 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
+                {mobileFractalTransferPaused ? "Fractal mobile transfer paused" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
               </button>
-              {isMobileBrowser() && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">Mobile transfer uses only UniSat’s native `sendInscription` approval inside the UniSat in-app browser. Check the inscription, network, recipient and final wallet confirmation. This site does not construct a custom PSBT.</p>}
+              {mobileFractalTransferPaused ? <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">Mobile transfer on Fractal Bitcoin is paused because UniSat Mobile 1.7.20 returned `toAddress` undefined in its native method. Use UniSat on desktop until this is fixed. No custom PSBT is generated.</p> : isMobileBrowser() && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">Mobile transfer uses only UniSat’s native `sendInscription` approval inside the UniSat in-app browser. Check the inscription, network, recipient and final wallet confirmation. This site does not construct a custom PSBT.</p>}
             </div>
           )}
           {inscriptionCursor < inscriptionTotal && (
