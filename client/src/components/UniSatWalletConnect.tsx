@@ -779,10 +779,6 @@ export function UniSatWalletConnect() {
       setTransferError("Open this page in UniSat's in-app browser before transferring. No transfer request was sent.");
       return;
     }
-    if (isMobileBrowser() && chain?.enum === FRACTAL_MAINNET) {
-      setTransferError("Mobile transfers on Fractal Bitcoin are temporarily paused after UniSat Mobile returned `toAddress` undefined on iOS 1.7.20. Use UniSat on desktop; do not retry on mobile until UniSat fixes this native method. No custom PSBT is used.");
-      return;
-    }
     if (!provider?.getChain || !provider.sendInscription) {
       setTransferError("Update UniSat Wallet to enable inscription transfers.");
       return;
@@ -811,10 +807,6 @@ export function UniSatWalletConnect() {
       if (!activeNetworkEnum || activeNetworkEnum !== chain?.enum || !isSupportedMainnet(activeNetworkEnum)) {
         setChain(currentChain);
         throw new Error("The wallet network changed. Reload inscriptions and review the transfer on the selected mainnet.");
-      }
-      if (isMobileBrowser() && activeNetworkEnum === FRACTAL_MAINNET) {
-        setTransferError("Mobile transfers on Fractal Bitcoin are temporarily paused after UniSat Mobile returned `toAddress` undefined. Use UniSat on desktop; no custom PSBT is used.");
-        return;
       }
       if (provider.getAccounts) {
         const currentAccounts = await provider.getAccounts();
@@ -864,7 +856,7 @@ export function UniSatWalletConnect() {
 
   const connectedToFractal = Boolean(address && isSupportedMainnet(chain?.enum));
   const currentNetwork = getMempoolConfig(chain?.enum);
-  const mobileFractalTransferPaused = isMobileBrowser() && chain?.enum === FRACTAL_MAINNET;
+  const mobileFractalTransferOnFractal = isMobileBrowser() && chain?.enum === FRACTAL_MAINNET;
   const walletPageSize = 10;
   const normalizedInscriptionSearch = inscriptionSearch.trim().toLowerCase();
   const filteredInscriptions = normalizedInscriptionSearch
@@ -1004,10 +996,10 @@ export function UniSatWalletConnect() {
         </div>
       </div>
 
-      {connectedToFractal && mobileFractalTransferPaused && (
-        <div className="border-y border-[#d99a54]/50 bg-[#d99a54]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="alert">
-          <p className="uppercase tracking-[0.12em]">Mobile transfer paused on Fractal Bitcoin</p>
-          <p className="mt-1">This page will not submit a new Fractal transfer from a mobile browser. Check UniSat activity and Fractal Mempool for any earlier attempt before doing anything else. Use UniSat on desktop or wait for an officially supported mobile flow; this notice is not an RBF or PSBT replacement.</p>
+      {connectedToFractal && mobileFractalTransferOnFractal && (
+        <div className="border-y border-[#d99a54]/50 bg-[#d99a54]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">
+          <p className="uppercase tracking-[0.12em]">Fractal mobile transfer is enabled</p>
+          <p className="mt-1">This uses UniSat’s native `sendInscription` approval. UniSat Mobile has previously returned an incomplete response on this path; if the response is incomplete or no TXID is returned, do not retry until you check UniSat activity and Fractal Mempool. Final transaction approval remains in UniSat.</p>
         </div>
       )}
       {transferOutcomeUnclear && (
@@ -1118,12 +1110,12 @@ export function UniSatWalletConnect() {
               <button
                 type="button"
                 onClick={() => void sendSelectedInscription()}
-                disabled={transferOutcomeUnclear || mobileFractalTransferPaused || (isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable)) || !confirmed || transferBusy || busy || transferLiveLoading}
+                disabled={transferOutcomeUnclear || (isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable)) || !confirmed || transferBusy || busy || transferLiveLoading}
                 className="mt-3 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {transferOutcomeUnclear ? "Transfer status unknown — verify first" : mobileFractalTransferPaused ? "Fractal mobile transfer paused" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
+                {transferOutcomeUnclear ? "Transfer status unknown — verify first" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
               </button>
-              {isMobileBrowser() && !mobileFractalTransferPaused && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">Mobile transfer uses only UniSat’s native `sendInscription` approval inside the UniSat in-app browser. Check the inscription, network, recipient and final wallet confirmation. This site does not construct a custom PSBT.</p>}
+              {isMobileBrowser() && !mobileFractalTransferOnFractal && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">Mobile transfer uses only UniSat’s native `sendInscription` approval inside the UniSat in-app browser. Check the inscription, network, recipient and final wallet confirmation. This site does not construct a custom PSBT.</p>}
             </div>
           )}
           {inscriptionCursor < inscriptionTotal && (
