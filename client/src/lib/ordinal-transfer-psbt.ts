@@ -12,6 +12,7 @@ const MAINNET = bitcoin.networks.bitcoin;
 export const MIN_SAFE_OUTPUT_SATS = 1_200;
 const MAX_FEE_RATE_SAT_VB = 1_000;
 const MAX_INPUTS = 20;
+export const RBF_SEQUENCE = 0xfffffffd;
 
 export type SpendType =
   | "legacy"
@@ -282,9 +283,9 @@ function estimateVsize(inputs: PreparedInput[], scripts: string[]) {
   );
 }
 
-function addPsbtInput(psbt: bitcoin.Psbt, input: PreparedInput) {
+function addPsbtInput(psbt: bitcoin.Psbt, input: PreparedInput, sequence: number) {
   const script = decodeHex(input.scriptHex, "input script");
-  const common = { hash: input.txid, index: input.vout, sequence: 0xffffffff };
+  const common = { hash: input.txid, index: input.vout, sequence };
   if (input.spendType === "legacy") {
     psbt.addInput({
       ...common,
@@ -502,7 +503,7 @@ export function buildOrdinalTransferPsbt(params: {
 
   const psbt = new bitcoin.Psbt({ network: MAINNET });
   psbt.setVersion(2);
-  for (const input of inputs) addPsbtInput(psbt, input);
+  for (const input of inputs) addPsbtInput(psbt, input, RBF_SEQUENCE);
   for (const output of outputs) {
     psbt.addOutput({
       script: decodeHex(output.scriptHex, "transaction output script"),
@@ -515,7 +516,7 @@ export function buildOrdinalTransferPsbt(params: {
     publicKeyHex: publicKey.toString("hex"),
     transactionVersion: 2,
     lockTime: 0,
-    inputSequence: 0xffffffff,
+    inputSequence: RBF_SEQUENCE,
     inscriptionOutpoint,
     inscriptionOffsetSats: location.offsetSats,
     recipientOutputSats,

@@ -7,6 +7,7 @@ import {
   extractAndVerifySignedOrdinalTransaction,
   identifyStandardOutputScript,
   MIN_SAFE_OUTPUT_SATS,
+  RBF_SEQUENCE,
   type PreviousOutputRef,
   type SpendType,
 } from "./ordinal-transfer-psbt";
@@ -120,6 +121,7 @@ describe("experimental Ordinal PSBT constructor", () => {
         plan
       );
       const transaction = bitcoin.Transaction.fromHex(rawTx);
+      expect(plan.inputSequence).toBe(RBF_SEQUENCE);
       expect(transaction.ins).toHaveLength(plan.inputs.length);
       expect(transaction.outs).toHaveLength(plan.outputs.length);
       expect(transaction.version).toBe(plan.transactionVersion);
@@ -127,6 +129,7 @@ describe("experimental Ordinal PSBT constructor", () => {
       expect(
         transaction.ins.every(input => input.sequence === plan.inputSequence)
       ).toBe(true);
+      expect(transaction.ins.every(input => input.sequence === 0xfffffffd)).toBe(true);
       expect(transaction.virtualSize()).toBeLessThanOrEqual(
         plan.estimatedVsize
       );

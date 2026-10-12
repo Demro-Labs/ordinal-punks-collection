@@ -29,7 +29,9 @@ describe("isTransferOutcomeUnclear", () => {
     ["native toAddress undefined", new Error("Cannot read property 'toAddress' of undefined"), true],
     ["structured incomplete response", { message: "UniSat Mobile returned an incomplete transfer response." }, true],
     ["missing transaction id after wallet call", "UniSat did not return a valid transaction ID.", true],
+    ["uncertain Mempool broadcast", new Error("BROADCAST_OUTCOME_UNCLEAR: network timeout"), true],
     ["wallet rejection", new Error("User rejected the request."), false],
+    ["PSBT cancelled before signing", new Error("Transfer cancelled before signing; no transaction was signed or broadcast."), false],
     ["preflight error", new Error("Fee service unavailable."), false],
   ])("classifies %s", (_label, error, expected) => {
     expect(isTransferOutcomeUnclear(error)).toBe(expected);
