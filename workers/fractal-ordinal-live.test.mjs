@@ -115,7 +115,7 @@ test('supports CORS preflight only for an allowed origin', async () => {
   const response = await worker.fetch(makeRequest('/api/market', { method: 'OPTIONS' }), {});
   assert.equal(response.status, 204);
   assert.equal(response.headers.get('access-control-allow-methods'), 'GET, POST, OPTIONS');
-  assert.match(response.headers.get('access-control-allow-headers') || '', /X-Human-Proof/i);
+  assert.equal(response.headers.get('access-control-allow-headers'), 'Accept, Content-Type');
 });
 
 test('rejects methods other than GET, POST and OPTIONS', async () => {
@@ -188,19 +188,13 @@ test('applies the per-isolate request ceiling and a retry hint', async () => {
 
 
 
-test('requires a verified Cloudflare session before creating a V5 order and supports file batches', async () => {
+test('creates a V5 order without a human token and supports file batches', async () => {
   const previousFetch = globalThis.fetch;
   let createUrl = '';
   let upstreamBody;
   let authHeader = '';
   globalThis.fetch = async (input, init = {}) => {
     const url = String(input);
-    if (url === 'https://turnstile-human-verification.servostar23.workers.dev/api/session') {
-      const session = JSON.parse(init.body);
-      assert.equal(session.action, 'ordinal-punks');
-      assert.equal(session.proof, 'signed-session-proof');
-      return Response.json({ valid: true });
-    }
     if (url.endsWith('/v1/indexer/fees/recommended')) return Response.json({ code: 0, data: { halfHourFee: 6 } });
     if (url === 'https://mempool.fractalbitcoin.io/api/v1/fees/recommended') return Response.json({ halfHourFee: 5 });
     createUrl = url;
@@ -224,7 +218,6 @@ test('requires a verified Cloudflare session before creating a V5 order and supp
     });
     const response = await worker.fetch(makeRequest('/api/inscribe/order', {
       method: 'POST', ip: '192.0.2.221',
-      headers: { 'X-Human-Action': 'ordinal-punks', 'X-Human-Proof': 'signed-session-proof' },
       body,
     }), { UNISAT_API_KEY: 'test-only' });
     const data = await response.json();
@@ -241,22 +234,30 @@ test('requires a verified Cloudflare session before creating a V5 order and supp
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('rejects an Inscribe request without a valid session before touching the UniSat API', async () => {
+test('rejects Inscribe requests from origins outside the allowlist', async () => {
   const previousFetch = globalThis.fetch;
   let upstreamCalls = 0;
-  globalThis.fetch = async (input) => {
-    if (String(input).includes('turnstile-human-verification')) return Response.json({ valid: false });
+  globalThis.fetch = async () => {
     upstreamCalls += 1;
     return Response.json({ code: 0, data: {} });
   };
   try {
     const response = await worker.fetch(makeRequest('/api/inscribe/order', {
-      method: 'POST', ip: '192.0.2.222',
+      method: 'POST', ip: '192.0.2.222', origin: 'https://untrusted.example',
       body: JSON.stringify({}),
     }), { UNISAT_API_KEY: 'test-only' });
     assert.equal(response.status, 403);
     assert.equal(upstreamCalls, 0);
   } finally { globalThis.fetch = previousFetch; }
+});
+
+test('allows the configured Manus site origin to reach normal Inscribe payload validation', async () => {
+  const response = await worker.fetch(makeRequest('/api/inscribe/order', {
+    method: 'POST', ip: '192.0.2.237', origin: 'https://punksgallery-mlwdpcwl.manus.space', body: JSON.stringify({}),
+  }), {});
+  const data = await response.json();
+  assert.equal(response.status, 400);
+  assert.match(data.error, /Adresse de wallet ou clé publique invalide/i);
 });
 
 test('routes Bitcoin order status to the Bitcoin API rather than Fractal', async () => {

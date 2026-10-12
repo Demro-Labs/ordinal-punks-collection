@@ -14,8 +14,6 @@ const rateBuckets = new Map();
 const INSCRIBE_RATE_WINDOW_MS = 60_000;
 const INSCRIBE_RATE_LIMIT = 5;
 const inscribeBuckets = new Map();
-const HUMAN_SESSION_URL = 'https://turnstile-human-verification.servostar23.workers.dev/api/session';
-const HUMAN_ACTIONS = new Set(['ordinal-punks', 'pokedex']);
 const MAX_INSCRIBE_FILES = 100;
 const MAX_INSCRIBE_FILE_BYTES = 365 * 1024;
 const MAX_INSCRIBE_BODY_BYTES = 50_000_000;
@@ -34,7 +32,7 @@ function cors(request) {
   const headers = {
     ...SECURITY_HEADERS,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Accept, Content-Type, X-Human-Action, X-Human-Proof',
+    'Access-Control-Allow-Headers': 'Accept, Content-Type',
     'Access-Control-Max-Age': '600',
     'Vary': 'Origin',
   };
@@ -80,19 +78,6 @@ function isInscribeRateLimited(request) {
   if (bucket.count >= INSCRIBE_RATE_LIMIT) return true;
   bucket.count += 1;
   return false;
-}
-
-async function verifyHumanSession(action, proof) {
-  if (!HUMAN_ACTIONS.has(action) || typeof proof !== 'string' || proof.length < 1 || proof.length > 2048) return false;
-  const response = await fetch(HUMAN_SESSION_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Origin: 'https://demro-labs.github.io' },
-    body: JSON.stringify({ action, proof }),
-    signal: AbortSignal.timeout(5000),
-  });
-  if (!response.ok) throw new Error('Cloudflare verification service unavailable');
-  const result = await response.json();
-  return result?.valid === true;
 }
 
 function parseBoundedInteger(raw, fallback, maximum) {
@@ -497,18 +482,11 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/api/inscribe/order') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
-      if (origin !== 'https://demro-labs.github.io') return Response.json({ error: 'Origine non autorisée pour créer une commande.' }, { status: 403, headers: noStore });
+      if (!ALLOWED_ORIGINS.has(origin)) return Response.json({ error: 'Origine non autorisée pour créer une commande.' }, { status: 403, headers: noStore });
       if (isRateLimited(request) || isInscribeRateLimited(request)) return Response.json({ error: 'Trop de commandes. Réessayez dans une minute.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       if (!(request.headers.get('Content-Type') || '').toLowerCase().includes('application/json')) return Response.json({ error: 'Content-Type JSON requis.' }, { status: 415, headers: noStore });
       const contentLength = Number(request.headers.get('Content-Length') || 0);
       if (Number.isFinite(contentLength) && contentLength > MAX_INSCRIBE_BODY_BYTES) return Response.json({ error: 'Le lot dépasse la taille maximale autorisée.' }, { status: 413, headers: noStore });
-      const action = request.headers.get('X-Human-Action') || '';
-      const proof = request.headers.get('X-Human-Proof') || '';
-      try {
-        if (!await verifyHumanSession(action, proof)) return Response.json({ error: 'Terminez la vérification Cloudflare du site avant de créer une commande.' }, { status: 403, headers: noStore });
-      } catch {
-        return Response.json({ error: 'Le service de vérification Cloudflare est temporairement indisponible.' }, { status: 503, headers: noStore });
-      }
       try { return await inscribeOrder(request, env, headers); }
       catch (error) {
         if (error instanceof InscribeRequestError) return Response.json({ error: error.message }, { status: error.status, headers: noStore });
