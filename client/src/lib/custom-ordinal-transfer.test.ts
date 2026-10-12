@@ -70,6 +70,7 @@ function setupMocks() {
     const url = String(input);
     if (url.startsWith(`${LIVE_DATA_API_BASE}/api/spendable-utxos?`)) {
       const query = new URL(url).searchParams;
+      expect(query.get("size")).toBe("25");
       const address = query.get("address");
       return Response.json({
         chain: "fractal",
