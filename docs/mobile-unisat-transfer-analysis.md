@@ -4,6 +4,16 @@
 **Dépôt analysé :** `Demro-Labs/ordinal-punks-collection`
 **Commit `main` examiné :** `687b79c2e20a6d1a10cfc19e839292be37e8db05` — fusion de la PR #113, « Pause failing UniSat mobile transfers on Fractal ».
 
+## État final après correctifs fusionnés
+
+Les constats et recommandations historiques ci-dessous décrivent l’état initial du dépôt; ils sont supersédés par les changements fusionnés dans les PR [#117](https://github.com/Demro-Labs/ordinal-punks-collection/pull/117) et [#118](https://github.com/Demro-Labs/ordinal-punks-collection/pull/118). Pour corriger l’échec `toAddress` sur Fractal mobile, le site remplace maintenant, **uniquement dans le navigateur intégré UniSat Mobile sur Fractal Bitcoin**, l’appel natif `sendInscription` par un parcours PSBT avec `signPsbt`. L’écran de revue affiche l’inscription, le destinataire, les sorties, le taux et le total des frais; après approbation UniSat, le site valide le réseau, les sorties et les signatures avant de diffuser la transaction vérifiée vers Mempool Fractal. Le transfert Bitcoin mobile et les autres chemins restent inchangés.
+
+Les entrées PSBT signalent l’opt-in RBF par la séquence `0xfffffffd`. Le site ne crée ni ne diffuse de transaction de remplacement et ne propose pas d’augmentation de frais; toute action de remplacement reste à faire par une fonction explicitement autorisée du wallet. Ce changement évite l’appel natif qui rapportait `toAddress` indéfini, mais ne constitue pas une correction du code UniSat lui-même. **Aucun appareil mobile, signature ou transfert réel n’a été utilisé pour cette validation logicielle.**
+
+Le Worker `fractal-ordinal-live` du correctif #117 est déployé à 100 %. Il ne fournit un UTXO de frais qu’après contrôle de l’outpoint, du script, de la valeur, de l’état dépensé/RBF et des inscriptions; il vérifie également les soldes Runes et, sur Fractal, Alkanes. Les réponses incomplètes échouent de manière fermée. Le binding Cloudflare `UNISAT_API_KEY` est resté présent côté serveur (`secret_text`, nom/type vérifiés uniquement); sa valeur n’a pas été lue. L’endpoint officiel [Cloudflare Replace Worker Script Content](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/content/methods/update/) précise que l’opération de mise à jour du contenu ne touche pas à la configuration ni aux métadonnées.
+
+Vérifications observées : typecheck réussi, **18 tests Worker** et **37 tests Vitest** réussis, build réussi, **6 contrôles GitHub** réussis sur #118, puis déploiement GitHub Pages réussi. Le bundle public HTTP 200 contient `signPsbt`, le marqueur d’attestation UTXO et le signal RBF; l’ancien message « does not build a custom PSBT » n’y figure plus. Le Worker a répondu HTTP 200 au calcul de frais Fractal et à une requête UTXO de démonstration (liste sûre vide). Un appel `spendable-utxos` sans paramètres reçoit encore un 503 générique — les erreurs de validation sont actuellement ramenées à une indisponibilité amont; le client envoie les paramètres requis. Cette amélioration de statut HTTP est non bloquante et distincte du transfert.
+
 Le résultat principal est clair : **le code `main` bloque intentionnellement les transferts Fractal depuis tout navigateur mobile reconnu**. La PR #113 indique que le problème à l’origine de cette pause a été reproduit sur UniSat Mobile iOS 1.7.20 : la méthode native de transfert a renvoyé `toAddress` avec la valeur `undefined`. Le correctif présent dans le dépôt est un garde-fou; il ne corrige pas la méthode mobile UniSat elle-même. [1] [2]
 
 Le workflow GitHub Pages associé au commit `687b79c…` est terminé avec succès. Cela confirme que GitHub a achevé le déploiement, mais pas que chaque navigateur mobile sert déjà les nouveaux fichiers plutôt qu’une version mise en cache. [3]
@@ -28,7 +38,7 @@ RBF concerne le remplacement d’une transaction non confirmée dans le mempool 
 
 Pour votre cas, vérifiez l’historique UniSat et cherchez tout TXID sur le réseau correspondant. Si une transaction Fractal est en attente, n’utilisez qu’une action RBF explicitement proposée par le wallet/le parcours concerné après avoir vérifié que l’inscription reste dans la sortie destinataire attendue. **Ne créez pas manuellement une seconde transaction ni un PSBT de remplacement** : le bouton RBF de Bool Bridge ne garantit pas qu’un transfert `sendInscription` séparé soit remplaçable de la même manière. S’il n’y a ni TXID ni transaction dans l’historique, contrôlez l’emplacement actuel sur UniScan et ne concluez pas à une diffusion sur la seule base de l’erreur.
 
-## Ce qui se passe dans le code
+## Ce qui se passait dans le code au commit de référence
 
 Dans `client/src/components/UniSatWalletConnect.tsx`, le parcours actif appelle `window.unisat.sendInscription(recipient, inscriptionId, { feeRate })`. Avant cet appel, il vérifie le compte et le réseau, charge des données d’inscription live, valide l’adresse avec l’instance Mempool du réseau, récupère un taux de frais, puis vérifie la présence de fonds/UTXO séparés pour les frais. [2]
 
@@ -58,7 +68,7 @@ Un deuxième point à valider concerne le bouton « Open this page in UniSat » 
 
 UniScan est documenté comme explorateur Bitcoin/Fractal qui affiche notamment adresses, inscriptions et transactions, et non comme mécanisme d’autorisation ou de signature. Mempool fournit des données de réseau et des fonctions d’exploration/diffusion; il ne remplace pas l’approbation du wallet. Pour une inscription Fractal, les requêtes de chaîne doivent rester sur les endpoints Fractal (`mempool.fractalbitcoin.io` et les endpoints UniSat Fractal), distincts de ceux de Bitcoin. [7] [9] [10] [11]
 
-## Plan de résolution recommandé
+## Plan recommandé à l’étape d’analyse initiale (historique; remplacé par l’état final ci-dessus)
 
 1. **Garder la pause et éviter les doublons.** Ne pas réessayer le même transfert sur Fractal mobile tant que le statut de l’inscription n’est pas établi. Vérifier l’activité UniSat, l’inscription/adresse sur UniScan et, si un TXID existe, la transaction sur l’explorateur Mempool Fractal. L’absence immédiate d’une transaction dans un explorateur ne suffit pas, à elle seule, à conclure qu’aucune diffusion n’a eu lieu. Bitcoin et Fractal doivent être vérifiés séparément. [7] [9] [10]
 
@@ -74,7 +84,9 @@ UniScan est documenté comme explorateur Bitcoin/Fractal qui affiche notamment a
 
 7. **Validation finale, sans diffusion mainnet.** Après toute modification ultérieure, exécuter `pnpm run check`, les tests du composant mobile, les tests unitaires et le build, puis confirmer le déploiement GitHub Pages. Aucun essai ne doit signer ou diffuser un transfert d’inscription de valeur sans nouvelle autorisation et vérification manuelle complète de la chaîne, de la destination et des frais.
 
-## Mise à jour : transfert mobile Fractal réactivé
+## État intermédiaire historique : transfert natif Fractal réactivé (avant le correctif PSBT #118)
+
+> Cette section consigne l’état après la PR #116 mais avant la migration PSBT. Elle est conservée pour l’historique; le parcours courant est décrit dans « État final après correctifs fusionnés » en tête de ce rapport.
 
 Le changement demandé supprime les deux refus spécifiques au transfert mobile Fractal et réactive le parcours natif UniSat `sendInscription` dans le navigateur intégré UniSat. Le bouton conserve les contrôles de contexte mobile, de réseau, d’inscription, d’adresse destinataire et de confirmation explicite; UniSat affiche toujours l’écran d’approbation final. L’avertissement « Fractal mobile transfer is enabled » n’est plus bloquant et rappelle le risque de réponse incomplète.
 
