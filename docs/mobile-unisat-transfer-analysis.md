@@ -70,21 +70,23 @@ UniScan est documenté comme explorateur Bitcoin/Fractal qui affiche notamment a
 
 5. **Vérifier le Worker sans toucher au secret.** En lecture seule, confirmer que le Worker déployé attend bien le binding `UNISAT_API_KEY`, que ce binding existe sous ce nom et que le Worker/site sont ceux attendus. Ne pas afficher, copier, remplacer ou faire tourner la valeur. Cette vérification sert aux étapes de données live/frais; elle ne répare pas une erreur native de destination. [6] [7]
 
-6. **Corriger l’interface et la documentation.** Le correctif fusionné affiche la pause dès la connexion mobile sur Fractal, corrige l’état indiqué dans `docs/experimental-ordinal-psbt.md` et construit « Live details » selon le réseau. Il ajoute aussi des tests unitaires de classification des réponses incertaines; des tests sur le provider mobile réel et les variantes d’agent utilisateur restent à faire. [21]
+6. **Corriger l’interface et la documentation.** Le correctif initial affichait la pause mobile Fractal; la réactivation demandée retire ce blocage et utilise désormais un avertissement non bloquant. Les validations du wallet, du réseau, de l’inscription, du destinataire et de l’approbation finale UniSat restent actives, tout comme le verrou après résultat incertain. Des tests sur le provider mobile réel et sur appareil restent à faire. [21]
 
 7. **Validation finale, sans diffusion mainnet.** Après toute modification ultérieure, exécuter `pnpm run check`, les tests du composant mobile, les tests unitaires et le build, puis confirmer le déploiement GitHub Pages. Aucun essai ne doit signer ou diffuser un transfert d’inscription de valeur sans nouvelle autorisation et vérification manuelle complète de la chaîne, de la destination et des frais.
 
-## Mise à jour du correctif fusionné
+## Mise à jour : transfert mobile Fractal réactivé
 
-Le correctif conserve le garde-fou qui suspend les transferts Fractal mobile et affiche maintenant cet avertissement dès que le wallet est connecté, sans attendre la sélection d’une inscription ou la saisie d’un destinataire. Une erreur `toAddress`/réponse incomplète ou un TXID invalide après l’appel wallet verrouille les nouvelles tentatives; le verrou persiste après rechargement de l’onglet et ne peut être levé qu’après une case de vérification manuelle de l’activité UniSat et du Mempool. Les liens « Live details » sont générés selon le réseau actif. La note PSBT a été rectifiée : le chemin PSBT expérimental et ses tests existent, mais ne sont pas branchés au transfert du site.
+Le changement demandé supprime les deux refus spécifiques au transfert mobile Fractal et réactive le parcours natif UniSat `sendInscription` dans le navigateur intégré UniSat. Le bouton conserve les contrôles de contexte mobile, de réseau, d’inscription, d’adresse destinataire et de confirmation explicite; UniSat affiche toujours l’écran d’approbation final. L’avertissement « Fractal mobile transfer is enabled » n’est plus bloquant et rappelle le risque de réponse incomplète.
 
-Ces corrections **ne réparent pas l’implémentation native `sendInscription` d’UniSat** et n’activent pas le transfert mobile Fractal. La PR #114 a été fusionnée au commit `b084873a65a49cc542c15fab1a2c0f0433537db3`; son workflow « Deploy to GitHub Pages » a réussi. La page publique et le bundle `index-Dx448svh.js` ont été vérifiés en HTTP 200, et le bundle contient les nouveaux messages de pause et de verrou. [21] [22] [23] [24]
+Si la réponse native est ambiguë (notamment `toAddress` indéfini ou TXID invalide), le verrou `sessionStorage` continue de bloquer une autre tentative jusqu’à la vérification manuelle de l’activité UniSat et du Mempool. Cette réactivation **ne corrige pas le défaut natif UniSat** : l’erreur peut toujours se produire. Vérifier l’activité et la chaîne avant de réessayer; aucune transaction n’a été signée ou diffusée pendant les tests locaux.
 
-Ce merge n’ajoute pas de parcours RBF/PSBT et ne modifie pas Cloudflare. Ces éléments restent à faire selon une spécification technique distincte. Aucun secret Cloudflare n’a été lu et aucune configuration Cloudflare n’a été modifiée.
+La PR #114 précédente a fusionné les garde-fous et la documentation au commit `b084873a65a49cc542c15fab1a2c0f0433537db3`; son workflow Pages a réussi. La page et le bundle de cette publication avaient été vérifiés en HTTP 200. [21] [22] [23] [24]
+
+Cette réactivation n’ajoute pas de parcours RBF/PSBT et ne modifie pas Cloudflare. Ces éléments restent à traiter selon une spécification distincte. Aucun secret Cloudflare n’a été lu et aucune configuration Cloudflare n’a été modifiée.
 
 ## Vérifications locales effectuées
 
-`pnpm run check` a réussi; les tests Vitest sélectionnés passent (33 tests), les tests Node mockés du Worker passent (15 tests) et `pnpm run build` a réussi. **Aucun de ces tests ne couvre le vrai provider UniSat sur mobile, le lien `openDapp`, ni l’erreur native `toAddress`.** Aucun appareil n’a été utilisé et aucune transaction n’a été signée ou diffusée. Les résultats couvrent seulement les changements locaux décrits ci-dessus, pas un futur parcours RBF/PSBT ni une modification Cloudflare.
+`pnpm run check` a réussi; les tests Vitest sélectionnés passent (33 tests), les tests Node mockés du Worker passent (15 tests) et `pnpm run build` a réussi après la réactivation. **Aucun de ces tests ne couvre le vrai provider UniSat sur mobile, le lien `openDapp`, ni l’erreur native `toAddress`.** Aucun appareil n’a été utilisé et aucune transaction n’a été signée ou diffusée. Ces résultats ne valident pas un futur parcours RBF/PSBT ni une modification Cloudflare.
 
 ## Références
 
