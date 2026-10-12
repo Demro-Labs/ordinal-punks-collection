@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, Wallet } from "lucide-react";
 import { fetchLiveInscription, type LiveInscription } from "@/lib/live";
 import { describeFeeSources, getRecommendedFeeEstimate } from "@/lib/mempool";
+import { getUniSatInscriptionUrl, isTransferOutcomeUnclear } from "@/lib/transfer-safety";
 
 type UniSatChain = {
   enum?: string;
@@ -120,6 +121,7 @@ async function validateMempoolAddress(networkEnum: string, address: string) {
 const MARKETPLACE_URL = "https://fractal.unisat.io/market/collection?collectionId=opunk";
 const INSCRIPTIONS_PAGE_SIZE = 50;
 const INSCRIPTION_ID_PATTERN = /^[a-f0-9]{64}i\d+$/i;
+const TRANSFER_OUTCOME_UNCLEAR_SESSION_KEY = "ordinal-punks:transfer-outcome-unclear";
 let pendingTransferRequest: string | null = null;
 
 function sameInscriptionId(left: string, right: string) {
@@ -310,6 +312,14 @@ export function UniSatWalletConnect() {
   const [confirmed, setConfirmed] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferError, setTransferError] = useState("");
+  const [transferOutcomeUnclear, setTransferOutcomeUnclear] = useState(() => {
+    try {
+      return typeof window !== "undefined" && window.sessionStorage.getItem(TRANSFER_OUTCOME_UNCLEAR_SESSION_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [transferOutcomeChecked, setTransferOutcomeChecked] = useState(false);
   const [txid, setTxid] = useState("");
   const [mempoolStatus, setMempoolStatus] = useState<MempoolTrackingStatus>("idle");
   const [mempoolMessage, setMempoolMessage] = useState("");
@@ -754,6 +764,10 @@ export function UniSatWalletConnect() {
   };
 
   const sendSelectedInscription = async () => {
+    if (transferOutcomeUnclear) {
+      setTransferError("A previous UniSat transfer response had an uncertain outcome. Check UniSat activity and the selected network's mempool before authorizing another transfer.");
+      return;
+    }
     const provider = window.unisat;
     const recipient = destination.trim();
     const selected = inscriptions.find(item => item.inscriptionId === selectedInscriptionId);
@@ -832,7 +846,17 @@ export function UniSatWalletConnect() {
       setConfirmed(false);
       setDestination("");
     } catch (cause) {
-      setTransferError(describeWalletError(cause, "Transfer was cancelled or failed in UniSat."));
+      const message = describeWalletError(cause, "Transfer was cancelled or failed in UniSat.");
+      if (isTransferOutcomeUnclear(cause) || isTransferOutcomeUnclear(message)) {
+        setTransferOutcomeUnclear(true);
+        setTransferOutcomeChecked(false);
+        try {
+          window.sessionStorage.setItem(TRANSFER_OUTCOME_UNCLEAR_SESSION_KEY, "1");
+        } catch {
+          // The in-memory lock remains active if session storage is unavailable.
+        }
+      }
+      setTransferError(message);
     } finally {
       setTransferBusy(false);
     }
@@ -980,6 +1004,24 @@ export function UniSatWalletConnect() {
         </div>
       </div>
 
+      {connectedToFractal && mobileFractalTransferPaused && (
+        <div className="border-y border-[#d99a54]/50 bg-[#d99a54]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="alert">
+          <p className="uppercase tracking-[0.12em]">Mobile transfer paused on Fractal Bitcoin</p>
+          <p className="mt-1">This page will not submit a new Fractal transfer from a mobile browser. Check UniSat activity and Fractal Mempool for any earlier attempt before doing anything else. Use UniSat on desktop or wait for an officially supported mobile flow; this notice is not an RBF or PSBT replacement.</p>
+        </div>
+      )}
+      {transferOutcomeUnclear && (
+        <div className="border border-[#a45e54]/70 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#e08b7d]" role="alert">
+          <p className="uppercase tracking-[0.12em]">Previous transfer outcome is unknown</p>
+          <p className="mt-1">Do not submit another request yet. Check UniSat activity and Mempool for {currentNetwork?.label ?? "the selected network"}. If a transaction is visible or confirmed, do not unlock another attempt.</p>
+          <label className="mt-2 flex cursor-pointer items-start gap-2 text-[#d9d3c6]">
+            <input type="checkbox" checked={transferOutcomeChecked} onChange={event => setTransferOutcomeChecked(event.target.checked)} className="mt-0.5 accent-[#d99a54]" />
+            <span>I checked UniSat activity and the selected network’s Mempool; no transaction from the previous attempt is pending or confirmed.</span>
+          </label>
+          <button type="button" disabled={!transferOutcomeChecked} onClick={() => { try { window.sessionStorage.removeItem(TRANSFER_OUTCOME_UNCLEAR_SESSION_KEY); } catch { /* The in-memory lock can still be cleared after the explicit check. */ } setTransferOutcomeUnclear(false); setTransferOutcomeChecked(false); setConfirmed(false); setTransferError(""); }} className="mt-2 border border-[#a45e54] px-3 py-2 uppercase tracking-[0.08em] text-[#f3efe5] disabled:cursor-not-allowed disabled:opacity-40">Unlock a new attempt after verification</button>
+        </div>
+      )}
+
       {connectedToFractal && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-dashboard-title">
           <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#d99a54]">Live wallet data</p><h2 id="wallet-dashboard-title" className="mt-1 font-display text-xl text-[#f3efe5]">Wallet dashboard</h2></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => void refreshWalletDashboard()} disabled={busy} className="inline-flex items-center gap-1 border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#9ea7b3] hover:border-[#d99a54] disabled:opacity-40"><RefreshCw size={12} /> Refresh live data</button><a href={uniScanUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 border border-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#f2bd63] hover:bg-[#d99a54]/10">Open UniScan <ExternalLink size={12} /></a></div></div>
@@ -990,7 +1032,7 @@ export function UniSatWalletConnect() {
       {connectedToFractal && inscriptions.length > 0 && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-gallery-title">
           <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#d99a54]">Live wallet collection</p><h2 id="wallet-gallery-title" className="mt-1 font-display text-xl text-[#f3efe5]">My inscriptions</h2><p className="mt-1 font-mono text-[10px] text-[#718092]">Live data from the connected UniSat wallet · 10 per page</p></div><div className="flex w-full flex-wrap items-center gap-2 sm:w-auto"><div className="flex items-center border border-[#30363d] bg-[#151a1f] p-1"><button type="button" onClick={() => setWalletDisplayMode("mosaic")} className={`px-2 py-1 font-mono text-[9px] uppercase transition-colors ${walletDisplayMode === "mosaic" ? "bg-[#454d56] text-[#f0f2f4]" : "text-[#7e8994] hover:bg-[#30363d]"}`}>Mosaic</button><button type="button" onClick={() => setWalletDisplayMode("compact")} className={`px-2 py-1 font-mono text-[9px] uppercase transition-colors ${walletDisplayMode === "compact" ? "bg-[#30363d] text-[#d9d3c6]" : "text-[#7e8994] hover:bg-[#30363d]"}`}>Compact</button><button type="button" onClick={() => setWalletDisplayMode("list")} className={`px-2 py-1 font-mono text-[9px] uppercase transition-colors ${walletDisplayMode === "list" ? "bg-[#20262d] text-[#d9d3c6]" : "text-[#7e8994] hover:bg-[#30363d]"}`}>List</button></div><label className="sr-only" htmlFor="wallet-inscription-search">Search inscriptions</label><input id="wallet-inscription-search" value={inscriptionSearch} onChange={event => { setInscriptionSearch(event.target.value); setWalletInscriptionsPage(0); }} placeholder="Search ID, number or location" className="min-h-10 min-w-[220px] flex-1 border border-[#3b434d] bg-[#0f1317] px-3 py-2 font-mono text-[10px] text-[#d9d3c6] outline-none placeholder:text-[#66717e] focus:border-[#d99a54] sm:flex-none" /><a href={inscriptionSearchUniScanUrl} target={inscriptionSearchMatch ? "_blank" : undefined} rel={inscriptionSearchMatch ? "noreferrer" : undefined} onClick={event => { if (!inscriptionSearchMatch) event.preventDefault(); }} className={`inline-flex min-h-10 items-center border px-3 py-2 font-mono text-[9px] uppercase tracking-[0.08em] transition-colors ${inscriptionSearchMatch ? "border-[#d99a54] text-[#f2bd63] hover:bg-[#d99a54]/10" : "border-[#30363d] text-[#59636f]"}`}>Open result in UniScan</a><span className="bg-[#20262d] px-2 py-2 font-mono text-[10px] text-[#9aa3ad]">Page {walletInscriptionsPage + 1} / {walletPageCount}</span></div></div>
-          <div className={walletGalleryClassName}>{walletPageItems.map(item => { const isSelected = sameInscriptionId(item.inscriptionId, selectedInscriptionId); return <article key={item.inscriptionId} className={`min-w-0 border bg-[#10151a] ${walletDisplayMode === "compact" ? "p-2" : "p-3"} ${isSelected ? "border-[#d99a54]" : "border-[#2c323a]"}`}><div className={walletPreviewClassName}><InscriptionPreview item={item} localImage={localInscriptionImages[item.inscriptionId.toLowerCase()]} /></div><p className="mt-3 truncate font-mono text-[10px] text-[#f2bd63]">{item.inscriptionNumber != null ? `#${item.inscriptionNumber}` : "Inscription"}</p><p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#d9d3c6]">{item.inscriptionId}</p><p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#718092]">{item.location ?? "Location unavailable"}</p><div className="mt-3 grid grid-cols-1 gap-2 border-t border-[#2c323a] pt-3"><button type="button" onClick={() => selectInscriptionForTransfer(item.inscriptionId)} disabled={busy || transferBusy} className={`h-9 rounded-sm border-2 w-full justify-center px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] shadow-[0_0_0_1px_rgba(217,154,84,0.12)] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${isSelected ? "border-[#f2bd63] bg-[#d99a54] text-[#0b0d10]" : "border-[#d99a54] bg-[#d99a54]/10 text-[#f2bd63] hover:bg-[#d99a54]/25"}`}>Transfer</button><a href={`https://fractal.unisat.io/inscription/${encodeURIComponent(item.inscriptionId)}`} target="_blank" rel="noreferrer" className="inline-flex h-9 w-full justify-center items-center border border-[#3b434d] px-3 py-2 font-mono text-[10px] uppercase text-[#9ea7b3] transition-colors hover:border-[#d99a54] hover:text-[#f2bd63]">Live details</a></div></article>; })}</div>
+          <div className={walletGalleryClassName}>{walletPageItems.map(item => { const isSelected = sameInscriptionId(item.inscriptionId, selectedInscriptionId); return <article key={item.inscriptionId} className={`min-w-0 border bg-[#10151a] ${walletDisplayMode === "compact" ? "p-2" : "p-3"} ${isSelected ? "border-[#d99a54]" : "border-[#2c323a]"}`}><div className={walletPreviewClassName}><InscriptionPreview item={item} localImage={localInscriptionImages[item.inscriptionId.toLowerCase()]} /></div><p className="mt-3 truncate font-mono text-[10px] text-[#f2bd63]">{item.inscriptionNumber != null ? `#${item.inscriptionNumber}` : "Inscription"}</p><p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#d9d3c6]">{item.inscriptionId}</p><p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#718092]">{item.location ?? "Location unavailable"}</p><div className="mt-3 grid grid-cols-1 gap-2 border-t border-[#2c323a] pt-3"><button type="button" onClick={() => selectInscriptionForTransfer(item.inscriptionId)} disabled={busy || transferBusy} className={`h-9 rounded-sm border-2 w-full justify-center px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] shadow-[0_0_0_1px_rgba(217,154,84,0.12)] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${isSelected ? "border-[#f2bd63] bg-[#d99a54] text-[#0b0d10]" : "border-[#d99a54] bg-[#d99a54]/10 text-[#f2bd63] hover:bg-[#d99a54]/25"}`}>Transfer</button><a href={getUniSatInscriptionUrl(chain?.enum, item.inscriptionId) ?? "#"} target="_blank" rel="noreferrer" className="inline-flex h-9 w-full justify-center items-center border border-[#3b434d] px-3 py-2 font-mono text-[10px] uppercase text-[#9ea7b3] transition-colors hover:border-[#d99a54] hover:text-[#f2bd63]">Live details</a></div></article>; })}</div>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2"><button type="button" onClick={() => setWalletInscriptionsPage(page => Math.max(0, page - 1))} disabled={walletInscriptionsPage === 0} className="border border-[#3b4343] bg-[#30363d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] transition-colors hover:bg-[#3b4343] disabled:cursor-not-allowed disabled:bg-[#20262d] disabled:text-[#59636f]">Previous</button><span className="bg-[#20262d] px-3 py-2 font-mono text-[10px] text-[#9aa3ad]">{walletPageItems.length} shown · {filteredInscriptions.length} match · {inscriptions.length} total loaded</span><button type="button" onClick={() => setWalletInscriptionsPage(page => Math.min(walletPageCount - 1, page + 1))} disabled={walletInscriptionsPage >= walletPageCount - 1} className="border border-[#454d56] bg-[#454d56] px-3 py-2 font-mono text-[9px] uppercase text-[#f0f2f4] transition-colors hover:bg-[#515b66] disabled:cursor-not-allowed disabled:bg-[#20262d] disabled:text-[#59636f]">Next</button></div>
         </section>
       )}
@@ -1076,12 +1118,12 @@ export function UniSatWalletConnect() {
               <button
                 type="button"
                 onClick={() => void sendSelectedInscription()}
-                disabled={mobileFractalTransferPaused || (isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable)) || !confirmed || transferBusy || busy || transferLiveLoading}
+                disabled={transferOutcomeUnclear || mobileFractalTransferPaused || (isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable)) || !confirmed || transferBusy || busy || transferLiveLoading}
                 className="mt-3 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {mobileFractalTransferPaused ? "Fractal mobile transfer paused" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
+                {transferOutcomeUnclear ? "Transfer status unknown — verify first" : mobileFractalTransferPaused ? "Fractal mobile transfer paused" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? "Waiting for UniSat approval…" : "Review transfer in UniSat"}
               </button>
-              {mobileFractalTransferPaused ? <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">Mobile transfer on Fractal Bitcoin is paused because UniSat Mobile 1.7.20 returned `toAddress` undefined in its native method. Use UniSat on desktop until this is fixed. No custom PSBT is generated.</p> : isMobileBrowser() && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">Mobile transfer uses only UniSat’s native `sendInscription` approval inside the UniSat in-app browser. Check the inscription, network, recipient and final wallet confirmation. This site does not construct a custom PSBT.</p>}
+              {isMobileBrowser() && !mobileFractalTransferPaused && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">Mobile transfer uses only UniSat’s native `sendInscription` approval inside the UniSat in-app browser. Check the inscription, network, recipient and final wallet confirmation. This site does not construct a custom PSBT.</p>}
             </div>
           )}
           {inscriptionCursor < inscriptionTotal && (
