@@ -5,6 +5,7 @@ import { describeFeeSources, getRecommendedFeeEstimate } from "@/lib/mempool";
 import { sendOrdinalInscriptionWithCustomPsbt } from "@/lib/custom-ordinal-transfer";
 import type { OrdinalTransferPlan } from "@/lib/ordinal-transfer-psbt";
 import { getUniSatInscriptionUrl, isTransferOutcomeUnclear } from "@/lib/transfer-safety";
+import { shouldShowDustRelayGuidance } from "@/lib/wallet-error";
 
 type UniSatChain = {
   enum?: string;
@@ -300,7 +301,7 @@ function describeWalletError(cause: unknown, fallback: string) {
   if (/toAddress/i.test(message) && /undefined/i.test(message)) {
     return `${message}${code}. UniSat Mobile returned an incomplete native transfer response. Do not retry until you check UniSat activity and the selected network's Mempool for a possible broadcast. Update UniSat Wallet and review the destination and final approval screen.`;
   }
-  if (/dust|0-fee/i.test(message)) {
+  if (shouldShowDustRelayGuidance(message)) {
     return `${message}${code}. Dust is a network relay policy: raising the fee rate alone does not fix an output below the relay threshold. On Fractal mobile, the PSBT flow controls the recipient and change outputs and refuses unsafe values before signing; native UniSat sendInscription paths leave output construction to the wallet. Adding BTC/FB helps only if it removes a dust change output. An API key cannot override relay policy.`;
   }
   return message ? `${message}${code}` : fallback;
