@@ -178,11 +178,12 @@ async function spendableUtxos(request, env, corsHeaders) {
   const chain = url.searchParams.get('chain') || '';
   const address = url.searchParams.get('address') || '';
   const cursor = parseBoundedInteger(url.searchParams.get('cursor'), 0, 1000000);
-  const requestedSize = parseBoundedInteger(url.searchParams.get('size'), 50, 50);
+  const requestedSize = parseBoundedInteger(url.searchParams.get('size'), 25, 25);
   if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new Error('Invalid spendable UTXO query.');
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
   const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}`, env);
   const raw = Array.isArray(source?.utxo) ? source.utxo : [];
+  if (raw.length > requestedSize) throw new Error('UniSat returned an oversized spendable UTXO page.');
   const checked = [];
   for (const item of raw.slice(0, 25)) {
     const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
@@ -190,10 +191,18 @@ async function spendableUtxos(request, env, corsHeaders) {
     const satoshi = Number(item?.satoshi);
     const scriptPk = typeof item?.scriptPk === 'string' ? item.scriptPk.toLowerCase() : '';
     const height = Number(item?.height);
-    if (item?.address !== address || !/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !Number.isSafeInteger(satoshi) || satoshi < 600 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) || !Number.isSafeInteger(height) || height <= 0 || item?.isLowFee === true || item?.isOpInRBF === true || !Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0) continue;
+    if (item?.address !== address || !/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !Number.isSafeInteger(satoshi) || satoshi < 600 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) || !Number.isSafeInteger(height) || height <= 0 || item?.isLowFee !== false || item?.isOpInRBF !== false || !Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0) continue;
     const detail = await uniNetwork(base, `/v1/indexer/utxo/${txid}/${vout}`, env);
-    if (detail?.address !== address || Number(detail?.satoshi) !== satoshi || String(detail?.scriptPk || '').toLowerCase() !== scriptPk || detail?.spent === true || (Array.isArray(detail?.inscriptions) && detail.inscriptions.length !== 0)) continue;
-    checked.push({ address, txid, vout, satoshi, scriptPk, height, isLowFee: false, isOpInRBF: false, inscriptions: [], protocolAssetsChecked: true });
+    if (String(detail?.txid || '').toLowerCase() !== txid || Number(detail?.vout) !== vout || detail?.address !== address || Number(detail?.satoshi) !== satoshi || String(detail?.scriptPk || '').toLowerCase() !== scriptPk || !Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0 || detail?.isSpent !== false || detail?.isOpInRBF !== false || !Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0) continue;
+    const runes = await uniNetwork(base, `/v1/indexer/runes/utxo/${txid}/${vout}/balance`, env);
+    if (!Array.isArray(runes)) throw new Error('UniSat returned an incomplete Rune balance response.');
+    if (runes.length !== 0) continue;
+    if (chain === 'fractal') {
+      const alkanes = await uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env);
+      if (!Array.isArray(alkanes)) throw new Error('UniSat returned an incomplete Alkane balance response.');
+      if (alkanes.length !== 0) continue;
+    }
+    checked.push({ address, txid, vout, satoshi, scriptPk, height, isLowFee: false, isOpInRBF: false, inscriptions: [], inscriptionsRunesAlkanesChecked: true });
   }
   return Response.json({ chain, address, cursor, nextCursor: cursor + raw.length, total: Number.isSafeInteger(source?.total) ? source.total : cursor + raw.length, scannedCount: raw.length, utxo: checked }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
