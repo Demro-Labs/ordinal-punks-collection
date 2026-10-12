@@ -9,7 +9,8 @@ import {
   type PreviousOutputRef,
 } from "./ordinal-transfer-psbt";
 
-const PAGE_SIZE = 50;
+// The Worker caps each safe-UTXO response page at 25.
+const PAGE_SIZE = 25;
 const MAX_UTXO_PAGES = 4;
 const MAX_FEE_UTXOS_TO_INSPECT = 100;
 const FETCH_TIMEOUT_MS = 10_000;
