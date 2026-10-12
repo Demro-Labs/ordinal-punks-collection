@@ -70,15 +70,17 @@ UniScan est documenté comme explorateur Bitcoin/Fractal qui affiche notamment a
 
 5. **Vérifier le Worker sans toucher au secret.** En lecture seule, confirmer que le Worker déployé attend bien le binding `UNISAT_API_KEY`, que ce binding existe sous ce nom et que le Worker/site sont ceux attendus. Ne pas afficher, copier, remplacer ou faire tourner la valeur. Cette vérification sert aux étapes de données live/frais; elle ne répare pas une erreur native de destination. [6] [7]
 
-6. **Corriger l’interface et la documentation.** La branche locale affiche la pause dès la connexion mobile sur Fractal, corrige l’état indiqué dans `docs/experimental-ordinal-psbt.md` et construit « Live details » selon le réseau. Elle ajoute aussi des tests unitaires de classification des réponses incertaines; des tests sur le provider mobile réel et les variantes d’agent utilisateur restent à faire. Cette branche n’est pas encore publiée (voir la mise à jour ci-dessous).
+6. **Corriger l’interface et la documentation.** Le correctif fusionné affiche la pause dès la connexion mobile sur Fractal, corrige l’état indiqué dans `docs/experimental-ordinal-psbt.md` et construit « Live details » selon le réseau. Il ajoute aussi des tests unitaires de classification des réponses incertaines; des tests sur le provider mobile réel et les variantes d’agent utilisateur restent à faire. [21]
 
 7. **Validation finale, sans diffusion mainnet.** Après toute modification ultérieure, exécuter `pnpm run check`, les tests du composant mobile, les tests unitaires et le build, puis confirmer le déploiement GitHub Pages. Aucun essai ne doit signer ou diffuser un transfert d’inscription de valeur sans nouvelle autorisation et vérification manuelle complète de la chaîne, de la destination et des frais.
 
-## Mise à jour du correctif local (non publié)
+## Mise à jour du correctif fusionné
 
-La branche locale conserve le garde-fou qui suspend les transferts Fractal mobile et affiche maintenant cet avertissement dès que le wallet est connecté, sans attendre la sélection d’une inscription ou la saisie d’un destinataire. Une erreur `toAddress`/réponse incomplète ou un TXID invalide après l’appel wallet verrouille les nouvelles tentatives; le verrou persiste après rechargement de l’onglet et ne peut être levé qu’après une case de vérification manuelle de l’activité UniSat et du Mempool. Les liens « Live details » sont générés selon le réseau actif. La note PSBT a été rectifiée : le chemin PSBT expérimental et ses tests existent, mais ne sont pas branchés au transfert du site.
+Le correctif conserve le garde-fou qui suspend les transferts Fractal mobile et affiche maintenant cet avertissement dès que le wallet est connecté, sans attendre la sélection d’une inscription ou la saisie d’un destinataire. Une erreur `toAddress`/réponse incomplète ou un TXID invalide après l’appel wallet verrouille les nouvelles tentatives; le verrou persiste après rechargement de l’onglet et ne peut être levé qu’après une case de vérification manuelle de l’activité UniSat et du Mempool. Les liens « Live details » sont générés selon le réseau actif. La note PSBT a été rectifiée : le chemin PSBT expérimental et ses tests existent, mais ne sont pas branchés au transfert du site.
 
-Ces corrections **ne réparent pas l’implémentation native `sendInscription` d’UniSat** et n’activent pas le transfert mobile Fractal. L’ajout d’un parcours RBF/PSBT et les changements Cloudflare restent à préciser; ils ne sont pas inclus dans ce patch local. Aucun secret Cloudflare n’a été lu et aucune configuration Cloudflare n’a été modifiée. La branche n’a pas encore été poussée; aucune PR, fusion ou mise en production n’a eu lieu.
+Ces corrections **ne réparent pas l’implémentation native `sendInscription` d’UniSat** et n’activent pas le transfert mobile Fractal. La PR #114 a été fusionnée au commit `b084873a65a49cc542c15fab1a2c0f0433537db3`; son workflow « Deploy to GitHub Pages » a réussi. La page publique et le bundle `index-Dx448svh.js` ont été vérifiés en HTTP 200, et le bundle contient les nouveaux messages de pause et de verrou. [21] [22] [23] [24]
+
+Ce merge n’ajoute pas de parcours RBF/PSBT et ne modifie pas Cloudflare. Ces éléments restent à faire selon une spécification technique distincte. Aucun secret Cloudflare n’a été lu et aucune configuration Cloudflare n’a été modifiée.
 
 ## Vérifications locales effectuées
 
@@ -106,3 +108,7 @@ Ces corrections **ne réparent pas l’implémentation native `sendInscription` 
 [18]: https://docs.unisat.io/misc/articles/understanding-sub-1-sat-vb-bitcoin-transactions/what-happens-below-1-sat-vb-+-the-hidden-risks-of-sub-1-sat-vb-bitcoin-transactions "UniSat — risques de transactions à frais très bas et outils RBF"
 [19]: https://bitcoincore.org/en/faq/optin_rbf/ "Bitcoin Core — Opt-in RBF FAQ"
 [20]: https://bitcoinops.org/en/topics/replace-by-fee/ "Bitcoin Optech — Replace-by-fee"
+[21]: https://github.com/Demro-Labs/ordinal-punks-collection/pull/114 "PR #114 — correctifs de sûreté transfert mobile UniSat"
+[22]: https://github.com/Demro-Labs/ordinal-punks-collection/actions/runs/38192236961 "GitHub Actions — déploiement Pages après fusion de la PR #114"
+[23]: https://demro-labs.github.io/ordinal-punks-collection/ "Site Ordinal Punks — page publique vérifiée après fusion"
+[24]: https://demro-labs.github.io/ordinal-punks-collection/assets/index-Dx448svh.js "Bundle public contenant les correctifs de transfert mobile"
