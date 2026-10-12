@@ -273,6 +273,108 @@ test('routes Bitcoin order status to the Bitcoin API rather than Fractal', async
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('attests only Fractal UTXOs with empty inscription, Rune, and Alkane checks', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  const scriptPk = '0014' + '11'.repeat(20);
+  const records = ['a', 'b', 'c'].map((marker, index) => ({
+    address,
+    txid: marker.repeat(64),
+    vout: 0,
+    satoshi: 10000,
+    scriptPk,
+    height: 100,
+    isLowFee: false,
+    isOpInRBF: false,
+    inscriptions: [],
+    index,
+  }));
+  const calls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    calls.push(url.pathname);
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      return Response.json({ code: 0, data: { total: records.length, utxo: records } });
+    }
+    const pathParts = url.pathname.split('/');
+    const txid = url.pathname.startsWith('/v1/indexer/utxo/') ? pathParts[4] : pathParts[5];
+    const record = records.find(item => item.txid === txid);
+    if (url.pathname.startsWith('/v1/indexer/utxo/')) {
+      return Response.json({ code: 0, data: { ...record, isSpent: false } });
+    }
+    if (url.pathname.startsWith('/v1/indexer/runes/utxo/')) {
+      return Response.json({ code: 0, data: txid === records[1].txid ? [{ runeid: '1:1', amount: '1' }] : [] });
+    }
+    if (url.pathname.startsWith('/v1/indexer/alkanes/utxo/')) {
+      return Response.json({ code: 0, data: txid === records[2].txid ? [{ alkaneid: '2:1', amount: '1' }] : [] });
+    }
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.230' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.utxo.length, 1);
+    assert.equal(data.utxo[0].txid, records[0].txid);
+    assert.equal(data.utxo[0].inscriptionsRunesAlkanesChecked, true);
+    assert.ok(calls.includes(`/v1/indexer/runes/utxo/${records[0].txid}/0/balance`));
+    assert.ok(calls.includes(`/v1/indexer/alkanes/utxo/${records[0].txid}/0/balance`));
+    assert.equal(calls.includes(`/v1/indexer/alkanes/utxo/${records[1].txid}/0/balance`), false);
+    assert.equal(JSON.stringify(data).includes('test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('fails closed when a protocol balance response is missing or malformed', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  const record = { address, txid: 'd'.repeat(64), vout: 0, satoshi: 10000, scriptPk: '0014' + '22'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, inscriptions: [] };
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
+    if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false } });
+    if (url.pathname === `/v1/indexer/runes/utxo/${record.txid}/0/balance`) return Response.json({ code: 0, data: null });
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.231' }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).error, /temporarily unavailable/i);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('rejects an oversized UniSat page instead of skipping uninspected outpoints', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  let detailLookups = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      const utxo = Array.from({ length: 26 }, (_, index) => ({
+        address,
+        txid: index.toString(16).padStart(64, '0'),
+        vout: 0,
+        satoshi: 10000,
+        scriptPk: '0014' + '33'.repeat(20),
+        height: 100,
+        isLowFee: false,
+        isOpInRBF: false,
+        inscriptions: [],
+      }));
+      return Response.json({ code: 0, data: { total: utxo.length, utxo } });
+    }
+    if (url.pathname.startsWith('/v1/indexer/utxo/')) detailLookups += 1;
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.232' }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(response.status, 503);
+    assert.equal(detailLookups, 0);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('caps the per-isolate client table under rotating IPs', async () => {
   let blocked = false;
   for (let i = 0; i < 10002; i += 1) {
