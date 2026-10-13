@@ -453,7 +453,7 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
 
   let signedPsbtHex: string;
   if (typeof approval === "string") {
-    // Mobile callers may obtain this signature from the final review button so
+    // Callers may obtain this signature from the final review button so
     // UniSat's signing request is dispatched in the user's direct click handler.
     signedPsbtHex = approval;
   } else {
