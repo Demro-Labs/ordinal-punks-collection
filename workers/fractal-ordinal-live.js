@@ -1,3 +1,4 @@
+import './buffer-polyfill.js';
 import { handleWalletAuth } from './auth-bip322.js';
 export { AuthStorage } from './auth-bip322.js';
 

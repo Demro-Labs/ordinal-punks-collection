@@ -50,11 +50,20 @@ jobs:
       - name: Validate Wrangler bundle without publishing
         run: pnpm dlx wrangler@4.150.0 deploy --dry-run --outdir=/tmp/fractal-worker-dry-run
 
+      - name: Smoke-test Worker in local workerd runtime
+        run: bash scripts/smoke-worker-runtime.sh
+
       # The existing Worker was last uploaded through Cloudflare's Script API.
       # Omit --strict for this reconciliation deploy so Wrangler can replace that
       # legacy upload with the declarative wrangler.jsonc configuration.
       - name: Deploy to Cloudflare Workers
         run: pnpm dlx wrangler@4.150.0 deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify Cloudflare bindings and both production apps
+        run: bash scripts/verify-cloudflare-production.sh
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
