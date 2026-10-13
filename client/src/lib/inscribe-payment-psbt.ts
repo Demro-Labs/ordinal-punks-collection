@@ -242,7 +242,7 @@ export async function prepareInscribePaymentPsbt(params: {
 export function getInscribePaymentSignOptions(plan: InscribePaymentPlan, address: string) {
   return {
     autoFinalized: false,
-    toSignInputs: plan.inputs.map((input, index) => ({ index, address, ...(input.spendType === "taproot" ? { useTweakedSigner: true } : {}) })),
+    toSignInputs: plan.inputs.map((input, index) => ({ index, address, publicKey: plan.publicKeyHex, ...(input.spendType === "taproot" ? { useTweakedSigner: true } : {}) })),
   };
 }
 

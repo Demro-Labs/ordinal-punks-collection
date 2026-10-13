@@ -850,6 +850,7 @@ export function UniSatWalletConnect() {
           toSignInputs: plan.inputs.map((input, index) => ({
             index,
             address,
+            publicKey: plan.publicKeyHex,
             ...(input.spendType === "taproot" ? { useTweakedSigner: true } : {}),
           })),
         });
