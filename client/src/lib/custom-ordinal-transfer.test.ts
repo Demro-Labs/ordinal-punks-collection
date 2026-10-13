@@ -87,7 +87,7 @@ function setupMocks() {
             satoshi: 100_000,
             scriptPk: SCRIPT_HEX,
             height: 100,
-            isLowFee: false,
+            isLowFee: true,
             isOpInRBF: true,
             inscriptions: [],
             inscriptionsRunesAlkanesChecked: true,

@@ -235,13 +235,13 @@ async function loadIndexedSpendableRefs(
         !/^(?:[a-f0-9]{2})+$/i.test(scriptHex) ||
         !Number.isSafeInteger(item.height) ||
         Number(item.height) <= 0 ||
-        item.isLowFee !== false ||
+        typeof item.isLowFee !== "boolean" ||
         typeof item.isOpInRBF !== "boolean" ||
         !Array.isArray(item.inscriptions) ||
         item.inscriptions.length !== 0
       ) {
         throw new Error(
-          "UniSat's safe-UTXO response contained an unconfirmed, low-fee, asset-bearing, or malformed output; refusing to spend it."
+          "UniSat's safe-UTXO response contained an unconfirmed, asset-bearing, or malformed output, or omitted a required safety flag; refusing to spend it."
         );
       }
       const key = outpoint(txid, vout);
