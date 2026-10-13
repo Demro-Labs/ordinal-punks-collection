@@ -69,6 +69,9 @@ export async function getRecommendedFeeRate(network: string) {
 }
 
 export type SpendableUtxo = { address: string; txid: string; vout: number; satoshi: number; scriptPk: string; height: number; inscriptionsRunesAlkanesChecked: true; isLowFee: boolean; isOpInRBF: boolean; inscriptions: [] };
+export class InsufficientSafeUtxosError extends Error {
+  constructor(message: string) { super(message); this.name = "InsufficientSafeUtxosError"; }
+}
 const SPENDABLE_UTXO_PAGE_SIZE = 25;
 const MAX_SPENDABLE_UTXO_PAGES = 20;
 
@@ -120,7 +123,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
   if (safeSats < minimumSats) {
     const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
-    throw new Error(`UniSat/Worker n’a validé que ${safeSats.toLocaleString("fr-FR")} sats dans ${collected.length} UTXO sûrs, après analyse de ${scannedLabel} sorties (plafond ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). Minimum requis : ${minimumSats.toLocaleString("fr-FR")} sats. Aucun paiement n’a été lancé.`);
+    throw new InsufficientSafeUtxosError(`UniSat/Worker n’a validé que ${safeSats.toLocaleString("fr-FR")} sats dans ${collected.length} UTXO sûrs, après analyse de ${scannedLabel} sorties (plafond ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). Minimum requis : ${minimumSats.toLocaleString("fr-FR")} sats. Aucun paiement n’a été lancé.`);
   }
   return collected;
 }
