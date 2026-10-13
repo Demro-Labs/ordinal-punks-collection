@@ -1,40 +1,45 @@
-# Authentification par signature UniSat — conception
+# Authentification du wallet UniSat par BIP-322
 
-## Statut
+## Statut et portée
 
-Spécification seulement : aucune connexion, session utilisateur ou signature de message n’est activée par ce document. L’authentification est indépendante des transactions, reçus d’inscription et transferts d’Ordinal.
+Le dashboard UniSat d’Ordinal Punks expose maintenant le même parcours d’authentification sur mobile et desktop. Le composant `UniSatWalletAuth` demande explicitement une signature `bip322-simple`; aucune signature n’est déclenchée au chargement de la page.
 
-## Flux recommandé
+Cette authentification prouve uniquement le contrôle d’une adresse. Elle ne constitue pas une autorisation de paiement, de transfert FB ou d’inscription, et n’accorde aucun droit de dépense. Chaque transaction continue d’exiger l’appel UniSat approprié et sa confirmation séparée.
 
-1. Le client mobile lit l’adresse et le réseau depuis `window.unisat`, puis demande au serveur un challenge pour cette adresse et `FRACTAL_BITCOIN_MAINNET`.
-2. Le serveur génère un nonce cryptographiquement aléatoire (au moins 256 bits), conserve uniquement son empreinte, et crée un challenge lié à l’origine canonique du site, l’URI, l’adresse, le réseau, l’action `login`, un identifiant unique, l’heure d’émission et une expiration de cinq minutes. Le challenge est à usage unique.
-3. Le client affiche le challenge complet et appelle `unisat.signMessage(challenge, "bip322-simple")`. L’utilisateur confirme la signature dans UniSat; aucune signature n’est demandée automatiquement au chargement de la page.
-4. Le client envoie adresse, réseau, challenge et signature au serveur. Le serveur retrouve le challenge par identifiant, vérifie les valeurs, l’origine et l’expiration, puis vérifie cryptographiquement la signature BIP-322 contre l’adresse Bitcoin indiquée. Il consomme le nonce de façon atomique avant de créer une session.
-5. Le serveur remet une session courte dans un cookie `HttpOnly`, `Secure`, `SameSite=Lax` (ou plus strict si compatible), avec rotation et mécanisme de révocation. Le client ne conserve ni clé privée ni signature réutilisable.
+## Parcours
 
-## Contrôles obligatoires
+1. Le client lit à nouveau l’adresse et le réseau UniSat avant de demander un challenge. Seul `FRACTAL_BITCOIN_MAINNET` est accepté.
+2. `POST /api/auth/challenge` crée un identifiant aléatoire de 256 bits, lié au site, à l’origine, à l’URI canonique, à l’adresse, au réseau et à une expiration de cinq minutes. La réponse fournit le message exact à examiner.
+3. Après l’action explicite « Sign this challenge in UniSat », le client appelle `unisat.signMessage(message, "bip322-simple")`.
+4. `POST /api/auth/verify` reçoit l’identifiant, l’adresse, le réseau et la signature. Le Worker reconstruit lui-même le message à partir de l’enregistrement serveur, vérifie BIP-322 avec `@exodus/bip322-js`, puis consomme le challenge et crée la session dans une transaction SQLite atomique du Durable Object.
+5. La session est posée dans un cookie `HttpOnly`, `Secure`, `SameSite=None; Partitioned`, valable huit heures. Le client vérifie qu’il est effectivement renvoyé par `GET /api/auth/session?site=punks`; aucun secret ni signature réutilisable n’est enregistré dans le navigateur.
 
-- Une signature seule n’est jamais un jeton de session et ne doit pas être acceptée deux fois.
-- Refuser les nonces expirés, inconnus, déjà consommés, les domaines inattendus et les réseaux différents de celui du challenge.
-- Comparer l’adresse au format canonique; vérifier le script/adresse réseau cible via une bibliothèque BIP-322 maintenue, et non par décodage maison.
-- Limiter les challenges par adresse et par IP, éviter les messages contenant une instruction de transaction, un paiement ou une approbation de dépense.
-- Prévoir un message explicite du type « Connexion à [origine] pour [adresse] sur Fractal Bitcoin. Aucun paiement ni transfert n’est autorisé. Nonce: … Expire: … ».
-- Ne jamais demander, afficher, journaliser ou stocker la phrase de récupération, une clé privée ou un secret wallet.
-- Les sessions ne doivent pas autoriser les opérations on-chain : chaque dépense doit continuer à exiger une action UniSat distincte et une confirmation transactionnelle.
+Le message signé inclut notamment le domaine, l’URI `https://demro-labs.github.io/ordinal-punks-collection/`, le réseau, l’adresse, l’action « Login; prove wallet control only », un nonce et les horodatages. Il indique explicitement qu’aucun paiement, transfert ou accord de dépense n’est autorisé.
 
-## API à concevoir
+## Routes Worker
 
-- `POST /api/auth/challenge`: reçoit `{ address, network }`, renvoie `{ challengeId, message, expiresAt }`.
-- `POST /api/auth/verify`: reçoit `{ challengeId, address, network, signature }`, consomme atomiquement le nonce après vérification, puis crée la session.
-- `POST /api/auth/logout`: invalide la session côté serveur.
+- `POST /api/auth/challenge` — reçoit `{ site: "punks", address, network }`; renvoie `{ challengeId, message, expiresAt, network, site }`.
+- `POST /api/auth/verify` — reçoit `{ site, challengeId, address, network, signature }`; vérifie et consomme le challenge, crée la session et pose le cookie.
+- `GET /api/auth/session?site=punks` — renvoie la session associée au cookie ou `{ session: null }`.
+- `POST /api/auth/logout` — reçoit `{ site: "punks" }`, révoque la session côté serveur et supprime le cookie.
 
-Ces routes restent à construire avec stockage serveur dédié (TTL et consommation atomique). Le stockage browser/localStorage existant pour les reçus de transactions ne doit pas être réutilisé pour les challenges ou sessions.
+Les réponses d’authentification sont `no-store`. CORS n’autorise que les origines configurées et active les credentials pour ces origines.
 
-## Référence provider
+## Stockage et protections
 
-UniSat documente `signMessage(msg, type)` et les types `ecdsa` et `bip322-simple`; la documentation indique que BIP-322 prend en charge les adresses Taproot (P2TR). Pour ces sites Fractal mobile, utiliser explicitement `bip322-simple`, puis vérifier côté serveur avec un vérificateur BIP-322 qui prend en charge le réseau/adresse visé.
+- Le Durable Object `AuthStorage` utilise le stockage SQLite et les exports déclaratifs Cloudflare (`storage: "sqlite"`). La liaison Worker est `AUTH_STORAGE`.
+- Le Durable Object ne conserve que l’empreinte SHA-256 du challenge et du jeton de session; le challenge stocke les métadonnées nécessaires et l’adresse publique. Il ne stocke ni le nonce en clair, ni la signature BIP-322, ni une clé privée.
+- Les compteurs IP stockent une empreinte de l’IP limitée à une fenêtre de 15 minutes, jamais l’IP brute. Limites durables : 8 créations de challenge/15 min et 20 vérifications/15 min par IP; en plus, 6 challenges/heure par empreinte d’adresse. Les throttles en mémoire par isolate constituent une protection rapide supplémentaire.
+- Chaque challenge expire après cinq minutes et n’est consommable qu’une seule fois. La consommation, la révocation des anciennes sessions du même site/adresse et la création du nouveau jeton sont atomiques.
+- Les sessions sont isolées entre Punks (`__Host-demro-punks-auth`) et Pokédex (`__Host-demro-pokedex-auth`). Les dépenses on-chain restent indépendantes de ces sessions.
+- L’authentification accepte uniquement les adresses mainnet `bc1q` P2WPKH et `bc1p` P2TR à clé unique, vérifiées par la bibliothèque BIP-322; le réseau applicatif requis reste Fractal Bitcoin mainnet.
+- La limite actuelle de **1 000 fichiers par commande Inscribe** est conservée dans le Worker. Les autres limites de taille et de requête restent inchangées.
+- Le secret UniSat existant demeure un binding `secret_text` nommé `UNISAT_API_KEY`; le déploiement préserve les bindings secrets sans lire ni remplacer leur valeur.
 
 ## Références
 
-- UniSat Wallet API: [sendBitcoin, provider events and wallet methods](https://docs.unisat.io/dev/unisat-wallet-api).
-- UniSat signMessage: [API reference and signature formats](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/wallet-api/api-docs/sign-message.md).
+- [UniSat `signMessage` et format BIP-322](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/wallet-api/api-docs/sign-message.md)
+- [BIP-322](https://bips.dev/322/)
+- [Cloudflare — Durable Object class exports](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/)
+- [Cloudflare — Durable Object SQLite storage](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)
+- [Exodus BIP-322 JavaScript](https://www.npmjs.com/package/@exodus/bip322-js)
