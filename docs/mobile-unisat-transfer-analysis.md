@@ -4,6 +4,12 @@
 **Dépôt analysé :** `Demro-Labs/ordinal-punks-collection`
 **Commit `main` examiné :** `687b79c2e20a6d1a10cfc19e839292be37e8db05` — fusion de la PR #113, « Pause failing UniSat mobile transfers on Fractal ».
 
+## Addendum — correctif natif préparé sur branche, 13 octobre 2026
+
+Après le constat que le parcours PSBT Fractal ne fonctionnait pas sur mobile, le code de la branche de travail a été basculé vers les méthodes wallet natives UniSat : `sendInscription` pour les transferts et `sendBitcoin` pour le paiement d’inscription de fichier. L’application valide au préalable les adresses auprès de Mempool, puis suit le TXID après l’approbation et la diffusion du wallet. Elle échoue sans fallback si la méthode native n’est pas exposée. La construction, la signature et la diffusion de la transaction relèvent de l’écran UniSat; Mempool fournit validation d’adresse, estimation de frais et suivi, pas une approbation pré-signature.
+
+Les modules PSBT expérimentaux restent isolés des composants mobiles actifs. Les tests hors ligne, le typecheck et le build passent sur les deux dépôts; aucun appareil réel, signature, UTXO réel ni diffusion mainnet n’a été utilisé. Cet addendum décrit le travail local préparé et ne signifie pas que la branche est déjà fusionnée ou publiée.
+
 ## État final après correctifs fusionnés
 
 Les constats et recommandations historiques ci-dessous décrivent l’état initial du dépôt; ils sont supersédés par les changements fusionnés dans les PR [#117](https://github.com/Demro-Labs/ordinal-punks-collection/pull/117) et [#118](https://github.com/Demro-Labs/ordinal-punks-collection/pull/118). Pour corriger l’échec `toAddress` sur Fractal mobile, le site remplace maintenant, **uniquement dans le navigateur intégré UniSat Mobile sur Fractal Bitcoin**, l’appel natif `sendInscription` par un parcours PSBT avec `signPsbt`. L’écran de revue affiche l’inscription, le destinataire, les sorties, le taux et le total des frais; après approbation UniSat, le site valide le réseau, les sorties et les signatures avant de diffuser la transaction vérifiée vers Mempool Fractal. Le transfert Bitcoin mobile et les autres chemins restent inchangés.
@@ -60,7 +66,7 @@ Un deuxième point à valider concerne le bouton « Open this page in UniSat » 
 
 5. **Blocage serveur possible, mais distinct.** Le composant attend `fetchLiveInscription` avant d’appeler le wallet. Une erreur du Worker, un binding `UNISAT_API_KEY` absent/inopérant ou une origine non autorisée peut donc empêcher un transfert avant même l’ouverture de l’approbation UniSat. Le Worker n’autorise notamment que les origines déclarées dans `ALLOWED_ORIGINS`; l’origine GitHub Pages de production figure dans cette liste. C’est à vérifier seulement si le message est de type « Live UniSat data unavailable », erreur de frais ou erreur CORS, pas si l’écran affiche le garde-fou Fractal mobile. [2] [7]
 
-6. **Documentation PSBT périmée et contradictoire.** `docs/experimental-ordinal-psbt.md` affirme qu’un transfert PSBT personnalisé est activé et remplace `sendInscription`. Pourtant, le composant actif appelle `sendInscription`, n’importe pas `sendOrdinalInscriptionWithCustomPsbt`, et indique dans l’interface qu’aucun PSBT personnalisé n’est utilisé. Cette note peut induire en erreur lors d’un futur dépannage. Le constructeur PSBT et ses tests existent, mais leur présence ne les rend pas actifs dans le parcours actuel. [2] [8]
+6. **Documentation PSBT périmée et contradictoire — corrigée sur la branche locale.** Ce constat était exact au moment de l’analyse : le document affirmait qu’un transfert PSBT personnalisé était actif alors que le composant utilisait `sendInscription`. La documentation `experimental-ordinal-psbt.md` a depuis été remplacée par l’état du parcours natif préparé dans l’addendum ci-dessus; cette mise à jour doit encore être fusionnée et publiée avec le correctif. [2] [8]
 
 7. **Avertissement peu visible.** Le message de pause se trouve à l’intérieur du panneau rendu seulement après sélection d’une inscription et saisie d’une adresse destinataire. Un utilisateur mobile peut donc ne pas comprendre immédiatement pourquoi le transfert est indisponible. C’est un problème d’interface, pas la cause native. [2]
 
