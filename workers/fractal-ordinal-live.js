@@ -543,6 +543,20 @@ export default {
     }
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     if (url.pathname.startsWith('/api/auth/')) return handleWalletAuth(request, env, headers);
+    if (request.method === 'GET' && url.pathname === '/api/fractal/balance') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const address = url.searchParams.get('address') || '';
+      if (!validWalletAddress(address)) return Response.json({ error: 'Adresse Fractal invalide.' }, { status: 400, headers: noStore });
+      try {
+        return edgeCachedResponse(request, headers, 10, 30, async () => {
+          const balance = await uniNetwork(API_BASE, '/v1/indexer/address/' + encodeURIComponent(address) + '/balance', env, { signal: AbortSignal.timeout(8000) });
+          return Response.json({ network: 'FRACTAL_BITCOIN_MAINNET', address, balance, refreshedAt: new Date().toISOString() }, { headers });
+        });
+      } catch {
+        return Response.json({ error: 'Le solde Fractal est temporairement indisponible.' }, { status: 503, headers: noStore });
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/api/fees/recommended') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
