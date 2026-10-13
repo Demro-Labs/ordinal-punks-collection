@@ -1,7 +1,6 @@
+import './buffer-polyfill.js';
 import { Buffer } from 'buffer';
 import { Address, Verifier } from '@exodus/bip322-js';
-
-if (typeof globalThis.Buffer === 'undefined') globalThis.Buffer = Buffer;
 
 const AUTH_SITES = {
   punks: {

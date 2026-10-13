@@ -7,6 +7,17 @@
   "compatibility_date": "2021-11-02",
   "workers_dev": true,
   "upload_source_maps": false,
+  "placement": {
+    "mode": "smart",
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1,
+    "logs": {
+      "invocation_logs": false,
+      "head_sampling_rate": 0.1,
+    },
+  },
   "durable_objects": {
     "bindings": [
       {
