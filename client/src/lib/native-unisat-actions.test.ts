@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { canOfferSafeUtxoNativeFallback, ensureNativeInscriptionFeeBalance, sendNativeUniSatBitcoinPayment, sendNativeUniSatInscription } from "./native-unisat-actions";
+import { canUseMobileNativePaymentFallback, ensureNativeInscriptionFeeBalance, sendNativeUniSatBitcoinPayment, sendNativeUniSatInscription } from "./native-unisat-actions";
 
 const TXID = "a".repeat(64);
 const INSCRIPTION_ID = `${"b".repeat(64)}i0`;
@@ -26,14 +26,13 @@ describe("native UniSat wallet actions", () => {
     expect(sendBitcoin).toHaveBeenCalledWith("bc1qpayment", 12_345, { feeRate: 4 });
   });
 
-  it("offers the mocked sendBitcoin fallback only for a mobile shortage with an existing unpaid receipt", async () => {
-    const eligible = { isMobileUniSat: true, hasReceipt: true, safeUtxoShortage: true, hasPaymentPlan: false, hasPaymentTxid: false, stage: "awaiting-approval" };
-    expect(canOfferSafeUtxoNativeFallback(eligible)).toBe(true);
-    expect(canOfferSafeUtxoNativeFallback({ ...eligible, isMobileUniSat: false })).toBe(false);
-    expect(canOfferSafeUtxoNativeFallback({ ...eligible, safeUtxoShortage: false })).toBe(false);
-    expect(canOfferSafeUtxoNativeFallback({ ...eligible, hasPaymentPlan: true })).toBe(false);
-    expect(canOfferSafeUtxoNativeFallback({ ...eligible, hasPaymentTxid: true })).toBe(false);
-    expect(canOfferSafeUtxoNativeFallback({ ...eligible, stage: "tracking" })).toBe(false);
+  it("allows sendBitcoin only after an unpaid mobile plan has Worker-confirmed sufficient UTXOs", async () => {
+    const eligible = { isMobileUniSat: true, hasReceipt: true, hasPaymentPlan: true, hasWorkerAttestation: true, hasPaymentTxid: false };
+    expect(canUseMobileNativePaymentFallback(eligible)).toBe(true);
+    expect(canUseMobileNativePaymentFallback({ ...eligible, isMobileUniSat: false })).toBe(false);
+    expect(canUseMobileNativePaymentFallback({ ...eligible, hasWorkerAttestation: false })).toBe(false);
+    expect(canUseMobileNativePaymentFallback({ ...eligible, hasPaymentPlan: false })).toBe(false);
+    expect(canUseMobileNativePaymentFallback({ ...eligible, hasPaymentTxid: true })).toBe(false);
 
     const sendBitcoin = vi.fn().mockResolvedValue({ txid: TXID });
     await expect(sendNativeUniSatBitcoinPayment({ sendBitcoin }, "bc1qpayment", 12_345, 4)).resolves.toBe(TXID);

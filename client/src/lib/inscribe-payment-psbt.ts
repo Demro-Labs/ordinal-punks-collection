@@ -1,7 +1,7 @@
 import { Buffer } from "buffer";
 import * as bitcoin from "bitcoinjs-lib";
 import ecc from "@bitcoinerlab/secp256k1";
-import { getMempoolConfig, getSpendableUtxos } from "@/lib/mempool";
+import { confirmFractalSpendableUtxos, getMempoolConfig, getSpendableUtxos, type WorkerSafeUtxoAttestation } from "@/lib/mempool";
 import { LIVE_DATA_API_BASE } from "@/lib/live";
 
 const MIN_CHANGE_SATS = 1_200;
@@ -39,7 +39,18 @@ export type InscribePaymentPlan = {
   totalInputSats: number;
   inputs: InscribePaymentInput[];
   outputs: InscribePaymentOutput[];
+  workerAttestation?: WorkerSafeUtxoAttestation;
 };
+
+export function hasSufficientWorkerUtxoAttestation(plan: InscribePaymentPlan | null | undefined) {
+  if (!plan) return false;
+  if (plan.network !== "FRACTAL_BITCOIN_MAINNET") return true;
+  const requiredSats = plan.paymentSats + plan.feeSats;
+  const attestation = plan.workerAttestation;
+  return Number.isSafeInteger(requiredSats) && Boolean(attestation && attestation.sufficient === true && attestation.chain === "fractal" &&
+    attestation.address === plan.walletAddress && attestation.minimumSats === requiredSats && attestation.safeSats >= requiredSats &&
+    attestation.verifiedUtxoCount === plan.inputs.length);
+}
 
 export class InscribePaymentBroadcastUnclearError extends Error {
   readonly txid: string;
@@ -229,13 +240,23 @@ export async function prepareInscribePaymentPsbt(params: {
   };
   const firstMinimum = params.paymentSats + 1;
   const candidates = await fetchCandidates(firstMinimum);
+  const confirmPlan = async (plan: InscribePaymentPlan) => {
+    if (params.network !== "FRACTAL_BITCOIN_MAINNET") return plan;
+    const minimumSats = plan.paymentSats + plan.feeSats;
+    if (!Number.isSafeInteger(minimumSats)) throw new Error("Le montant minimal du paiement dépasse la précision sûre des satoshis.");
+    const workerAttestation = await confirmFractalSpendableUtxos(plan.walletAddress, minimumSats, plan.inputs.map(input => ({
+      txid: input.txid, vout: input.vout, satoshi: input.valueSats, scriptPk: input.scriptHex,
+    })));
+    return { ...plan, workerAttestation };
+  };
   try {
-    return buildPlan({ ...params, walletScript, paymentScript, candidates });
+    return await confirmPlan(buildPlan({ ...params, walletScript, paymentScript, candidates }));
   } catch (firstError) {
+    if (firstError instanceof Error && firstError.name === "InsufficientSafeUtxosError") throw firstError;
     const expandedMinimum = params.paymentSats + Math.ceil(params.feeRateSatVb * 250) + MIN_CHANGE_SATS;
     if (expandedMinimum <= firstMinimum) throw firstError;
     const expanded = await fetchCandidates(expandedMinimum);
-    return buildPlan({ ...params, walletScript, paymentScript, candidates: expanded });
+    return await confirmPlan(buildPlan({ ...params, walletScript, paymentScript, candidates: expanded }));
   }
 }
 
