@@ -13,6 +13,19 @@ export type NativeUniSatProvider = {
   getBitcoinUtxos?: (cursor: number, size: number) => Promise<unknown>;
 };
 
+export type SafeUtxoNativeFallbackGate = {
+  isMobileUniSat: boolean;
+  hasReceipt: boolean;
+  safeUtxoShortage: boolean;
+  hasPaymentPlan: boolean;
+  hasPaymentTxid: boolean;
+  stage: string;
+};
+
+export function canOfferSafeUtxoNativeFallback(gate: SafeUtxoNativeFallbackGate) {
+  return gate.isMobileUniSat && gate.hasReceipt && gate.safeUtxoShortage && !gate.hasPaymentPlan && !gate.hasPaymentTxid && gate.stage === "awaiting-approval";
+}
+
 const TXID_PATTERN = /^[a-f0-9]{64}$/i;
 
 function requireTxid(result: UniSatTxResult, action: string) {

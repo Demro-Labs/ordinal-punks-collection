@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getSpendableUtxos } from "./mempool";
+import { getSpendableUtxos, InsufficientSafeUtxosError } from "./mempool";
 
 const ADDRESS = "bc1qtestaddress0000000000000000000000000";
 
@@ -90,5 +90,20 @@ describe("getSpendableUtxos", () => {
 
     await expect(getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 5_000))
       .rejects.toThrow(/page cohérente d’UTXO sûrs/i);
+  });
+
+  it("emits the typed shortage signal only when no verified UTXOs cover the minimum", async () => {
+    installWindowAndFetch(async () => Response.json({
+      chain: "fractal",
+      address: ADDRESS,
+      cursor: 0,
+      nextCursor: 0,
+      total: 0,
+      scannedCount: 0,
+      utxo: [],
+    }));
+
+    await expect(getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 5_000))
+      .rejects.toBeInstanceOf(InsufficientSafeUtxosError);
   });
 });
