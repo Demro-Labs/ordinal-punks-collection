@@ -862,7 +862,7 @@ export function UniSatWalletConnect() {
             getChain: psbtProvider.getChain.bind(provider),
             signPsbt: psbtProvider.signPsbt.bind(provider),
           },
-          mempool: { api: mempool.api, label: mempool.label, chain: "fractal" },
+          mempool: { api: mempool.api, label: mempool.label, chain: activeNetworkEnum === BITCOIN_MAINNET ? "bitcoin" : "fractal" },
           expectedNetworkEnum: activeNetworkEnum,
           currentAddress: address,
           recipientAddress: recipient,
@@ -889,7 +889,7 @@ export function UniSatWalletConnect() {
         });
         returnedTxid = result.txid;
       } else {
-        // Keep the existing desktop path byte-for-byte behaviorally unchanged; Bitcoin mobile retains its native path.
+        // Keep the existing desktop path behaviorally unchanged; Bitcoin mobile retains its native path.
         if (isMobileBrowser()) await ensureNativeInscriptionFeeBalance(provider, activeNetworkEnum, selected, feeRate);
         returnedTxid = await sendNativeUniSatInscription(provider, recipient, selected.inscriptionId, feeRate);
       }
@@ -1090,8 +1090,8 @@ export function UniSatWalletConnect() {
 
       {connectedToFractal && mobileFractalTransferOnFractal && (
         <div className="border-y border-[#d99a54]/50 bg-[#d99a54]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">
-          <p className="uppercase tracking-[0.12em]">Fractal mobile uses UniSat’s native inscription transfer</p>
-          <p className="mt-1">UniSat constructs, reviews, signs and broadcasts the transfer. Mempool validates the recipient address before the wallet opens, then tracks the returned transaction ID. Review the final amount and fee in UniSat.</p>
+          <p className="uppercase tracking-[0.12em]">Fractal mobile uses a verified PSBT transfer</p>
+          <p className="mt-1">Cloudflare provides protocol-checked fee UTXOs; the site reviews the exact transaction, UniSat signs after your approval, and Fractal Mempool validates and broadcasts it. Review every output and fee before signing.</p>
         </div>
       )}
       {transferOutcomeUnclear && (
