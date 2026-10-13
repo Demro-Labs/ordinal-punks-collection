@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { RarityBadge, LiveDataBlock } from "@/components/CollectionSignals";
+import { SiteOverviewPanel } from "@/components/SiteOverviewPanel";
 const MarketPanel = lazy(() => import("@/components/MarketPanel").then(module => ({ default: module.MarketPanel })));
 import { createRarityIndex } from "@/lib/rarity";
 import { fetchLiveInscription, type LiveInscription } from "@/lib/live";
@@ -589,6 +590,58 @@ export default function Home() {
           </div>
         </div>
       </header>
+      <SiteOverviewPanel
+        id="ordinal-punks-overview"
+        eyebrow="Guide de la collection"
+        title="Ordinal Punks — archive de 10 000 inscriptions"
+        summary="Un catalogue visuel des Ordinal Punks inscrits sur Fractal Bitcoin : retrouvez une pièce, examinez ses attributs et suivez les informations de marché et de portefeuille depuis une seule page."
+        sections={[
+          {
+            title: "Une archive d’artefacts inscrits",
+            text: "Le site rassemble les 10 000 pièces de la collection dans un index consultable. Les métadonnées et les images locales permettent de continuer à explorer le catalogue même lorsque les services en direct sont momentanément indisponibles.",
+            bullets: [
+              "Recherche par nom, identifiant d’inscription, numéro, token ou attribut.",
+              "Fiche de chaque pièce avec ses traits, son lien source et, quand le réseau répond, son propriétaire, créateur et état de mise en vente.",
+            ],
+          },
+          {
+            title: "Filtres et découverte",
+            text: "Parcourez l’archive à votre rythme et réduisez la sélection sans perdre le contexte de la collection.",
+            bullets: [
+              "Filtres par sexe, teinte de peau, rareté et statut de listing.",
+              "Favoris enregistrés localement, pagination et vues adaptées au parcours visuel.",
+              "Accès direct aux pages d’inscription UniSat et UniScan.",
+            ],
+          },
+          {
+            title: "Marché et portefeuille UniSat",
+            text: "Les valeurs de marché, listings, soldes, UTXO et informations de transaction sont récupérés en direct lorsqu’ils sont disponibles; ils restent distincts des métadonnées du catalogue.",
+            bullets: [
+              "Connexion UniSat explicite et chargement manuel des inscriptions du portefeuille.",
+              "Préparation d’un transfert ordinal, envoi Fractal Bitcoin et suivi des transactions.",
+              "Sélection de fichier, examen du reçu d’inscription et ouverture du paiement dans UniSat.",
+            ],
+          },
+          {
+            title: "Preuve de propriété et sécurité",
+            text: "Sur mobile UniSat, une signature BIP-322 fraîche prouve le contrôle de l’adresse avant chaque transfert ou inscription de fichier. Pour Inscribe, l’ordre est reçu examiné → confirmer le paiement → signer la preuve de propriété → ouvrir séparément l’approbation de transaction dans UniSat.",
+            bullets: [
+              "La preuve BIP-322 ne vaut ni connexion de session ni autorisation de transaction.",
+              "Les clés privées restent dans UniSat; le parcours desktop n’est pas modifié.",
+            ],
+          },
+          {
+            title: "Dernière mise à jour — parcours mobile",
+            text: "La mise à jour récente renforce les opérations UniSat sur téléphone sans modifier la version desktop : une preuve de propriété doit précéder l’approbation de transaction et le portefeuille est relu après une opération réussie.",
+            bullets: [
+              "Transfert ordinal ou envoi FB : signer BIP-322 avant l’ouverture de la signature transactionnelle.",
+              "Inscribe : examiner le reçu → confirmer le paiement → signer BIP-322 → ouvrir séparément l’approbation UniSat.",
+              "Après confirmation, le solde est actualisé à partir des données live du wallet; la sélection mobile conserve le sélecteur de fichier natif et la revue du reçu.",
+              "Le flux desktop opérationnel reste inchangé.",
+            ],
+          },
+        ]}
+      />
       <div
         id="top"
         className="mx-auto grid max-w-[1440px] lg:grid-cols-[220px_minmax(0,1fr)]"
