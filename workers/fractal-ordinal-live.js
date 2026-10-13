@@ -1,3 +1,6 @@
+import { handleWalletAuth } from './auth-bip322.js';
+export { AuthStorage } from './auth-bip322.js';
+
 const API_BASE = 'https://open-api-fractal.unisat.io';
 const BITCOIN_API_BASE = 'https://open-api.unisat.io';
 const ALLOWED_ORIGINS = new Set([
@@ -14,7 +17,7 @@ const rateBuckets = new Map();
 const INSCRIBE_RATE_WINDOW_MS = 60_000;
 const INSCRIBE_RATE_LIMIT = 5;
 const inscribeBuckets = new Map();
-const MAX_INSCRIBE_FILES = 100;
+const MAX_INSCRIBE_FILES = 1000;
 const MAX_INSCRIBE_FILE_BYTES = 365 * 1024;
 const MAX_INSCRIBE_BODY_BYTES = 50_000_000;
 const MAX_UTXO_CONFIRM_BODY_BYTES = 20_000;
@@ -38,7 +41,10 @@ function cors(request) {
     'Access-Control-Max-Age': '600',
     'Vary': 'Origin',
   };
-  if (ALLOWED_ORIGINS.has(origin)) headers['Access-Control-Allow-Origin'] = origin;
+  if (ALLOWED_ORIGINS.has(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
+  }
   return headers;
 }
 
@@ -536,6 +542,7 @@ export default {
       return new Response('Forbidden', { status: 403, headers });
     }
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+    if (url.pathname.startsWith('/api/auth/')) return handleWalletAuth(request, env, headers);
     if (request.method === 'GET' && url.pathname === '/api/fees/recommended') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });

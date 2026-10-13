@@ -468,6 +468,42 @@ test('rejects an oversized UniSat page instead of skipping uninspected outpoints
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('preserves the 1000-file Inscribe limit and rejects file 1001 before upstream access', async () => {
+  const previousFetch = globalThis.fetch;
+  let acceptedFileCount = 0;
+  let orderCalls = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url.endsWith('/v1/indexer/fees/recommended')) return Response.json({ code: 0, data: { halfHourFee: 6 } });
+    if (url === 'https://mempool.fractalbitcoin.io/api/v1/fees/recommended') return Response.json({ halfHourFee: 5 });
+    if (url.endsWith('/v5/inscribe/order/create')) {
+      orderCalls += 1;
+      acceptedFileCount = JSON.parse(init.body).files.length;
+      return Response.json({ code: 0, data: { orderId: 'order-1000-test', status: 'pending', payAddress: 'bc1qtestaddress0000000000000000000000000', amount: 12345 } });
+    }
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  const common = {
+    receiver: 'bc1qtestaddress0000000000000000000000000',
+    refundAddress: 'bc1qtestaddress0000000000000000000000000',
+    userAddress: 'bc1qtestaddress0000000000000000000000000',
+    userPubkey: '02' + 'a'.repeat(64),
+    feeRate: 5,
+    outputValue: 546,
+    chain: 'FRACTAL_BITCOIN_MAINNET',
+  };
+  try {
+    const files = count => Array.from({ length: count }, (_, index) => ({ filename: `file-${index}.txt`, dataURL: 'data:text/plain;base64,QQ==' }));
+    const accepted = await worker.fetch(makeRequest('/api/inscribe/order', { method: 'POST', ip: '192.0.2.229', body: JSON.stringify({ ...common, files: files(1000) }) }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(accepted.status, 200);
+    assert.equal(acceptedFileCount, 1000);
+    const rejected = await worker.fetch(makeRequest('/api/inscribe/order', { method: 'POST', ip: '192.0.2.228', body: JSON.stringify({ ...common, files: files(1001) }) }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(rejected.status, 400);
+    assert.match((await rejected.json()).error, /1 à 1000 fichiers/i);
+    assert.equal(orderCalls, 1);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('caps the per-isolate client table under rotating IPs', async () => {
   let blocked = false;
   for (let i = 0; i < 10002; i += 1) {
@@ -480,4 +516,113 @@ test('caps the per-isolate client table under rotating IPs', async () => {
     assert.equal(response.status, 400);
   }
   assert.equal(blocked, true);
+});
+
+
+function createAuthStorageMock() {
+  const state = { challenge: null, session: null, ipCounts: new Map() };
+  const binding = {
+    idFromName(name) { assert.equal(name, 'wallet-auth-v1'); return name; },
+    get() {
+      return {
+        async fetch(request) {
+          const path = new URL(request.url).pathname;
+          const body = await request.json();
+          if (path === '/challenge/create') {
+            state.challenge = { idHash: body.idHash, site: body.site, address: body.address, addressHash: body.addressHash, network: body.network, origin: body.origin, issuedAt: body.issuedAt, expiresAt: body.expiresAt, usedAt: null };
+            return Response.json({ created: true });
+          }
+          if (path === '/rate/ip') {
+            const key = `${body.ipHash}:${body.action}:${body.windowStart}`;
+            const count = state.ipCounts.get(key) || 0;
+            if (count >= body.limit) return Response.json({ code: 'AUTH_IP_RATE_LIMITED' }, { status: 429 });
+            state.ipCounts.set(key, count + 1);
+            return Response.json({ allowed: true });
+          }
+          if (path === '/challenge/get') {
+            if (!state.challenge || state.challenge.idHash !== body.idHash) return Response.json({ code: 'AUTH_CHALLENGE_NOT_FOUND' }, { status: 404 });
+            return Response.json(state.challenge);
+          }
+          if (path === '/challenge/consume') {
+            if (!state.challenge || state.challenge.idHash !== body.idHash || state.challenge.usedAt || state.challenge.expiresAt <= body.now) return Response.json({ created: false }, { status: 409 });
+            state.challenge.usedAt = body.now;
+            state.session = { tokenHash: body.tokenHash, site: body.site, address: body.address, network: body.network, createdAt: body.now, expiresAt: body.expiresAt };
+            return Response.json({ created: true });
+          }
+          if (path === '/session/get') {
+            const current = state.session;
+            if (!current || current.site !== body.site || current.tokenHash !== body.tokenHash || current.expiresAt <= body.now) return Response.json({ session: null });
+            return Response.json({ session: { site: current.site, address: current.address, network: current.network, createdAt: new Date(current.createdAt).toISOString(), expiresAt: new Date(current.expiresAt).toISOString() } });
+          }
+          if (path === '/session/delete') {
+            if (state.session?.site === body.site && state.session.tokenHash === body.tokenHash) state.session = null;
+            return Response.json({ ok: true });
+          }
+          return new Response('Not found', { status: 404 });
+        },
+      };
+    },
+  };
+  return { binding, state };
+}
+
+test('BIP-322 challenge is origin-bound, short-lived, uncached, and stores only the challenge hash', async () => {
+  const { binding, state } = createAuthStorageMock();
+  const address = 'bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l';
+  const response = await worker.fetch(makeRequest('/api/auth/challenge', {
+    method: 'POST',
+    ip: '192.0.2.250',
+    body: JSON.stringify({ site: 'punks', address, network: 'FRACTAL_BITCOIN_MAINNET' }),
+  }), { AUTH_STORAGE: binding });
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('access-control-allow-credentials'), 'true');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(result.site, 'punks');
+  assert.equal(result.network, 'FRACTAL_BITCOIN_MAINNET');
+  assert.equal(Date.parse(result.expiresAt) - Date.now() <= 5 * 60 * 1000, true);
+  assert.match(result.message, /URI: https:\/\/demro-labs\.github\.io\/ordinal-punks-collection\//);
+  assert.match(result.message, /No payment, transfer, or spending approval is authorized\./);
+  assert.equal(state.challenge.idHash.length, 64);
+  assert.equal(state.challenge.idHash === result.challengeId, false);
+  assert.equal(JSON.stringify(state.challenge).includes(result.challengeId), false);
+});
+
+test('BIP-322 verify rejects a malformed signature and does not create a session', async () => {
+  const { binding, state } = createAuthStorageMock();
+  const address = 'bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l';
+  const challengeResponse = await worker.fetch(makeRequest('/api/auth/challenge', {
+    method: 'POST',
+    ip: '192.0.2.251',
+    body: JSON.stringify({ site: 'pokedex', address, network: 'FRACTAL_BITCOIN_MAINNET' }),
+  }), { AUTH_STORAGE: binding });
+  const challenge = await challengeResponse.json();
+  const response = await worker.fetch(makeRequest('/api/auth/verify', {
+    method: 'POST',
+    ip: '192.0.2.252',
+    body: JSON.stringify({ site: 'pokedex', challengeId: challenge.challengeId, address, network: 'FRACTAL_BITCOIN_MAINNET', signature: 'ZmFrZV9zaWduYXR1cmU=' }),
+  }), { AUTH_STORAGE: binding });
+  const result = await response.json();
+  assert.equal(response.status, 401);
+  assert.equal(result.code, 'AUTH_SIGNATURE_REJECTED');
+  assert.equal(state.challenge.usedAt, null);
+  assert.equal(state.session, null);
+});
+
+test('BIP-322 routes reject other origins and fail closed without the Durable Object binding', async () => {
+  const address = 'bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l';
+  const denied = await worker.fetch(makeRequest('/api/auth/challenge', {
+    method: 'POST',
+    origin: 'https://attacker.example',
+    ip: '192.0.2.253',
+    body: JSON.stringify({ site: 'punks', address, network: 'FRACTAL_BITCOIN_MAINNET' }),
+  }), {});
+  assert.equal(denied.status, 403);
+  const missingBinding = await worker.fetch(makeRequest('/api/auth/challenge', {
+    method: 'POST',
+    ip: '192.0.2.254',
+    body: JSON.stringify({ site: 'punks', address, network: 'FRACTAL_BITCOIN_MAINNET' }),
+  }), {});
+  assert.equal(missingBinding.status, 503);
+  assert.equal((await missingBinding.json()).code, 'AUTH_STORAGE_UNAVAILABLE');
 });
