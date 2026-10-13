@@ -3,12 +3,13 @@ import * as bitcoin from "bitcoinjs-lib";
 import ecc from "@bitcoinerlab/secp256k1";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ getMempoolConfig: vi.fn(), getSpendableUtxos: vi.fn() }));
-vi.mock("@/lib/mempool", () => ({ getMempoolConfig: mocks.getMempoolConfig, getSpendableUtxos: mocks.getSpendableUtxos }));
+const mocks = vi.hoisted(() => ({ getMempoolConfig: vi.fn(), getSpendableUtxos: vi.fn(), confirmFractalSpendableUtxos: vi.fn() }));
+vi.mock("@/lib/mempool", () => ({ getMempoolConfig: mocks.getMempoolConfig, getSpendableUtxos: mocks.getSpendableUtxos, confirmFractalSpendableUtxos: mocks.confirmFractalSpendableUtxos }));
 
 import {
   broadcastSignedInscribePayment,
   getInscribePaymentSignOptions,
+  hasSufficientWorkerUtxoAttestation,
   InscribePaymentBroadcastUnclearError,
   prepareInscribePaymentPsbt,
 } from "./inscribe-payment-psbt";
@@ -86,6 +87,19 @@ async function sign(psbtHex: string) {
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("mobile inscription payment PSBT", () => {
+  it("requires the Worker attestation to cover the exact Fractal payment and fee total", () => {
+    const plan = {
+      psbtHex: "", network: "FRACTAL_BITCOIN_MAINNET", walletAddress: WALLET_ADDRESS, paymentAddress: PAYMENT_ADDRESS,
+      paymentSats: 10_000, publicKeyHex: PUBLIC_KEY_HEX, feeRateSatVb: 2, feeSats: 400, estimatedVsize: 200,
+      totalInputSats: 10_400, inputs: [{}], outputs: [],
+      workerAttestation: { chain: "fractal" as const, address: WALLET_ADDRESS, minimumSats: 10_400, safeSats: 10_400, sufficient: true as const, verifiedUtxoCount: 1, confirmedAt: new Date().toISOString() },
+    };
+    expect(hasSufficientWorkerUtxoAttestation(plan as never)).toBe(true);
+    expect(hasSufficientWorkerUtxoAttestation({ ...plan, workerAttestation: undefined } as never)).toBe(false);
+    expect(hasSufficientWorkerUtxoAttestation({ ...plan, workerAttestation: { ...plan.workerAttestation, safeSats: 10_399 } } as never)).toBe(false);
+    expect(hasSufficientWorkerUtxoAttestation({ ...plan, workerAttestation: { ...plan.workerAttestation, verifiedUtxoCount: 2 } } as never)).toBe(false);
+  });
+
   it("prepares the exact payment + change, asks UniSat to sign on click, verifies, then broadcasts once", async () => {
     const fixture = setup();
     const plan = await prepare(fixture);

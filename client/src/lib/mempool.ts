@@ -18,11 +18,13 @@ export const MEMPOOL_ENDPOINTS: Record<string, MempoolConfig> = {
 
 export function getMempoolConfig(network?: string) { return network ? MEMPOOL_ENDPOINTS[network] : undefined; }
 
-async function requestJson<T>(url: string, timeoutMs = 8_000): Promise<T> {
+async function requestJson<T>(url: string, timeoutMs = 8_000, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { cache: "no-store", signal: controller.signal, headers: { Accept: "application/json" } });
+    const headers = new Headers(init?.headers);
+    if (!headers.has("Accept")) headers.set("Accept", "application/json");
+    const response = await fetch(url, { ...init, cache: "no-store", signal: controller.signal, headers });
     if (!response.ok) {
       if (new URL(url).origin === new URL(LIVE_DATA_API_BASE).origin) {
         const failure = await response.json().catch(() => null) as { error?: unknown; code?: unknown } | null;
@@ -72,6 +74,16 @@ export type SpendableUtxo = { address: string; txid: string; vout: number; satos
 export class InsufficientSafeUtxosError extends Error {
   constructor(message: string) { super(message); this.name = "InsufficientSafeUtxosError"; }
 }
+export type WorkerSafeUtxoAttestation = {
+  chain: "fractal";
+  address: string;
+  minimumSats: number;
+  safeSats: number;
+  sufficient: true;
+  verifiedUtxoCount: number;
+  confirmedAt: string;
+};
+type WorkerSafeUtxoConfirmationResponse = Omit<WorkerSafeUtxoAttestation, "sufficient"> & { sufficient: boolean };
 const SPENDABLE_UTXO_PAGE_SIZE = 25;
 const MAX_SPENDABLE_UTXO_PAGES = 20;
 
@@ -126,6 +138,36 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     throw new InsufficientSafeUtxosError(`UniSat/Worker n’a validé que ${safeSats.toLocaleString("fr-FR")} sats dans ${collected.length} UTXO sûrs, après analyse de ${scannedLabel} sorties (plafond ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). Minimum requis : ${minimumSats.toLocaleString("fr-FR")} sats. Aucun paiement n’a été lancé.`);
   }
   return collected;
+}
+
+/** Recheck the exact PSBT inputs with the Fractal Worker before UniSat is asked to sign or pay. */
+export async function confirmFractalSpendableUtxos(address: string, minimumSats: number, utxos: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk">>): Promise<WorkerSafeUtxoAttestation> {
+  if (!address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0 || !Array.isArray(utxos) || utxos.length < 1 || utxos.length > 20) {
+    throw new Error("Le jeu d’UTXO à confirmer auprès du Worker est invalide.");
+  }
+  const result = await requestJson<Partial<WorkerSafeUtxoConfirmationResponse>>(
+    `${LIVE_DATA_API_BASE}/api/spendable-utxos/confirm`,
+    15_000,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chain: "fractal",
+        address,
+        minimumSats,
+        utxos: utxos.map(utxo => ({ txid: utxo.txid, vout: utxo.vout, satoshi: utxo.satoshi, scriptPk: utxo.scriptPk })),
+      }),
+    },
+  );
+  if (
+    result.chain !== "fractal" || result.address !== address || result.minimumSats !== minimumSats ||
+    !Number.isSafeInteger(result.safeSats) || !Number.isSafeInteger(result.verifiedUtxoCount) ||
+    result.verifiedUtxoCount !== utxos.length || typeof result.sufficient !== "boolean" || typeof result.confirmedAt !== "string"
+  ) throw new Error("Le Worker n’a pas renvoyé une attestation complète des UTXO Fractal sélectionnés.");
+  if (!result.sufficient || result.safeSats! < minimumSats) {
+    throw new InsufficientSafeUtxosError(`Le Worker n’a confirmé que ${result.safeSats!.toLocaleString("fr-FR")} sats sûrs sur les entrées du PSBT; ${minimumSats.toLocaleString("fr-FR")} sats sont nécessaires. Aucun paiement ne peut être approuvé.`);
+  }
+  return result as WorkerSafeUtxoAttestation;
 }
 
 export async function validateMempoolAddress(network: string, address: string) {
