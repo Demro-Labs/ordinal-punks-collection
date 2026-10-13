@@ -1,5 +1,7 @@
 # Analyse du blocage de transfert mobile UniSat — Ordinal Punks
 
+> **Mise à jour du 13 octobre 2026 —** Cette analyse conserve les constats historiques du parcours mobile. Le transfert ordinal et le paiement Inscribe vérifiés par PSBT, avec UTXO contrôlés par le Worker Cloudflare, revue exacte, signature `signPsbt` et validation Mempool, sont désormais également utilisés par l’extension UniSat desktop. Les mentions ci-dessous indiquant que le desktop reste natif décrivent l’état antérieur et ne constituent plus le comportement actif.
+
 **Date :** 12 octobre 2026
 **Dépôt analysé :** `Demro-Labs/ordinal-punks-collection`
 **Commit `main` examiné :** `687b79c2e20a6d1a10cfc19e839292be37e8db05` — fusion de la PR #113, « Pause failing UniSat mobile transfers on Fractal ».
