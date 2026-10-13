@@ -9,11 +9,12 @@ import NotFound from "./pages/NotFound";
 
 function Router() {
   const base = import.meta.env.BASE_URL === "/" ? "" : import.meta.env.BASE_URL.replace(/\/$/, "");
+
   return (
     <WouterRouter base={base}>
       <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/404" component={NotFound} />
+      <Route path="/" component={Home} />
+      <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>
     </WouterRouter>
