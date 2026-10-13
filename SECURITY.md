@@ -2,7 +2,7 @@
 
 ## Scope
 
-This repository publishes a public, read-only static collection site. It does not request passwords, wallet seed phrases, private keys, payment-card details, or other authentication secrets. The live market data API is a separate Cloudflare Worker; its UniSat credential must remain a Cloudflare secret binding and must never be committed or exposed in browser code.
+This repository publishes a public static collection site with optional UniSat wallet operations. The application does not request passwords, seed phrases, private keys, payment-card details, or other authentication secrets; private keys remain in UniSat. The shared Cloudflare Worker may create inscription orders and verify short-lived ownership challenges, but ownership proof never creates a login session or authorizes, signs, or broadcasts a transaction. The UniSat credential must remain a Cloudflare secret binding and must never be committed or exposed in browser code.
 
 ## Reporting a vulnerability
 
@@ -10,7 +10,7 @@ Please report suspected vulnerabilities privately through [GitHub private vulner
 
 ## Security baseline
 
-The site enforces HTTPS on GitHub Pages, applies a restrictive HTML Content Security Policy, and uses a read-only Worker API. CI runs type-checking, a production dependency audit, and a production build. Third-party GitHub Actions are pinned to immutable commit SHAs; Dependabot checks packages and Actions weekly.
+The site enforces HTTPS on GitHub Pages and applies a restrictive HTML Content Security Policy. Transfers and inscription payments require explicit approval inside UniSat; on mobile, a fresh BIP-322 ownership signature is required first, followed by a separate transaction approval. The desktop transaction flow remains unchanged. CI runs type-checking, a production dependency audit, production builds, and CodeQL. Third-party GitHub Actions are pinned to immutable commit SHAs. Dependabot version-update and security-update PRs are disabled, while GitHub vulnerability alerts remain enabled.
 
 ## Limitations
 
