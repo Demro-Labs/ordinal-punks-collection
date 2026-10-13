@@ -403,10 +403,15 @@ test('fails closed when a protocol balance response is missing or malformed', as
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('returns a stage-specific UniSat error code without echoing the wallet address', async () => {
+test('never sends the Fractal UniSat secret to the Bitcoin API', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
-  globalThis.fetch = async () => new Response('upstream unavailable', { status: 429 });
+  const upstreamAuthorization = [];
+  globalThis.fetch = async (input, init = {}) => {
+    assert.equal(new URL(String(input)).origin, 'https://open-api.unisat.io');
+    upstreamAuthorization.push(new Headers(init.headers).get('Authorization'));
+    return new Response('upstream unavailable', { status: 429 });
+  };
   try {
     const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=bitcoin&address=${address}&cursor=0&size=25`, { ip: '192.0.2.235' }), { UNISAT_API_KEY: 'test-only' });
     const data = await response.json();
@@ -414,6 +419,7 @@ test('returns a stage-specific UniSat error code without echoing the wallet addr
     assert.equal(data.code, 'UTXO_LIST_UNISAT_HTTP_429');
     assert.equal(JSON.stringify(data).includes(address), false);
     assert.equal(JSON.stringify(data).includes('test-only'), false);
+    assert.deepEqual(upstreamAuthorization, [null]);
   } finally { globalThis.fetch = previousFetch; }
 });
 
