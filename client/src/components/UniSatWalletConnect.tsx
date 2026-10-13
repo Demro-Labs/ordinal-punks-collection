@@ -7,6 +7,7 @@ import type { OrdinalTransferPlan } from "@/lib/ordinal-transfer-psbt";
 import { getUniSatInscriptionUrl, isTransferOutcomeUnclear } from "@/lib/transfer-safety";
 import { shouldShowDustRelayGuidance } from "@/lib/wallet-error";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
+import { MobileFbSendPanel } from "@/components/MobileFbSendPanel";
 
 type UniSatChain = {
   enum?: string;
@@ -1113,6 +1114,9 @@ export function UniSatWalletConnect() {
           <div className="mt-3 grid grid-cols-2 gap-px border border-[#2c323a] bg-[#2c323a] sm:grid-cols-3 lg:grid-cols-6"><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Network</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{currentNetwork?.label}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">FB total</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{formatSats(walletDashboard?.total)}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Available</p><p className="mt-2 font-mono text-[10px] text-[#70c7a0]">{formatSats(walletDashboard?.available)}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Inscriptions</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{inscriptions.length} / {inscriptionTotal}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">UTXOs</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{walletDashboard?.utxoCount ?? "—"}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">UTXO value</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{formatSats(walletDashboard?.utxoSats)}</p></div></div>
           <div className="mt-3 grid gap-2 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] text-[#9ea7b3] sm:grid-cols-2"><p className="break-all sm:col-span-2"><span className="text-[#718092]">Connected address:</span> {address}</p><p><span className="text-[#718092]">Confirmed:</span> {formatSats(walletDashboard?.confirmed)}</p><p><span className="text-[#718092]">Unconfirmed:</span> {formatSats(walletDashboard?.unconfirmed)}</p><p><span className="text-[#718092]">Unavailable:</span> {formatSats(walletDashboard?.unavailable)}</p><p><span className="text-[#718092]">Last refresh:</span> {walletDashboard ? new Date(walletDashboard.refreshedAt).toLocaleTimeString() : "Loading…"}</p>{walletDashboard?.publicKey && <p className="break-all sm:col-span-2"><span className="text-[#718092]">Public key:</span> {walletDashboard.publicKey}</p>}</div>
         </section>
+      )}
+      {isMobileBrowser() && connectedToFractal && (
+        <MobileFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} />
       )}
       {connectedToFractal && inscriptions.length > 0 && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-gallery-title">
