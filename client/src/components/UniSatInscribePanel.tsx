@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CheckCircle2, ExternalLink, FilePlus2, Files, ShieldCheck, Upload, X } from "lucide-react";
-import { describeFeeSources, getRecommendedFeeEstimate, getRecommendedFeeRate, trackMempoolTransaction, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
-import { sendMobilePayment, type MobilePaymentProvider } from "@/lib/mobile-payment-psbt";
+import { describeFeeSources, getRecommendedFeeEstimate, getRecommendedFeeRate, trackMempoolTransaction, validateMempoolAddress, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
+import { sendNativeUniSatBitcoinPayment } from "@/lib/native-unisat-actions";
 
 const API_BASE = "https://fractal-ordinal-live.servostar23.workers.dev";
 const MAX_FILE_BYTES = 365 * 1024;
@@ -197,6 +197,7 @@ export function UniSatInscribePanel() {
         setStage("idle");
         return setMessage("Réseau UniSat non pris en charge. Sélectionnez Bitcoin mainnet ou Fractal Bitcoin mainnet dans le wallet.");
       }
+      await validateMempoolAddress(activeChainEnum, activeAddress);
       const [encodedFiles, publicKey] = await Promise.all([Promise.all(files.map(async file => ({ filename: file.name, dataURL: await readAsDataUrl(file) }))), provider.getPublicKey()]);
       const feeEstimate = await getRecommendedFeeEstimate(activeChainEnum);
       const liveFeeRate = feeEstimate.feeRate;
@@ -251,41 +252,26 @@ export function UniSatInscribePanel() {
   };
   const approvePayment = async () => {
     const provider = window.unisat;
-    const mobileProvider = provider as unknown as MobilePaymentProvider;
     const mobileUniSat = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const mobilePsbtAvailable = Boolean(mobileProvider?.signPsbt && (mobileProvider.pushPsbt || mobileProvider.pushTx));
     if (!receipt) return setMessage("Aucune commande d’inscription n’est en attente d’approbation.");
     if (!provider?.getChain) return setMessage("UniSat ne permet pas l’approbation du paiement depuis ce navigateur.");
-    if (mobileUniSat && !mobilePsbtAvailable) return setMessage("UniSat mobile doit fournir signPsbt et pushPsbt/pushTx. Aucun paiement n’a été lancé; mettez UniSat à jour ou ouvrez le site dans son navigateur intégré.");
-    if (!mobileUniSat && !provider.sendBitcoin && !mobilePsbtAvailable) return setMessage("UniSat ne permet pas l’approbation du paiement depuis ce navigateur.");
+    if (!provider.sendBitcoin) return setMessage(mobileUniSat ? "Ouvrez cette page dans le navigateur intégré UniSat à jour (sendBitcoin natif requis). Aucun paiement n’a été lancé." : "UniSat ne fournit pas sendBitcoin dans ce navigateur. Aucun paiement n’a été lancé.");
     setStage("paying"); setMessage("Vérification du réseau de la commande avant d’ouvrir l’approbation UniSat…");
     let paymentCallStarted = false;
     let paymentReturned = false;
     try {
       const currentChain = await provider.getChain();
       if (currentChain.enum !== receipt.chain) throw new Error("Le réseau du wallet a changé depuis la création du reçu. Revenez au réseau indiqué sur le reçu; aucun paiement n’a été envoyé.");
+      await validateMempoolAddress(receipt.chain, receipt.payAddress);
       const paymentFeeRate = await getRecommendedFeeRate(receipt.chain);
       setReceipt(current => current ? { ...current, feeRate: paymentFeeRate } : current);
       setMessage(mobileUniSat
-        ? "Préparation d’une PSBT avec des UTXO sûrs vérifiés. UniSat affichera les détails à confirmer avant signature."
+        ? "Mempool a validé l’adresse de paiement. UniSat va construire et afficher le paiement natif; vérifiez le réseau, le montant et les frais dans le wallet."
         : "UniSat va afficher le montant et les frais finaux avant signature.");
-      let payment: string | { txid?: string };
-      if (mobileUniSat || !provider.sendBitcoin) {
-        payment = await sendMobilePayment({
-          provider: mobileProvider,
-          senderAddress: address,
-          payAddress: receipt.payAddress,
-          amount: receipt.amount,
-          feeRate: paymentFeeRate,
-          chain: receipt.chain,
-          onApprovalStarted: () => { paymentCallStarted = true; },
-        });
-      } else {
-        paymentCallStarted = true;
-        payment = await provider.sendBitcoin(receipt.payAddress, receipt.amount, { feeRate: paymentFeeRate });
-      }
+      paymentCallStarted = true;
+      const payment = await sendNativeUniSatBitcoinPayment(provider, receipt.payAddress, receipt.amount, paymentFeeRate);
       paymentReturned = true;
-      const returnedTxid = typeof payment === "string" ? payment : payment?.txid;
+      const returnedTxid = payment;
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) throw new Error("UniSat n’a pas retourné de TXID vérifiable. Vérifiez l’activité du wallet avant toute nouvelle action.");
       setTxid(returnedTxid);
       const initialPaymentReceipt: MempoolReceipt = { txid: returnedTxid, network: receipt.chain === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin", status: "checking", message: "Paiement approuvé. Recherche dans Mempool…", blockHeight: null, explorerUrl: "", checkedAt: new Date().toISOString() };
