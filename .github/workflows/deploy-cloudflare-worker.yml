@@ -8,6 +8,7 @@ on:
       - "wrangler.jsonc"
       - "package.json"
       - "pnpm-lock.yaml"
+      - "scripts/verify-cloudflare-production.sh"
       - ".github/workflows/deploy-cloudflare-worker.yml"
   workflow_dispatch:
     inputs:

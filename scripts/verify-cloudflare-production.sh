@@ -49,7 +49,10 @@ for origin in "https://demro-labs.github.io" "https://punksgallery-mlwdpcwl.manu
   echo "Auth CORS preflight verified for ${origin}."
 done
 
-status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' \
-  "${BASE_URL}/api/inscribe/order?orderId=invalid" -H 'Origin: https://demro-labs.github.io' || true)"
-[[ "${status}" == "400" ]] || { echo "Inscribe order status route returned HTTP ${status} for a deliberately invalid ID." >&2; exit 1; }
-echo "Inscribe status route is present and rejects malformed IDs without creating an order."
+status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
+  "${BASE_URL}/api/inscribe/order" \
+  -H 'Origin: https://demro-labs.github.io' \
+  -H 'Content-Type: text/plain' \
+  --data-binary 'pre-deploy-smoke-probe' || true)"
+[[ "${status}" == "415" ]] || { echo "Inscribe order route returned HTTP ${status} for a safe non-JSON probe (expected 415)." >&2; exit 1; }
+echo "Inscribe order route safely rejected non-JSON before creating an order."
