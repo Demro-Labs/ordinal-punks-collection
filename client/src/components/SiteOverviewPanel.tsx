@@ -62,7 +62,7 @@ export function SiteOverviewPanel({
               onClick={() => setOpen(value => !value)}
               className="inline-flex shrink-0 items-center justify-center gap-2 border border-[#d99a54]/70 px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f3efe5] transition-colors hover:bg-[#d99a54]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d99a54]"
             >
-              {open ? "Masquer la description" : "Découvrir le site"}
+              {open ? "Hide overview" : "Explore this site"}
               {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
             </button>
           </div>
@@ -74,7 +74,7 @@ export function SiteOverviewPanel({
             onPointerCancel={() => { dragStartY.current = null; }}
             role="presentation"
             aria-hidden="true"
-            title="Glissez vers le bas pour ouvrir, vers le haut pour fermer"
+            title="Drag down to open or up to close"
           >
             <span className="h-1 w-12 rounded-full bg-[#718092]/70 transition-colors hover:bg-[#d99a54]" />
           </div>
@@ -112,7 +112,7 @@ export function SiteOverviewPanel({
                   ))}
                 </div>
                 <p className="mt-4 text-center font-mono text-[9px] uppercase tracking-[0.13em] text-[#718092]">
-                  Appuyez sur le bouton ou glissez la poignée pour ouvrir / fermer
+                  Use the button or drag the handle to open / close
                 </p>
               </div>
             </div>
