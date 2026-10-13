@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { LogOut, ShieldCheck } from "lucide-react";
+import { isMobileUniSatDevice } from "@/lib/mobile-context";
 
 const AUTH_API = "https://fractal-ordinal-live.servostar23.workers.dev";
 const FRACTAL_MAINNET = "FRACTAL_BITCOIN_MAINNET";
@@ -107,13 +108,27 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
     try {
       if (Date.parse(challenge.expiresAt) <= Date.now()) throw new Error("The challenge expired. Create a new one.");
       if (!provider?.signMessage) throw new Error("This UniSat version does not expose BIP-322 message signing.");
-      const [accounts, currentChain] = await Promise.all([
-        provider.getAccounts ? provider.getAccounts() : Promise.resolve([address]),
-        provider.getChain ? provider.getChain() : Promise.resolve(null),
-      ]);
-      if (!accounts[0] || accounts[0].toLowerCase() !== address.toLowerCase()) throw new Error("The connected UniSat address changed. Create a new challenge for the active wallet.");
-      if (currentChain?.enum && currentChain.enum !== FRACTAL_MAINNET) throw new Error("Switch UniSat to Fractal Bitcoin mainnet before signing.");
-      const signature = await provider.signMessage(challenge.message, "bip322-simple");
+      let signature: string;
+      if (isMobileUniSatDevice()) {
+        // UniSat Mobile's injected in-app provider can require signMessage to
+        // start directly from the tap; run read-only wallet checks immediately
+        // after the prompt, and never submit if the active wallet changed.
+        signature = await provider.signMessage(challenge.message, "bip322-simple");
+        const [accounts, currentChain] = await Promise.all([
+          provider.getAccounts ? provider.getAccounts() : Promise.resolve([address]),
+          provider.getChain ? provider.getChain() : Promise.resolve(null),
+        ]);
+        if (!accounts[0] || accounts[0].toLowerCase() !== address.toLowerCase()) throw new Error("The connected UniSat address changed. Create a new challenge for the active wallet.");
+        if (currentChain?.enum && currentChain.enum !== FRACTAL_MAINNET) throw new Error("Switch UniSat to Fractal Bitcoin mainnet before signing.");
+      } else {
+        const [accounts, currentChain] = await Promise.all([
+          provider.getAccounts ? provider.getAccounts() : Promise.resolve([address]),
+          provider.getChain ? provider.getChain() : Promise.resolve(null),
+        ]);
+        if (!accounts[0] || accounts[0].toLowerCase() !== address.toLowerCase()) throw new Error("The connected UniSat address changed. Create a new challenge for the active wallet.");
+        if (currentChain?.enum && currentChain.enum !== FRACTAL_MAINNET) throw new Error("Switch UniSat to Fractal Bitcoin mainnet before signing.");
+        signature = await provider.signMessage(challenge.message, "bip322-simple");
+      }
       if (typeof signature !== "string" || !signature) throw new Error("UniSat did not return a BIP-322 signature.");
       const verifyResponse = await fetch(`${AUTH_API}/api/auth/verify`, {
         method: "POST",
