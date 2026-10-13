@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LogOut, ShieldCheck } from "lucide-react";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
+import { signMobileUniSatMessage, UniSatSignTimeoutError } from "@/lib/unisat-mobile-signing";
 
 const AUTH_API = "https://fractal-ordinal-live.servostar23.workers.dev";
 const FRACTAL_MAINNET = "FRACTAL_BITCOIN_MAINNET";
@@ -26,6 +27,7 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<"loading" | "anonymous" | "authenticated" | "unavailable">("loading");
   const [error, setError] = useState("");
+  const [mobileSignTimedOut, setMobileSignTimedOut] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -75,6 +77,7 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
     setBusy(true);
     setError("");
     setChallenge(null);
+    setMobileSignTimedOut(false);
     try {
       if (!networkReady) throw new Error("Switch UniSat to Fractal Bitcoin mainnet first.");
       if (!provider) throw new Error("UniSat is not available in this browser.");
@@ -103,17 +106,18 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
 
   const signChallenge = async () => {
     if (!challenge) return;
+    const mobile = isMobileUniSatDevice();
     setBusy(true);
     setError("");
     try {
       if (Date.parse(challenge.expiresAt) <= Date.now()) throw new Error("The challenge expired. Create a new one.");
       if (!provider?.signMessage) throw new Error("This UniSat version does not expose BIP-322 message signing.");
       let signature: string;
-      if (isMobileUniSatDevice()) {
+      if (mobile) {
         // UniSat Mobile's injected in-app provider can require signMessage to
         // start directly from the tap; run read-only wallet checks immediately
         // after the prompt, and never submit if the active wallet changed.
-        signature = await provider.signMessage(challenge.message, "bip322-simple");
+        signature = await signMobileUniSatMessage(provider, challenge.message);
         const [accounts, currentChain] = await Promise.all([
           provider.getAccounts ? provider.getAccounts() : Promise.resolve([address]),
           provider.getChain ? provider.getChain() : Promise.resolve(null),
@@ -156,7 +160,12 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
       setStatus("authenticated");
       setChallenge(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Sign-in failed.");
+      if (mobile && cause instanceof UniSatSignTimeoutError) {
+        setMobileSignTimedOut(true);
+        setError("");
+      } else {
+        setError(cause instanceof Error ? cause.message : "Sign-in failed.");
+      }
     } finally {
       setBusy(false);
     }
@@ -217,12 +226,13 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
         <div className="mt-3 border border-[#70c7a0]/50 bg-[#0b0f12] p-3">
           <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#70c7a0]">Review this message before opening UniSat · expires {new Date(challenge.expiresAt).toLocaleTimeString()}</p>
           <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-5 text-[#d9d3c6]">{challenge.message}</pre>
-          <button type="button" onClick={() => void signChallenge()} disabled={busy} className="mt-3 min-h-10 w-full border border-[#70c7a0] px-3 py-2 font-mono text-[9px] uppercase tracking-[0.08em] text-[#70c7a0] hover:bg-[#70c7a0]/10 disabled:opacity-50 sm:w-auto">
+          <button type="button" onClick={() => void signChallenge()} disabled={busy || (isMobileUniSatDevice() && mobileSignTimedOut)} className="mt-3 min-h-10 w-full border border-[#70c7a0] px-3 py-2 font-mono text-[9px] uppercase tracking-[0.08em] text-[#70c7a0] hover:bg-[#70c7a0]/10 disabled:opacity-50 sm:w-auto">
             {busy ? "Waiting for UniSat…" : "Sign this challenge in UniSat"}
           </button>
+          {mobileSignTimedOut && isMobileUniSatDevice() && <div className="mt-3 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="alert"><p>UniSat did not respond within 30 seconds. No signature was sent to the server. Check UniSat for a pending request; do not retry while one is still open.</p><button type="button" onClick={() => { setMobileSignTimedOut(false); setError(""); }} className="mt-2 underline">I checked UniSat — allow another attempt</button></div>}
         </div>
       )}
-      {error && <p className="mt-3 font-mono text-[10px] leading-5 text-[#e08b7d]" role="alert">{error}</p>}
+      {error && !(mobileSignTimedOut && isMobileUniSatDevice()) && <p className="mt-3 font-mono text-[10px] leading-5 text-[#e08b7d]" role="alert">{error}</p>}
       <p className="mt-3 font-mono text-[9px] leading-4 text-[#718092]">Only mainnet bc1q (native SegWit) and bc1p (single-key Taproot) wallets are supported. Authentication is separate from every transaction approval.</p>
     </section>
   );
