@@ -256,59 +256,95 @@ export function UniSatInscribePanel() {
     try { await pollOrder(receipt.orderId, txid, receipt.chain); }
     catch (error) { setMessage(`Le paiement est déjà transmis. Ne repayez pas. Suivi UniSat : ${error instanceof Error ? error.message : "indisponible"}`); }
   };
-  const approvePayment = async () => {
+  const handleApprovedPayment = async (paymentPromise: Promise<string>, activeReceipt: InscribeReceipt) => {
+    let paymentReturned = false;
+    try {
+      const returnedTxid = await paymentPromise;
+      paymentReturned = true;
+      if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) throw new Error("UniSat n’a pas retourné de TXID vérifiable. Vérifiez l’activité du wallet avant toute nouvelle action.");
+      const normalizedTxid = returnedTxid.toLowerCase();
+      setTxid(normalizedTxid);
+      const initialPaymentReceipt: MempoolReceipt = { txid: normalizedTxid, network: activeReceipt.chain === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin", status: "checking", message: "Paiement approuvé. Recherche dans Mempool…", blockHeight: null, explorerUrl: "", checkedAt: new Date().toISOString() };
+      recordFinalMempoolReceipt(activeReceipt, initialPaymentReceipt);
+      setStage("tracking"); setMessage("Paiement approuvé. Suivi live de la commande d’inscription…");
+      void trackMempoolTransaction(normalizedTxid, activeReceipt.chain, paymentReceipt => recordFinalMempoolReceipt(activeReceipt, paymentReceipt));
+      await pollOrder(activeReceipt.orderId, normalizedTxid, activeReceipt.chain);
+    } catch (error) {
+      const canceled = isWalletCancellation(error);
+      const detail = walletErrorMessage(error);
+      const mayHaveBeenSent = paymentReturned || !canceled;
+      setStage(mayHaveBeenSent ? "tracking" : "awaiting-approval");
+      setMessage(mayHaveBeenSent
+        ? `Le paiement a peut-être été transmis. Ne cliquez pas à nouveau avant d’avoir vérifié l’activité UniSat et Mempool. Aucun TXID n’a été récupéré. Détail UniSat : ${detail}`
+        : `Approbation annulée dans UniSat. Aucun paiement n’a été confirmé. Détail UniSat : ${detail}`);
+    }
+  };
+  const approveDesktopPayment = async (provider: NonNullable<typeof window.unisat>, activeReceipt: InscribeReceipt) => {
+    setStage("paying"); setMessage("Vérification du réseau de la commande avant d’ouvrir l’approbation UniSat…");
+    try {
+      if (!provider.getChain) throw new Error("UniSat ne permet pas la vérification du réseau dans ce navigateur.");
+      const currentChain = await provider.getChain();
+      if (currentChain.enum !== activeReceipt.chain) throw new Error("Le réseau du wallet a changé depuis la création du reçu. Revenez au réseau indiqué sur le reçu.");
+      await validateMempoolAddress(activeReceipt.chain, activeReceipt.payAddress);
+      const paymentFeeRate = await getRecommendedFeeRate(activeReceipt.chain);
+      setReceipt(current => current ? { ...current, feeRate: paymentFeeRate } : current);
+      setMessage("UniSat va afficher le montant et les frais finaux avant signature.");
+      const paymentPromise = sendNativeUniSatBitcoinPayment(provider, activeReceipt.payAddress, activeReceipt.amount, paymentFeeRate);
+      void handleApprovedPayment(paymentPromise, activeReceipt);
+    } catch (error) {
+      const detail = walletErrorMessage(error);
+      setStage("awaiting-approval");
+      setMessage(`La vérification a échoué avant l’appel de paiement; aucun paiement n’a été lancé. Détail : ${detail}`);
+    }
+  };
+  const approvePayment = () => {
     const provider = window.unisat;
     const mobileUniSat = isMobileUniSatDevice();
     if (!receipt) return setMessage("Aucune commande d’inscription n’est en attente d’approbation.");
     if (!provider?.getChain) return setMessage("UniSat ne permet pas l’approbation du paiement depuis ce navigateur.");
     if (!provider.sendBitcoin) return setMessage(mobileUniSat ? "Ouvrez cette page dans le navigateur intégré UniSat à jour (sendBitcoin natif requis). Aucun paiement n’a été lancé." : "UniSat ne fournit pas sendBitcoin dans ce navigateur. Aucun paiement n’a été lancé.");
-    setStage("paying"); setMessage(mobileUniSat ? "Précontrôles déjà terminés. Ouverture de l’approbation native dans UniSat…" : "Vérification du réseau de la commande avant d’ouvrir l’approbation UniSat…");
-    let paymentCallStarted = false;
-    let paymentReturned = false;
-    try {
-      let paymentFeeRate: number;
-      let paymentPromise: Promise<string>;
-      if (mobileUniSat) {
-        if (chain?.enum !== receipt.chain || address !== receipt.walletAddress) {
-          throw new Error("Le compte ou réseau UniSat a changé depuis le prévol. Repréparez la commande; aucun paiement n’a été lancé.");
-        }
-        if (!Number.isSafeInteger(receipt.paymentFeeRate) || Number(receipt.paymentFeeRate) < 1) {
-          throw new Error("Le prévol mobile Mempool est absent. Repréparez la commande dans UniSat Mobile; aucun paiement n’a été lancé.");
-        }
-        paymentFeeRate = Number(receipt.paymentFeeRate);
-        setMessage("Mempool a validé l’adresse et les frais avant ce clic. Vérifiez le réseau, le montant et les frais finaux dans UniSat.");
-        paymentCallStarted = true;
-        // Keep the native wallet request in the direct user-activation handler.
-        paymentPromise = sendNativeUniSatBitcoinPayment(provider, receipt.payAddress, receipt.amount, paymentFeeRate);
-      } else {
-        const currentChain = await provider.getChain();
-        if (currentChain.enum !== receipt.chain) throw new Error("Le réseau du wallet a changé depuis la création du reçu. Revenez au réseau indiqué sur le reçu; aucun paiement n’a été envoyé.");
-        await validateMempoolAddress(receipt.chain, receipt.payAddress);
-        paymentFeeRate = await getRecommendedFeeRate(receipt.chain);
-        setReceipt(current => current ? { ...current, feeRate: paymentFeeRate } : current);
-        setMessage("UniSat va afficher le montant et les frais finaux avant signature.");
-        paymentCallStarted = true;
-        paymentPromise = sendNativeUniSatBitcoinPayment(provider, receipt.payAddress, receipt.amount, paymentFeeRate);
+    if (mobileUniSat) {
+      if (chain?.enum !== receipt.chain || address !== receipt.walletAddress) return setMessage("Le compte ou réseau UniSat a changé depuis le prévol. Repréparez la commande; aucun paiement n’a été lancé.");
+      if (!Number.isSafeInteger(receipt.paymentFeeRate) || Number(receipt.paymentFeeRate) < 1) return setMessage("Le prévol mobile Mempool est absent. Repréparez la commande dans UniSat Mobile; aucun paiement n’a été lancé.");
+      const paymentFeeRate = Number(receipt.paymentFeeRate);
+      setStage("paying");
+      setMessage("Demande de paiement envoyée directement à UniSat depuis ce clic. Vérifiez et confirmez le montant dans le wallet.");
+      let walletResponse: Promise<string | { txid?: string }>;
+      try {
+        // Invoke the provider directly in this click handler to preserve mobile user activation.
+        walletResponse = provider.sendBitcoin(receipt.payAddress, receipt.amount, { feeRate: paymentFeeRate });
+      } catch (error) {
+        const canceled = isWalletCancellation(error);
+        setStage(canceled ? "awaiting-approval" : "tracking");
+        setMessage(canceled
+          ? `Approbation annulée dans UniSat. Détail : ${walletErrorMessage(error)}`
+          : `UniSat n’a pas pu ouvrir la demande de paiement. Vérifiez l’activité du wallet avant de réessayer. Détail : ${walletErrorMessage(error)}`);
+        return;
       }
-      const payment = await paymentPromise;
-      paymentReturned = true;
-      const returnedTxid = payment;
-      if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) throw new Error("UniSat n’a pas retourné de TXID vérifiable. Vérifiez l’activité du wallet avant toute nouvelle action.");
-      setTxid(returnedTxid);
-      const initialPaymentReceipt: MempoolReceipt = { txid: returnedTxid, network: receipt.chain === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin", status: "checking", message: "Paiement approuvé. Recherche dans Mempool…", blockHeight: null, explorerUrl: "", checkedAt: new Date().toISOString() };
-      recordFinalMempoolReceipt(receipt, initialPaymentReceipt);
-      setStage("tracking"); setMessage("Paiement approuvé. Suivi live de la commande d’inscription…");
-      void trackMempoolTransaction(returnedTxid, receipt.chain, paymentReceipt => recordFinalMempoolReceipt(receipt, paymentReceipt));
-      await pollOrder(receipt.orderId, returnedTxid, receipt.chain);
-    } catch (error) {
-      const canceled = isWalletCancellation(error);
-      const detail = walletErrorMessage(error);
-      const mayHaveBeenSent = paymentReturned || (paymentCallStarted && !canceled);
-      setStage(mayHaveBeenSent ? "tracking" : "awaiting-approval");
-      setMessage(mayHaveBeenSent
-        ? `Le paiement a peut-être été transmis. Ne cliquez pas à nouveau avant d’avoir vérifié l’activité UniSat. Aucun TXID n’a été récupéré. Détail UniSat : ${detail}`
-        : `${canceled ? "Approbation annulée dans UniSat." : paymentCallStarted ? "UniSat n’a pas terminé l’approbation." : "La préparation a échoué avant l’approbation; aucun paiement n’a été lancé."} Aucun TXID n’a été reçu; vérifiez le réseau ${receipt.chain}. Détail UniSat : ${detail}`);
+      let walletResponded = false;
+      const noResponseTimer = window.setTimeout(() => {
+        if (walletResponded) return;
+        setStage("tracking");
+        setMessage("UniSat n’a pas encore répondu à la demande. Ne relancez pas l’approbation; vérifiez l’activité UniSat et Mempool avant toute nouvelle tentative.");
+      }, 30_000);
+      const paymentPromise = Promise.resolve(walletResponse).then(
+        result => {
+          walletResponded = true;
+          window.clearTimeout(noResponseTimer);
+          const returnedTxid = typeof result === "string" ? result : result?.txid;
+          if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) throw new Error("UniSat n’a pas retourné de TXID vérifiable après l’appel sendBitcoin.");
+          return returnedTxid.toLowerCase();
+        },
+        error => {
+          walletResponded = true;
+          window.clearTimeout(noResponseTimer);
+          throw error;
+        },
+      );
+      void handleApprovedPayment(paymentPromise, receipt);
+      return;
     }
+    void approveDesktopPayment(provider, receipt);
   };
   const close = () => { if (["preparing", "paying"].includes(stage)) return; setOpen(false); if (stage === "tracking") return; setMessage(""); setStatus(""); setStage("idle"); setReceipt(null); setFinalReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]); };
   const downloadSelectedHistoryBatches = () => {
