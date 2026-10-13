@@ -68,47 +68,59 @@ export async function getRecommendedFeeRate(network: string) {
   return Math.ceil(estimate.feeRate);
 }
 
-export type SpendableUtxo = { address: string; txid: string; vout: number; satoshi: number; scriptPk: string; height: number; inscriptionsRunesAlkanesChecked: true; isLowFee: false; isOpInRBF: boolean; inscriptions: [] };
+export type SpendableUtxo = { address: string; txid: string; vout: number; satoshi: number; scriptPk: string; height: number; inscriptionsRunesAlkanesChecked: true; isLowFee: boolean; isOpInRBF: boolean; inscriptions: [] };
+const SPENDABLE_UTXO_PAGE_SIZE = 25;
+const MAX_SPENDABLE_UTXO_PAGES = 20;
 
-/** Fetch only confirmed, non-asset UTXOs verified by the server-side UniSat indexer. */
+/** Fetch confirmed, non-asset UTXOs; a low-fee/RBF history does not make a confirmed output replaceable. */
 export async function getSpendableUtxos(network: string, address: string, minimumSats: number): Promise<SpendableUtxo[]> {
   const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
   if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0) {
     throw new Error("Réseau, adresse ou montant invalide pour vérifier les UTXO dépensables.");
   }
-
   const collected: SpendableUtxo[] = [];
-  let cursor: number = 0;
-  for (let pageNumber = 0; pageNumber < 10; pageNumber += 1) {
-    const query: URLSearchParams = new URLSearchParams({ chain, address, cursor: String(cursor), size: "25" });
+  let cursor = 0;
+  let scannedCount = 0;
+  let sourceTotal: number | null = null;
+  for (let pageNumber = 0; pageNumber < MAX_SPENDABLE_UTXO_PAGES; pageNumber += 1) {
+    const query = new URLSearchParams({ chain, address, cursor: String(cursor), size: String(SPENDABLE_UTXO_PAGE_SIZE) });
     type SpendableUtxoPage = {
-      chain?: string; address?: string; nextCursor?: number; total?: number; scannedCount?: number;
+      chain?: string; address?: string; cursor?: number; nextCursor?: number; total?: number; scannedCount?: number;
       utxo?: Array<Record<string, unknown>>;
     };
     const page: SpendableUtxoPage = await requestJson<SpendableUtxoPage>(`${LIVE_DATA_API_BASE}/api/spendable-utxos?${query}`, 15_000);
-    if (page.chain !== chain || page.address !== address || !Array.isArray(page.utxo)) {
-      throw new Error("Le serveur n’a pas confirmé la liste d’UTXO sûre pour cette adresse.");
+    const pageScannedCount = page.scannedCount;
+    const nextCursor = page.nextCursor;
+    const total = page.total;
+    if (
+      page.chain !== chain || page.address !== address || page.cursor !== cursor || !Array.isArray(page.utxo) ||
+      !Number.isSafeInteger(pageScannedCount) || pageScannedCount! < 0 || pageScannedCount! > SPENDABLE_UTXO_PAGE_SIZE ||
+      !Number.isSafeInteger(nextCursor) || nextCursor !== cursor + pageScannedCount! ||
+      !Number.isSafeInteger(total) || total! < 0 || nextCursor! > total! || page.utxo.length > pageScannedCount!
+    ) {
+      throw new Error("Le serveur n’a pas confirmé une page cohérente d’UTXO sûrs pour cette adresse.");
     }
-
+    scannedCount += pageScannedCount!;
+    sourceTotal = total!;
     const safe = page.utxo.filter((item): item is SpendableUtxo =>
       item.address === address && typeof item.txid === "string" && /^[a-f0-9]{64}$/i.test(item.txid) &&
       typeof item.vout === "number" && Number.isSafeInteger(item.vout) && item.vout >= 0 &&
       typeof item.satoshi === "number" && Number.isSafeInteger(item.satoshi) && item.satoshi >= 600 &&
       typeof item.scriptPk === "string" && /^(?:[a-f0-9]{2})+$/i.test(item.scriptPk) &&
       typeof item.height === "number" && Number.isSafeInteger(item.height) && item.height > 0 &&
-      item.inscriptionsRunesAlkanesChecked === true && item.isLowFee === false && typeof item.isOpInRBF === "boolean" &&
+      item.inscriptionsRunesAlkanesChecked === true && typeof item.isLowFee === "boolean" && typeof item.isOpInRBF === "boolean" &&
       Array.isArray(item.inscriptions) && item.inscriptions.length === 0
     );
     collected.push(...safe);
-    if (collected.reduce((sum, item) => sum + item.satoshi, 0) >= minimumSats) return collected;
-
-    const nextCursor = Number(page.nextCursor);
-    const total = Number(page.total);
-    if (!Number.isSafeInteger(nextCursor) || nextCursor <= cursor || !Number.isSafeInteger(total) || nextCursor >= total || Number(page.scannedCount) <= 0) break;
-    cursor = nextCursor;
+    const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
+    if (safeSats >= minimumSats) return collected;
+    if (pageScannedCount === 0 || nextCursor === total) break;
+    cursor = nextCursor!;
   }
-  if (collected.reduce((sum, item) => sum + item.satoshi, 0) < minimumSats) {
-    throw new Error("Le serveur UniSat n’a pas confirmé assez d’UTXO sûrs pour couvrir le montant et les frais. Aucun paiement n’a été lancé.");
+  const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
+  if (safeSats < minimumSats) {
+    const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
+    throw new Error(`UniSat/Worker n’a validé que ${safeSats.toLocaleString("fr-FR")} sats dans ${collected.length} UTXO sûrs, après analyse de ${scannedLabel} sorties (plafond ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). Minimum requis : ${minimumSats.toLocaleString("fr-FR")} sats. Aucun paiement n’a été lancé.`);
   }
   return collected;
 }
