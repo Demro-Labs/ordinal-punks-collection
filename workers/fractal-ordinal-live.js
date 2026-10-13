@@ -107,15 +107,20 @@ async function uni(path, env, init = {}) {
 }
 
 async function uniNetwork(base, path, env, init = {}) {
-  if (!env.UNISAT_API_KEY) throw new Error('UniSat server binding is missing');
+  const isFractalApi = new URL(base).origin === new URL(API_BASE).origin;
+  const headers = new Headers(init.headers || {});
+  headers.set('Accept', 'application/json');
+  headers.set('Content-Type', 'application/json');
+  if (isFractalApi) {
+    if (!env.UNISAT_API_KEY) throw new Error('UniSat server binding is missing');
+    headers.set('Authorization', 'Bearer ' + env.UNISAT_API_KEY);
+  } else {
+    // The configured API key belongs to Fractal only; never forward it to Bitcoin UniSat.
+    headers.delete('Authorization');
+  }
   const response = await fetch(base + path, {
     ...init,
-    headers: {
-      Authorization: 'Bearer ' + env.UNISAT_API_KEY,
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...(init.headers || {}),
-    },
+    headers,
   });
   if (!response.ok) throw new Error('UniSat upstream returned ' + response.status);
   const payload = await response.json();
