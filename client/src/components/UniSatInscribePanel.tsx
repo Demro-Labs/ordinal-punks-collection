@@ -288,13 +288,22 @@ export function UniSatInscribePanel() {
     } catch { setInscriptionHistory([]); }
   }, [address, chain?.enum]);
   const chooseFiles = (next: File[]) => {
-    if (receipt) return setMessage("Un reçu existe déjà pour ce lot. Ne modifiez pas les fichiers; utilisez le paiement de ce reçu.");
-    if (isMobileUniSatDevice() && readActiveMobileOrder()) return setMessage("Une commande mobile est sauvegardée. Examinez-la ou effacez son reçu non payé avant d’ajouter des fichiers.");
+    const mobileDevice = isMobileUniSatDevice();
+    const savedMobileOrder = mobileDevice ? readActiveMobileOrder() : null;
     if (!next.length) return;
+    if (!mobileDevice && receipt) return setMessage("Un reçu existe déjà pour ce lot. Ne modifiez pas les fichiers; utilisez le paiement de ce reçu.");
     const combined = [...files, ...next];
     if (combined.length > MAX_FILES) { setMessage(`Maximum ${MAX_FILES} fichiers par commande.`); return; }
     const oversized = combined.find(file => file.size > MAX_FILE_BYTES);
     if (oversized) { setMessage(`${oversized.name} dépasse la limite UniSat de 365 KB.`); return; }
+    if (mobileDevice && (receipt || savedMobileOrder)) {
+      setFiles(combined);
+      const paymentMayHaveStarted = Boolean(txid || savedMobileOrder?.txid || savedMobileOrder?.paymentStarted);
+      setMessage(paymentMayHaveStarted
+        ? "Fichiers ajoutés à la file locale. Le reçu/paiement en cours reste intact; reprenez son suivi avant de préparer une autre commande."
+        : "Fichiers ajoutés à la file locale. Le reçu actuel reste inchangé; vérifiez qu’aucun paiement n’a été envoyé puis effacez seulement sa copie locale pour préparer ce nouveau lot.");
+      return;
+    }
     setFiles(combined); setMessage(""); setStage("idle"); setReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]);
   };
   const removeFile = (index: number) => setFiles(current => current.filter((_, currentIndex) => currentIndex !== index));
@@ -459,16 +468,17 @@ export function UniSatInscribePanel() {
   };
   const clearUnpaidMobileReceipt = () => {
     const saved = readActiveMobileOrder();
-    if (!isMobileUniSatDevice() || !saved || (receipt && saved.receipt.orderId !== receipt.orderId) || saved.txid || saved.paymentStarted || txid) {
-      setMessage("This receipt may have a payment attempt. Check UniSat and resume tracking; it was not cleared.");
+    const inMemoryUnpaidReceipt = Boolean(receipt && stage === "awaiting-approval" && !txid);
+    if (!isMobileUniSatDevice() || (saved && receipt && saved.receipt.orderId !== receipt.orderId) || saved?.txid || saved?.paymentStarted || txid || (!saved && !inMemoryUnpaidReceipt)) {
+      setMessage("Ce reçu peut correspondre à une tentative de paiement. Vérifiez UniSat et reprenez le suivi; rien n’a été effacé.");
       return;
     }
-    if (!clearActiveMobileOrder()) {
-      setMessage("The saved receipt could not be cleared from this browser. No files or order data were changed.");
+    if (saved && !clearActiveMobileOrder()) {
+      setMessage("Le reçu sauvegardé n’a pas pu être effacé de ce navigateur. Aucun fichier ni ordre n’a été modifié.");
       return;
     }
-    setFiles([]); setFileLoadProgress({ completed: 0, total: 0 }); setReceipt(null); setTxid(""); setStatus(""); setStage("idle"); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]);
-    setMessage("The unpaid receipt was cleared on this device only. The pending UniSat order may still exist; you can now select files.");
+    setReceipt(null); setTxid(""); setStatus(""); setStage("idle"); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]);
+    setMessage(`Reçu non payé effacé de cet appareil uniquement. La commande UniSat peut toujours exister; ${files.length ? `${files.length} fichier(s) choisi(s) conservé(s).` : "vous pouvez maintenant choisir des fichiers."}`);
   };
   const downloadSelectedHistoryBatches = () => {
     const group = historyGroups.find(item => selectedHistoryBatches.includes(item.orderId));
@@ -490,8 +500,8 @@ export function UniSatInscribePanel() {
   const busy = ["preparing", "paying"].includes(stage);
   const mobileDevice = isMobileUniSatDevice();
   const savedMobileOrder = mobileDevice ? readActiveMobileOrder() : null;
-  const canClearUnpaidMobileReceipt = Boolean(mobileDevice && savedMobileOrder && (!receipt || savedMobileOrder.receipt.orderId === receipt.orderId) && !savedMobileOrder.txid && !savedMobileOrder.paymentStarted && !txid && !busy);
-  const fileSelectionLocked = busy || stage === "awaiting-approval" || Boolean(mobileDevice && savedMobileOrder);
+  const canClearUnpaidMobileReceipt = Boolean(mobileDevice && !busy && !txid && (savedMobileOrder ? (!savedMobileOrder.txid && !savedMobileOrder.paymentStarted && (!receipt || savedMobileOrder.receipt.orderId === receipt.orderId)) : (receipt && stage === "awaiting-approval")));
+  const fileSelectionLocked = busy || (!mobileDevice && stage === "awaiting-approval");
   return <>
     <button type="button" onClick={() => setOpen(true)} className="inline-flex items-center gap-2 border border-[#d99a54] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63] hover:bg-[#d99a54]/10"><FilePlus2 size={13} /> Inscribe files</button>
     {open && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#07090c]/80 p-4" role="dialog" aria-modal="true" aria-labelledby="inscribe-modal-title"><div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto border border-[#3b434d] bg-[#14191f] p-5 shadow-2xl">
@@ -500,8 +510,7 @@ export function UniSatInscribePanel() {
       <div className="mt-5 grid gap-2 sm:grid-cols-4"><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Fichiers</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{files.length} / {MAX_FILES}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Taille totale</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{formatBytes(totalBytes)}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Réseau</p><p className="mt-1 truncate font-mono text-xs text-[#f2bd63]">{chain?.name ?? chain?.enum}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Statut live</p><p className="mt-1 font-mono text-xs text-[#f2bd63]">{status ? describeStatus(status) : "Prêt"}</p></div></div>
 {mobileDevice && savedMobileOrder && !receipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="status"><p>Un reçu mobile sauvegardé existe. Il ne s’ouvrira pas automatiquement. Examinez-le pour reprendre la commande; si aucun paiement n’a été envoyé, vous pouvez effacer uniquement la copie locale.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={reviewSavedMobileOrder} className="border border-[#e0b45f]/60 px-3 py-2 underline">Examiner le reçu mobile</button>{canClearUnpaidMobileReceipt && <button type="button" onClick={clearUnpaidMobileReceipt} className="border border-[#e0b45f]/60 px-3 py-2 underline">J’ai vérifié : aucun paiement envoyé — effacer le reçu local</button>}</div></div>}
 {canClearUnpaidMobileReceipt && receipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]"><p>Confirmez qu’aucun paiement n’a été envoyé avant de libérer l’ajout de fichiers. Cette action efface le reçu de cet appareil; elle n’annule pas la commande UniSat en attente.</p><button type="button" onClick={clearUnpaidMobileReceipt} className="mt-2 border border-[#e0b45f]/60 px-3 py-2 underline">J’ai vérifié : aucun paiement envoyé — effacer le reçu local</button></div>}
-{mobileDevice && <button type="button" onClick={() => filePickerRef.current?.click()} disabled={fileSelectionLocked} className="mt-5 w-full border border-[#d99a54]/70 bg-[#10151a] px-5 py-4 font-mono text-[11px] uppercase tracking-[0.1em] text-[#d9d3c6] disabled:cursor-not-allowed disabled:opacity-40">Choisir ou ajouter des fichiers depuis le téléphone</button>}
-<label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); chooseFiles(Array.from(event.dataTransfer.files ?? [])); }} className="mt-5 flex cursor-pointer flex-col items-center justify-center border border-dashed border-[#d99a54]/70 bg-[#10151a] px-5 py-8 text-center hover:bg-[#d99a54]/5"><Upload size={22} className="text-[#d99a54]" /><span className="mt-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#d9d3c6]">Déplacer ou ajouter les fichiers à minter</span><span className="mt-2 font-mono text-[10px] text-[#718092]">Maximum {MAX_FILES} fichiers · 365 KB par fichier · sélection multiple</span><input ref={filePickerRef} type="file" multiple accept="*/*" className="sr-only" disabled={fileSelectionLocked} onChange={event => { chooseFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ""; }} /></label>
+<label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); chooseFiles(Array.from(event.dataTransfer.files ?? [])); }} className={`${mobileDevice ? "relative " : ""}mt-5 flex cursor-pointer flex-col items-center justify-center border border-dashed border-[#d99a54]/70 bg-[#10151a] px-5 py-8 text-center hover:bg-[#d99a54]/5`}><Upload size={22} className="text-[#d99a54]" /><span className="mt-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#d9d3c6]">{mobileDevice ? "Touchez ici pour choisir des fichiers" : "Déplacer ou ajouter les fichiers à minter"}</span><span className="mt-2 font-mono text-[10px] text-[#718092]">Maximum {MAX_FILES} fichiers · 365 KB par fichier · sélection multiple</span><input ref={filePickerRef} type="file" multiple accept="*/*" className={mobileDevice ? "absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0" : "sr-only"} disabled={fileSelectionLocked} onChange={event => { const selected = Array.from(event.currentTarget.files ?? []); chooseFiles(selected); if (mobileDevice) event.currentTarget.value = ""; }} /></label>
       {fileLoadProgress.total > 0 && stage === "preparing" && <div className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3" role="status" aria-live="polite"><div className="flex items-center justify-between gap-3 font-mono text-[10px] uppercase text-[#f2bd63]"><span>Chargement des fichiers</span><span>{fileLoadProgress.completed} / {fileLoadProgress.total}</span></div><div className="mt-2 h-1.5 overflow-hidden bg-[#2c323a]"><div className="h-full bg-[#d99a54] transition-[width] duration-150" style={{ width: `${Math.round((fileLoadProgress.completed / fileLoadProgress.total) * 100)}%` }} /></div></div>}
       {files.length > 0 && <div className="mt-4 overflow-hidden border border-[#3b434d] bg-[#10151a]"><div className="flex items-center justify-between border-b border-[#3b434d] px-3 py-2"><span className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#d9d3c6]"><Files size={13} /> File queue</span><button type="button" disabled={busy || Boolean(receipt)} onClick={() => setFiles([])} className="font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">Vider</button></div><div className="max-h-48 overflow-y-auto">{files.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 border-b border-[#2c323a] px-3 py-2 last:border-b-0"><div className="min-w-0"><p className="truncate font-mono text-[10px] text-[#d9d3c6]">{index + 1}. {file.name}</p><p className="font-mono text-[9px] text-[#718092]">{fileKind(file)} · {formatBytes(file.size)}</p></div><button type="button" disabled={busy || Boolean(receipt)} onClick={() => removeFile(index)} className="shrink-0 font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">Retirer</button></div>)}</div></div>}
       <p className="mt-4 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">Fee rate dynamique · cible 30 min · consensus côté serveur = maximum des recommandations Mempool et UniSat. Si les estimateurs sont indisponibles, aucune valeur manuelle ancienne n’est utilisée. UniSat affiche toujours le coût final avant votre signature.</p>
