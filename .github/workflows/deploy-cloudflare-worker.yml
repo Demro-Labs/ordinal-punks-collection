@@ -1,0 +1,59 @@
+name: Deploy Cloudflare Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "workers/**"
+      - "wrangler.jsonc"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/deploy-cloudflare-worker.yml"
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Saisissez deploy-production pour déployer manuellement le Worker de production."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fractal-ordinal-live-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.confirmation == 'deploy-production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cloudflare-production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Wrangler bundle without publishing
+        run: pnpm dlx wrangler@4.150.0 deploy --dry-run --outdir=/tmp/fractal-worker-dry-run
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.150.0"
+          command: deploy --strict

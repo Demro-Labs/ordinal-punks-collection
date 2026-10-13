@@ -1,6 +1,6 @@
 # Worker `fractal-ordinal-live`
 
-Ce Worker sert les deux applications GitHub Pages, Ordinal Punks et Fractal Pokédex. Le module de routes d’authentification est `auth-bip322.js`; le point d’entrée est `fractal-ordinal-live.js`.
+Ce Worker sert les deux applications GitHub Pages, Ordinal Punks et Fractal Pokédex. Le module d’authentification est `auth-bip322.js`; le point d’entrée est `fractal-ordinal-live.js`.
 
 ## Build et contrôles
 
@@ -11,48 +11,34 @@ pnpm check
 pnpm build
 pnpm exec vitest run
 node --test workers/fractal-ordinal-live.test.mjs
-pnpm exec esbuild workers/fractal-ordinal-live.js --bundle --platform=browser --format=esm --target=es2022 --minify --outfile=/tmp/fractal-ordinal-live-bundle.mjs
-node --check /tmp/fractal-ordinal-live-bundle.mjs
+pnpm dlx wrangler@4.150.0 deploy --dry-run --outdir=/tmp/fractal-worker-dry-run
 ```
 
-Le bundler doit produire un seul module ESM `worker.js` qui contient `handleWalletAuth` et exporte `AuthStorage`.
+Le bundler Wrangler regroupe le point d’entrée et ses imports. Le dry-run compile et valide la configuration sans téléverser ni activer une version.
 
-## Métadonnées Cloudflare pour le déploiement
+## Configuration Wrangler et Durable Object
 
-Lors de l’upload de la version du Worker `fractal-ordinal-live`, inclure dans `metadata` le module principal, le binding SQLite, l’export déclaratif, et conserver tous les bindings `secret_text` existants :
+`wrangler.jsonc` cible le nom de Worker Cloudflare existant `fractal-ordinal-live`, garde l’accès `workers.dev` déjà utilisé, et déclare `AUTH_STORAGE` vers la classe exportée `AuthStorage` en stockage SQLite. La déclaration `exports` est le flux déclaratif Cloudflare actuel; ne pas la mélanger avec l’ancien tableau `migrations`.
 
-```json
-{
-  "main_module": "worker.js",
-  "usage_model": "standard",
-  "compatibility_flags": [],
-  "bindings": [
-    {
-      "type": "durable_object_namespace",
-      "name": "AUTH_STORAGE",
-      "class_name": "AuthStorage"
-    }
-  ],
-  "exports": {
-    "AuthStorage": {
-      "type": "durable-object",
-      "storage": "sqlite"
-    }
-  },
-  "keep_bindings": ["secret_text"]
-}
-```
+L’API de réglages du Worker actif ne renvoie aucune date de compatibilité explicite. Cloudflare documente que l’absence de date à l’upload API prend la valeur effective `2021-11-02`; la configuration Wrangler la fige pour éviter un changement runtime implicite au premier déploiement. Réévaluer cette date séparément, avec des tests dédiés, avant de la faire avancer.
 
-Le compte Cloudflare provisionne la nouvelle classe SQLite à son premier déploiement déclaratif. Ne pas déclarer simultanément une liste de migrations legacy : Cloudflare ne permet pas de mélanger les migrations impératives et `exports` dans une même configuration Worker.
+La production utilise le binding Cloudflare secret `UNISAT_API_KEY`. Ne jamais mettre sa valeur dans le code, `wrangler.jsonc`, `.dev.vars` commité, les logs ou les réponses API. Les déploiements Wrangler ne suppriment pas les secrets Cloudflare existants; une suppression exige la commande explicite `wrangler secret delete`. Pour le développement local, un fichier `.dev.vars` non commité peut être utilisé; il est ignoré par Git.
 
-Le réglage production existant ne fournit actuellement aucune `compatibility_date` explicite; ne pas en inventer une pour cet ajout. Garder aussi le mode d’utilisation `standard`, les flags vides et les bindings `secret_text` existants. Le secret UniSat reste exclusivement dans le binding Cloudflare `UNISAT_API_KEY` : ne jamais l’inclure dans le code, les métadonnées, les journaux ou les réponses API. Vérifier après déploiement le **nom et le type** du binding, pas sa valeur.
+## CI/CD Cloudflare
 
-## Déploiement sûr et retour arrière
+Le workflow `.github/workflows/deploy-cloudflare-worker.yml` déploie uniquement le Worker et seulement pour les changements de `workers/**`, de `wrangler.jsonc`, des dépendances ou du workflow. Il exécute d’abord le dry-run puis `wrangler deploy --strict`, avec le Worker d’environnement GitHub `cloudflare-production` et un verrou de concurrence.
 
-1. Téléverser un Worker compilé et testé dans l’API Cloudflare Workers Versions, avec les métadonnées ci-dessus et `keep_bindings: ["secret_text"]`.
-2. Confirmer que l’upload expose l’export `AuthStorage` de type Durable Object SQLite et le binding `AUTH_STORAGE`.
-3. Créer le déploiement Cloudflare à 100 % vers la nouvelle version. Le dernier Worker actif avant cette fonctionnalité était la version `38`; conserver son identifiant de version renvoyé par l’API comme cible de retour arrière, sans la supprimer.
-4. Vérifier `OPTIONS`, `POST /api/auth/challenge`, `POST /api/auth/verify`, `GET /api/auth/session` et `POST /api/auth/logout` sur les deux valeurs `site` (`punks`, `pokedex`). Utiliser un wallet de test contrôlé ou le vecteur public de test de la bibliothèque; toujours révoquer les sessions de test après le contrôle.
-5. Vérifier que le binding `UNISAT_API_KEY` est toujours de type secret, que les routes Inscribe existantes répondent, et que `MAX_INSCRIBE_FILES` reste à 1 000.
+Les secrets GitHub requis sont :
 
-Les cookies d’authentification ne sont pas stockés dans `localStorage`. Les routes sont en `no-store`; le Worker ne conserve pas la signature BIP-322 ni le jeton de session en clair.
+- `CLOUDFLARE_API_TOKEN` : token limité au compte Cloudflare concerné et à la permission **Edit Cloudflare Workers**;
+- `CLOUDFLARE_ACCOUNT_ID` : identifiant du compte Cloudflare cible.
+
+Ne jamais les stocker dans le dépôt ou les transmettre dans un message. Le workflow manuel accepte aussi une exécution depuis `main` lorsque le champ de confirmation vaut exactement `deploy-production`. La publication automatique est restreinte aux fichiers Worker afin qu’une modification frontend seule ne redéploie pas le Worker.
+
+Le workflow de contrôles sur pull request exécute le même dry-run Wrangler sans identifiants Cloudflare et sans effet distant.
+
+## Procédure post-déploiement
+
+Après activation, vérifier sur les deux origines autorisées : `OPTIONS`, `POST /api/auth/challenge`, `POST /api/auth/verify`, `GET /api/auth/session` et `POST /api/auth/logout`, pour les sites `punks` et `pokedex`. Utiliser un wallet de test contrôlé ou un vecteur public de test, puis révoquer toute session de test. Vérifier également le type du binding `UNISAT_API_KEY`, les routes Inscribe existantes et `MAX_INSCRIBE_FILES = 1_000`.
+
+Les cookies d’authentification ne sont pas stockés dans `localStorage`. Les routes d’auth sont en `no-store`; le Worker ne conserve pas la signature BIP-322 ni le jeton de session en clair.
