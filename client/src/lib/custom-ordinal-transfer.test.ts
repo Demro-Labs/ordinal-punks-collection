@@ -88,7 +88,7 @@ function setupMocks() {
             scriptPk: SCRIPT_HEX,
             height: 100,
             isLowFee: false,
-            isOpInRBF: false,
+            isOpInRBF: true,
             inscriptions: [],
             inscriptionsRunesAlkanesChecked: true,
           },

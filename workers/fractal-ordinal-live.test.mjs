@@ -274,19 +274,19 @@ test('routes Bitcoin order status to the Bitcoin API rather than Fractal', async
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('attests only Fractal UTXOs with empty inscription, Rune, and Alkane checks', async () => {
+test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag and rejects unconfirmed outputs', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
   const scriptPk = '0014' + '11'.repeat(20);
-  const records = ['a', 'b', 'c'].map((marker, index) => ({
+  const records = ['a', 'b', 'c', 'd'].map((marker, index) => ({
     address,
     txid: marker.repeat(64),
     vout: 0,
     satoshi: 10000,
     scriptPk,
-    height: 100,
+    height: index === 3 ? 0 : 100,
     isLowFee: false,
-    isOpInRBF: false,
+    isOpInRBF: index === 0 || index === 3,
     inscriptions: [],
     index,
   }));
@@ -318,7 +318,9 @@ test('attests only Fractal UTXOs with empty inscription, Rune, and Alkane checks
     assert.equal(response.status, 200);
     assert.equal(data.utxo.length, 1);
     assert.equal(data.utxo[0].txid, records[0].txid);
+    assert.equal(data.utxo[0].isOpInRBF, true);
     assert.equal(data.utxo[0].inscriptionsRunesAlkanesChecked, true);
+    assert.equal(data.utxo.some(item => item.txid === records[3].txid), false);
     assert.ok(calls.includes(`/v1/indexer/runes/utxo/${records[0].txid}/0/balance`));
     assert.ok(calls.includes(`/v1/indexer/alkanes/utxo/${records[0].txid}/0/balance`));
     assert.equal(calls.includes(`/v1/indexer/alkanes/utxo/${records[1].txid}/0/balance`), false);
