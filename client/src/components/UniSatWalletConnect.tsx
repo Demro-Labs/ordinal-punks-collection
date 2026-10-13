@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, Wallet } from "lucide-react";
 import { fetchLiveInscription, type LiveInscription } from "@/lib/live";
 import { describeFeeSources, getRecommendedFeeEstimate } from "@/lib/mempool";
-import { sendNativeUniSatInscription } from "@/lib/native-unisat-actions";
+import { ensureNativeInscriptionFeeBalance, sendNativeUniSatInscription } from "@/lib/native-unisat-actions";
 import { getUniSatInscriptionUrl, isTransferOutcomeUnclear } from "@/lib/transfer-safety";
 import { shouldShowDustRelayGuidance } from "@/lib/wallet-error";
 
@@ -755,6 +755,10 @@ export function UniSatWalletConnect() {
       const feeRate = feeEstimate.feeRate;
       setFeeSourceLabel(describeFeeSources(feeEstimate.strategy, feeEstimate.sources));
       setMempoolFeeRate(feeRate);
+      // Match the desktop fee-UTXO safety check on mobile only; leave desktop calls unchanged.
+      if (isMobileBrowser()) {
+        await ensureNativeInscriptionFeeBalance(provider, activeNetworkEnum, selected, feeRate);
+      }
       const returnedTxid = await sendNativeUniSatInscription(provider, recipient, selected.inscriptionId, feeRate);
       if (!returnedTxid || !/^[a-f0-9]{64}$/i.test(returnedTxid)) {
         throw new Error("The transfer did not return a valid transaction ID. Check UniSat and Mempool before retrying.");

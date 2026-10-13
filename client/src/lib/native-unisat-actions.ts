@@ -1,8 +1,16 @@
 export type UniSatTxResult = string | { txid?: string };
 
+type UniSatBalance = { confirmed?: number; unconfirmed?: number; total?: number };
+type UniSatBalanceV2 = { available?: number; unavailable?: number; total?: number };
+
+type FeeUtxo = { txid?: unknown; vout?: unknown };
+
 export type NativeUniSatProvider = {
   sendInscription?: (recipient: string, inscriptionId: string, options?: { feeRate?: number }) => Promise<UniSatTxResult>;
   sendBitcoin?: (recipient: string, satoshis: number, options?: { feeRate?: number }) => Promise<UniSatTxResult>;
+  getBalance?: () => Promise<UniSatBalance>;
+  getBalanceV2?: () => Promise<UniSatBalanceV2>;
+  getBitcoinUtxos?: (cursor: number, size: number) => Promise<unknown>;
 };
 
 const TXID_PATTERN = /^[a-f0-9]{64}$/i;
@@ -13,6 +21,69 @@ function requireTxid(result: UniSatTxResult, action: string) {
     throw new Error(`UniSat did not return a valid transaction ID after the native ${action}. Check UniSat activity and Mempool before retrying.`);
   }
   return txid.toLowerCase();
+}
+
+/** Desktop-style fee-UTXO preflight; call only from the mobile transfer path. */
+export async function ensureNativeInscriptionFeeBalance(
+  provider: NativeUniSatProvider,
+  networkEnum: string,
+  inscription: { location?: string },
+  feeRate: number,
+) {
+  const networkLabel = networkEnum === "BITCOIN_MAINNET"
+    ? "Bitcoin"
+    : networkEnum === "FRACTAL_BITCOIN_MAINNET" ? "Fractal Bitcoin" : "selected network";
+  const feeAsset = networkEnum === "BITCOIN_MAINNET" ? "BTC" : "FB";
+  // Reserve a conservative 350 vB for the inscription transfer plus a non-dust change output.
+  const minimumFeeBalance = Math.max(1_000, Math.ceil(feeRate * 350) + 600);
+  let availableBalance: number | null = null;
+
+  if (provider.getBalanceV2) {
+    const balance = await provider.getBalanceV2();
+    const available = Number(balance.available ?? 0);
+    if (!Number.isFinite(available) || available <= 0) {
+      throw new Error(`UniSat reports no spendable ${feeAsset} fee balance on ${networkLabel}. Add a separate, non-dust ${feeAsset} UTXO before transferring.`);
+    }
+    availableBalance = available;
+    if (available < minimumFeeBalance) {
+      const additional = Math.ceil(minimumFeeBalance - available);
+      throw new Error(`Insufficient spendable ${feeAsset} on ${networkLabel} for fees and non-dust change. UniSat reports ${Math.floor(available)} sats available; add about ${additional} more sats (estimated minimum ${minimumFeeBalance} sats at ${feeRate} sat/vB).`);
+    }
+  }
+
+  if (provider.getBitcoinUtxos) {
+    const result = await provider.getBitcoinUtxos(0, 100);
+    const utxos: unknown[] = Array.isArray(result)
+      ? result
+      : result && typeof result === "object" && "list" in result && Array.isArray(result.list)
+        ? result.list
+        : [];
+    const location = typeof inscription.location === "string" ? inscription.location : "";
+    const inscriptionOutpoint = location.match(/^([a-f0-9]{64}):(\d+)(?::\d+)?$/i);
+    const spendableUtxos = inscriptionOutpoint
+      ? utxos.filter(item => {
+          if (!item || typeof item !== "object") return false;
+          const utxo = item as FeeUtxo;
+          return typeof utxo.txid === "string"
+            && typeof utxo.vout === "number"
+            && `${utxo.txid}:${utxo.vout}`.toLowerCase() !== `${inscriptionOutpoint[1]}:${inscriptionOutpoint[2]}`.toLowerCase();
+        })
+      : utxos;
+    if (spendableUtxos.length === 0) {
+      throw new Error(`No separate spendable ${feeAsset} fee UTXO is available on ${networkLabel}. The inscription output itself is reserved for the Ordinal and cannot also pay network fees; add another non-dust UTXO.`);
+    }
+    return;
+  }
+
+  if (availableBalance !== null) return;
+  if (!provider.getBalance) return;
+  const balance = await provider.getBalance();
+  const confirmed = Number(balance.confirmed ?? 0);
+  const unconfirmed = Number(balance.unconfirmed ?? 0);
+  const total = Number(balance.total ?? confirmed + unconfirmed);
+  if (!Number.isFinite(total) || total <= 0) {
+    throw new Error(`Add a separate, spendable ${feeAsset} UTXO to this UniSat wallet to pay the ${networkLabel} network fee before transferring.`);
+  }
 }
 
 /** Ask UniSat itself to construct, review, sign, and broadcast an inscription transfer. */
