@@ -6,6 +6,7 @@ import { ensureNativeInscriptionFeeBalance, sendNativeUniSatInscription } from "
 import type { OrdinalTransferPlan } from "@/lib/ordinal-transfer-psbt";
 import { getUniSatInscriptionUrl, isTransferOutcomeUnclear } from "@/lib/transfer-safety";
 import { shouldShowDustRelayGuidance } from "@/lib/wallet-error";
+import { isMobileUniSatDevice } from "@/lib/mobile-context";
 
 type UniSatChain = {
   enum?: string;
@@ -69,6 +70,10 @@ type PsbtReviewState = {
   inscriptionId: string;
   networkLabel: string;
   feeSourceLabel: string;
+};
+type PsbtReviewResolver = {
+  resolve: (result: boolean | string) => void;
+  reject: (cause: unknown) => void;
 };
 
 declare global {
@@ -171,7 +176,7 @@ const UNISAT_MOBILE_APP_NAME = "Ordinal Punks";
 const UNISAT_MOBILE_CONTEXT_PARAM = "unisatMobile";
 
 function isMobileBrowser() {
-  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  return isMobileUniSatDevice();
 }
 
 function isUniSatMobileContext() {
@@ -227,6 +232,10 @@ function describeWalletError(cause: unknown, fallback: string) {
       ? ` (code ${details.code})`
       : "";
   }
+  if (message.startsWith("UNISAT_PSBT_SIGN_FAILED:")) {
+    const detail = message.slice("UNISAT_PSBT_SIGN_FAILED:".length).trim();
+    return `UniSat Mobile failed during signPsbt: ${detail}. The site did not submit a transaction to Fractal Mempool. Check UniSat activity before retrying; if no transfer appears, update UniSat Wallet and try again from the in-app browser.`;
+  }
   if (/toAddress/i.test(message) && /undefined/i.test(message)) {
     return `${message}${code}. UniSat Mobile returned an incomplete native transfer response. Do not retry until you check UniSat activity and the selected network's Mempool for a possible broadcast. Update UniSat Wallet and review the destination and final approval screen.`;
   }
@@ -252,7 +261,9 @@ export function UniSatWalletConnect() {
   const [confirmed, setConfirmed] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
   const [psbtReview, setPsbtReview] = useState<PsbtReviewState | null>(null);
-  const psbtReviewResolverRef = useRef<((approved: boolean) => void) | null>(null);
+  const [psbtSigning, setPsbtSigning] = useState(false);
+  const psbtReviewResolverRef = useRef<PsbtReviewResolver | null>(null);
+  const psbtReviewSignPsbtRef = useRef<((plan: OrdinalTransferPlan) => Promise<string>) | null>(null);
   const [transferError, setTransferError] = useState("");
   const [transferOutcomeUnclear, setTransferOutcomeUnclear] = useState(() => {
     try {
@@ -278,9 +289,10 @@ export function UniSatWalletConnect() {
   const inscriptionLoadRunRef = useRef(0);
   const inscriptionLoadControllerRef = useRef<AbortController | null>(null);
   useEffect(() => () => {
-    const resolve = psbtReviewResolverRef.current;
+    const pending = psbtReviewResolverRef.current;
     psbtReviewResolverRef.current = null;
-    resolve?.(false);
+    psbtReviewSignPsbtRef.current = null;
+    pending?.resolve(false);
   }, []);
   const [localInscriptionImages, setLocalInscriptionImages] = useState<Record<string, string>>({});
   const [walletInscriptionsPage, setWalletInscriptionsPage] = useState(0);
@@ -710,17 +722,50 @@ export function UniSatWalletConnect() {
     }
   };
 
-  const resolvePsbtReview = (approved: boolean) => {
-    const resolve = psbtReviewResolverRef.current;
+  const resolvePsbtReview = (result: boolean | string) => {
+    const pending = psbtReviewResolverRef.current;
     psbtReviewResolverRef.current = null;
+    psbtReviewSignPsbtRef.current = null;
     setPsbtReview(null);
-    resolve?.(approved);
+    pending?.resolve(result);
   };
 
-  const requestPsbtReview = (review: PsbtReviewState) => new Promise<boolean>(resolve => {
-    psbtReviewResolverRef.current = resolve;
+  const rejectPsbtReview = (cause: unknown) => {
+    const pending = psbtReviewResolverRef.current;
+    psbtReviewResolverRef.current = null;
+    psbtReviewSignPsbtRef.current = null;
+    setPsbtReview(null);
+    pending?.reject(cause);
+  };
+
+  const requestPsbtReview = (review: PsbtReviewState) => new Promise<boolean | string>((resolve, reject) => {
+    psbtReviewResolverRef.current = { resolve, reject };
     setPsbtReview(review);
   });
+
+  const approvePsbtReview = () => {
+    const review = psbtReview;
+    const signPsbt = psbtReviewSignPsbtRef.current;
+    if (!review || !signPsbt || !psbtReviewResolverRef.current) return;
+    setPsbtSigning(true);
+    try {
+      // Invoke the UniSat bridge synchronously from this explicit user click.
+      const signing = signPsbt(review.plan);
+      psbtReviewSignPsbtRef.current = null;
+      setPsbtReview(null);
+      void signing
+        .then(signedPsbtHex => resolvePsbtReview(signedPsbtHex))
+        .catch(cause => {
+          const detail = cause instanceof Error ? cause.message : String(cause);
+          rejectPsbtReview(new Error(`UNISAT_PSBT_SIGN_FAILED: ${detail}`));
+        })
+        .finally(() => setPsbtSigning(false));
+    } catch (cause) {
+      setPsbtSigning(false);
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      rejectPsbtReview(new Error(`UNISAT_PSBT_SIGN_FAILED: ${detail}`));
+    }
+  };
 
   const sendSelectedInscription = async () => {
     if (transferOutcomeUnclear) {
@@ -799,6 +844,15 @@ export function UniSatWalletConnect() {
         if (!mempool) throw new Error("Fractal Mempool is not configured; no transaction was signed or broadcast.");
         const psbtProvider = provider as Required<Pick<UniSatProvider, "getChain" | "getAccounts" | "getPublicKey" | "getBitcoinUtxos" | "signPsbt">>;
         const { sendOrdinalInscriptionWithCustomPsbt } = await import("@/lib/custom-ordinal-transfer");
+        const requestSignature = psbtProvider.signPsbt.bind(provider);
+        psbtReviewSignPsbtRef.current = plan => requestSignature(plan.psbtHex, {
+          autoFinalized: false,
+          toSignInputs: plan.inputs.map((input, index) => ({
+            index,
+            address,
+            ...(input.spendType === "taproot" ? { useTweakedSigner: true } : {}),
+          })),
+        });
         const currentFeeSourceLabel = describeFeeSources(feeEstimate.strategy, feeEstimate.sources);
         const result = await sendOrdinalInscriptionWithCustomPsbt({
           provider: {
@@ -851,7 +905,8 @@ export function UniSatWalletConnect() {
       setDestination("");
     } catch (cause) {
       const message = describeWalletError(cause, "Transfer was cancelled or failed in UniSat.");
-      if (isTransferOutcomeUnclear(cause) || isTransferOutcomeUnclear(message)) {
+      const signingFailedBeforeSiteBroadcast = cause instanceof Error && cause.message.includes("UNISAT_PSBT_SIGN_FAILED:");
+      if (!signingFailedBeforeSiteBroadcast && (isTransferOutcomeUnclear(cause) || isTransferOutcomeUnclear(message))) {
         setTransferOutcomeUnclear(true);
         setTransferOutcomeChecked(false);
         try {
@@ -862,6 +917,8 @@ export function UniSatWalletConnect() {
       }
       setTransferError(message);
     } finally {
+      psbtReviewSignPsbtRef.current = null;
+      setPsbtSigning(false);
       setTransferBusy(false);
     }
   };
@@ -938,8 +995,8 @@ export function UniSatWalletConnect() {
             </div>
             <p className="mt-3 font-mono text-[10px] leading-5 text-[#e0b45f]">The Cloudflare Worker supplies protocol-checked fee UTXOs. UniSat signs only after your approval; the signed transaction is verified locally, then submitted to Fractal Mempool for validation and broadcast. Do not approve if any detail differs.</p>
             <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <button type="button" onClick={() => resolvePsbtReview(false)} className="border border-[#3b434d] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#d9d3c6] hover:border-[#a45e54]">Cancel — do not sign</button>
-              <button type="button" onClick={() => resolvePsbtReview(true)} className="border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10]">Continue to UniSat signature</button>
+              <button type="button" disabled={psbtSigning} onClick={() => resolvePsbtReview(false)} className="border border-[#3b434d] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#d9d3c6] hover:border-[#a45e54] disabled:opacity-50">Cancel — do not sign</button>
+              <button type="button" disabled={psbtSigning} onClick={approvePsbtReview} className="border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:opacity-50">{psbtSigning ? "Waiting for UniSat…" : "Approve in UniSat"}</button>
             </div>
           </div>
         </div>

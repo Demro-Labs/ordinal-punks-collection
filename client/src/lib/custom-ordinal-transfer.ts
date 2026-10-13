@@ -369,7 +369,7 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
   selectedInscription: OrdinalLocation;
   ownedInscriptions: OrdinalLocation[];
   feeRateSatVb: number;
-  beforeSign?: (plan: OrdinalTransferPlan) => Promise<boolean>;
+  beforeSign?: (plan: OrdinalTransferPlan) => Promise<boolean | string>;
   beforeBroadcast?: (publicKeyHex: string) => Promise<void>;
 }) {
   const {
@@ -438,7 +438,8 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
     feeRateSatVb,
   });
 
-  if (params.beforeSign && !(await params.beforeSign(plan))) {
+  const approval = params.beforeSign ? await params.beforeSign(plan) : true;
+  if (approval === false) {
     throw new Error(
       "Transfer cancelled before signing; no transaction was signed or broadcast."
     );
@@ -450,14 +451,26 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
     publicKeyHex
   );
 
-  const signedPsbtHex = await provider.signPsbt(plan.psbtHex, {
-    autoFinalized: false,
-    toSignInputs: plan.inputs.map((input, index) => ({
-      index,
-      address: currentAddress,
-      ...(input.spendType === "taproot" ? { useTweakedSigner: true } : {}),
-    })),
-  });
+  let signedPsbtHex: string;
+  if (typeof approval === "string") {
+    // Mobile callers may obtain this signature from the final review button so
+    // UniSat's signing request is dispatched in the user's direct click handler.
+    signedPsbtHex = approval;
+  } else {
+    try {
+      signedPsbtHex = await provider.signPsbt(plan.psbtHex, {
+        autoFinalized: false,
+        toSignInputs: plan.inputs.map((input, index) => ({
+          index,
+          address: currentAddress,
+          ...(input.spendType === "taproot" ? { useTweakedSigner: true } : {}),
+        })),
+      });
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      throw new Error(`UNISAT_PSBT_SIGN_FAILED: ${detail}`);
+    }
+  }
   await assertWalletSession(
     provider,
     currentAddress,

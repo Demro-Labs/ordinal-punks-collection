@@ -159,6 +159,32 @@ describe("custom Ordinal transfer asset-scan attestation", () => {
 });
 
 describe("Fractal mobile PSBT workflow", () => {
+  it("uses a PSBT signed by the explicit review click without requesting a second signature", async () => {
+    const fixture = setupMocks();
+    const signPsbt = vi.fn(async (psbtHex: string) => {
+      const psbt = bitcoin.Psbt.fromHex(psbtHex, { network: NETWORK });
+      psbt.signAllInputs(TEST_SIGNER);
+      return psbt.toHex();
+    });
+    const provider: UniSatCustomTransferProvider = { ...fixture.provider, signPsbt };
+
+    const result = await sendOrdinalInscriptionWithCustomPsbt({
+      provider,
+      mempool: { api: MEMPOOL_API, label: "Fractal Bitcoin", chain: "fractal" },
+      expectedNetworkEnum: FRACTAL_NETWORK,
+      currentAddress: ADDRESS,
+      recipientAddress: ADDRESS,
+      selectedInscription: fixture.inscription,
+      ownedInscriptions: [fixture.inscription],
+      feeRateSatVb: 2,
+      beforeSign: async plan => signPsbt(plan.psbtHex),
+    });
+
+    expect(signPsbt).toHaveBeenCalledTimes(1);
+    expect(fixture.broadcastCount()).toBe(1);
+    expect(result.txid).toMatch(/^[a-f0-9]{64}$/i);
+  });
+
   it("presents the exact plan before signing and broadcasts only a verified RBF-signaling transaction", async () => {
     const fixture = setupMocks();
     let reviewedPlan: OrdinalTransferPlan | undefined;
