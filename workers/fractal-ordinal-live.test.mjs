@@ -67,6 +67,27 @@ test('uses the remaining live estimator if one fee source is unavailable', async
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('returns a live Fractal balance without exposing the UniSat API key', async () => {
+  const previousFetch = globalThis.fetch;
+  let unisatAuth = '';
+  globalThis.fetch = async (input, init = {}) => {
+    assert.equal(String(input), 'https://open-api-fractal.unisat.io/v1/indexer/address/bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh/balance');
+    unisatAuth = new Headers(init.headers).get('Authorization') || '';
+    return Response.json({ code: 0, data: { amount: 12345 } });
+  };
+  try {
+    const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+    const response = await worker.fetch(makeRequest(`/api/fractal/balance?address=${address}`, { ip: '192.0.2.79' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.network, 'FRACTAL_BITCOIN_MAINNET');
+    assert.equal(data.address, address);
+    assert.deepEqual(data.balance, { amount: 12345 });
+    assert.equal(unisatAuth, 'Bearer test-only');
+    assert.equal(JSON.stringify(data).includes('test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('caches successful public market responses at the edge', async () => {
   const previousCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
   const previousFetch = globalThis.fetch;
