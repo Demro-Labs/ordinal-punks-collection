@@ -570,6 +570,11 @@ function createAuthStorageMock() {
             state.session = { tokenHash: body.tokenHash, site: body.site, address: body.address, network: body.network, createdAt: body.now, expiresAt: body.expiresAt };
             return Response.json({ created: true });
           }
+          if (path === '/challenge/consume-ownership') {
+            if (!state.challenge || state.challenge.idHash !== body.idHash || state.challenge.usedAt || state.challenge.expiresAt <= body.now || state.challenge.site !== body.site || state.challenge.address !== body.address || state.challenge.network !== body.network) return Response.json({ created: false }, { status: 409 });
+            state.challenge.usedAt = body.now;
+            return Response.json({ created: true });
+          }
           if (path === '/session/get') {
             const current = state.session;
             if (!current || current.site !== body.site || current.tokenHash !== body.tokenHash || current.expiresAt <= body.now) return Response.json({ session: null });
@@ -622,6 +627,52 @@ test('BIP-322 verify rejects a malformed signature and does not create a session
     method: 'POST',
     ip: '192.0.2.252',
     body: JSON.stringify({ site: 'pokedex', challengeId: challenge.challengeId, address, network: 'FRACTAL_BITCOIN_MAINNET', signature: 'ZmFrZV9zaWduYXR1cmU=' }),
+  }), { AUTH_STORAGE: binding });
+  const result = await response.json();
+  assert.equal(response.status, 401);
+  assert.equal(result.code, 'AUTH_SIGNATURE_REJECTED');
+  assert.equal(state.challenge.usedAt, null);
+  assert.equal(state.session, null);
+});
+
+test('ownership challenges support Bitcoin and Fractal without creating an authentication session', async () => {
+  const address = 'bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l';
+  for (const network of ['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET']) {
+    const { binding, state } = createAuthStorageMock();
+    const response = await worker.fetch(makeRequest('/api/auth/ownership/challenge', {
+      method: 'POST',
+      ip: `192.0.2.${network === 'BITCOIN_MAINNET' ? '241' : '242'}`,
+      body: JSON.stringify({ site: 'pokedex', address, network }),
+    }), { AUTH_STORAGE: binding });
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('set-cookie'), null);
+    assert.equal(result.action, 'ownership-proof-only');
+    assert.equal(result.site, 'pokedex');
+    assert.equal(result.network, network);
+    assert.match(result.message, new RegExp(`Network: ${network}`));
+    assert.match(result.message, /does not authorize, sign, or broadcast a payment or transfer/i);
+    assert.match(result.message, /A separate UniSat transaction approval is required/i);
+    assert.equal(state.challenge.network, network);
+    assert.equal(state.session, null);
+  }
+});
+
+test('ownership verification rejects an invalid BIP-322 signature without consuming the proof or creating a session', async () => {
+  const { binding, state } = createAuthStorageMock();
+  const address = 'bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l';
+  const network = 'BITCOIN_MAINNET';
+  const challengeResponse = await worker.fetch(makeRequest('/api/auth/ownership/challenge', {
+    method: 'POST',
+    ip: '192.0.2.243',
+    body: JSON.stringify({ site: 'punks', address, network }),
+  }), { AUTH_STORAGE: binding });
+  const challenge = await challengeResponse.json();
+  const response = await worker.fetch(makeRequest('/api/auth/ownership/verify', {
+    method: 'POST',
+    ip: '192.0.2.244',
+    body: JSON.stringify({ site: 'punks', challengeId: challenge.challengeId, address, network, signature: 'ZmFrZV9zaWduYXR1cmU=' }),
   }), { AUTH_STORAGE: binding });
   const result = await response.json();
   assert.equal(response.status, 401);

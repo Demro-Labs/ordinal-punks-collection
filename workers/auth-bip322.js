@@ -18,12 +18,13 @@ const AUTH_SITES = {
 };
 
 const AUTH_NETWORK = 'FRACTAL_BITCOIN_MAINNET';
+const OWNERSHIP_NETWORKS = new Set(['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET']);
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const ADDRESS_RATE_WINDOW_MS = 60 * 60 * 1000;
 const ADDRESS_RATE_LIMIT = 6;
 const IP_RATE_WINDOW_MS = 15 * 60 * 1000;
-const IP_RATE_LIMITS = { challenge: 8, verify: 20, session: 120, logout: 20 };
+const IP_RATE_LIMITS = { challenge: 8, verify: 20, ownershipChallenge: 8, ownershipVerify: 20, session: 120, logout: 20 };
 const authIpBuckets = new Map();
 const MAX_AUTH_BODY_BYTES = 12_000;
 
@@ -161,6 +162,22 @@ function buildChallengeMessage(siteName, address, challengeId, issuedAt, expires
   ].join('\n');
 }
 
+function buildOwnershipChallengeMessage(siteName, address, network, challengeId, issuedAt, expiresAt) {
+  const site = AUTH_SITES[siteName];
+  const networkLabel = network === 'BITCOIN_MAINNET' ? 'Bitcoin mainnet' : 'Fractal Bitcoin mainnet';
+  return [
+    `${site.domain} requests a wallet ownership proof`,
+    `URI: ${site.uri}`,
+    `Network: ${network}`,
+    `Address: ${address}`,
+    'Action: Prove control of this wallet before a transaction',
+    `Nonce: ${challengeId}`,
+    `Issued At: ${new Date(issuedAt).toISOString()}`,
+    `Expiration Time: ${new Date(expiresAt).toISOString()}`,
+    `This signature only proves wallet ownership on ${networkLabel}. It does not authorize, sign, or broadcast a payment or transfer. A separate UniSat transaction approval is required.`,
+  ].join('\n');
+}
+
 async function authStorage(env, operation, payload) {
   if (!env?.AUTH_STORAGE) throw new AuthError('AUTH_STORAGE_UNAVAILABLE', 503);
   try {
@@ -176,7 +193,7 @@ async function authStorage(env, operation, payload) {
     if (!response.ok) {
       if (response.status === 429) throw new AuthError(result?.code === 'AUTH_IP_RATE_LIMITED' ? 'AUTH_IP_RATE_LIMITED' : 'AUTH_ADDRESS_RATE_LIMITED', 429);
       if (response.status === 404 && operation === 'challenge/get') return null;
-      if (response.status === 409 && operation === 'challenge/consume') return { created: false };
+      if (response.status === 409 && (operation === 'challenge/consume' || operation === 'challenge/consume-ownership')) return { created: false };
       throw new AuthError('AUTH_STORAGE_UNAVAILABLE', 503);
     }
     return result;
@@ -199,6 +216,7 @@ function errorResponse(error, headers) {
     AUTH_ORIGIN_NOT_ALLOWED: 'This site origin is not allowed to authenticate.',
     AUTH_INVALID_SITE: 'The requested site is not supported.',
     AUTH_INVALID_NETWORK: 'Select Fractal Bitcoin mainnet in UniSat to sign in.',
+    AUTH_INVALID_OWNERSHIP_NETWORK: 'Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat to prove wallet ownership.',
     AUTH_INVALID_ADDRESS: 'Use a supported mainnet SegWit or Taproot address in UniSat.',
     AUTH_INVALID_CHALLENGE: 'The challenge is invalid, expired, or already used. Request a new challenge.',
     AUTH_INVALID_SIGNATURE: 'UniSat did not return a valid BIP-322 simple signature.',
@@ -314,6 +332,77 @@ async function verifyChallenge(request, env, headers) {
   }, { headers: { ...responseHeaders(headers), 'Set-Cookie': cookie } });
 }
 
+async function createOwnershipChallenge(request, env, headers) {
+  const now = Date.now();
+  if (await checkIpRateLimit(request, 'ownershipChallenge')) throw new AuthError('AUTH_IP_RATE_LIMITED', 429);
+  await consumeDurableIpRate(env, request, 'ownershipChallenge', now);
+  const body = await readJson(request);
+  const siteName = body.site;
+  if (!AUTH_SITES[siteName]) throw new AuthError('AUTH_INVALID_SITE', 400);
+  const site = siteForRequest(siteName, request);
+  if (!OWNERSHIP_NETWORKS.has(body.network)) throw new AuthError('AUTH_INVALID_OWNERSHIP_NETWORK', 400);
+  if (!isValidAddress(body.address)) throw new AuthError('AUTH_INVALID_ADDRESS', 400);
+  const expiresAt = now + CHALLENGE_TTL_MS;
+  const challengeId = randomToken();
+  const idHash = await sha256Hex(challengeId);
+  const addressHash = await sha256Hex(body.address);
+  const stored = await authStorage(env, 'challenge/create', {
+    idHash,
+    site: siteName,
+    address: body.address,
+    addressHash,
+    network: body.network,
+    origin: site.origin,
+    issuedAt: now,
+    expiresAt,
+    now,
+    rateWindowStart: Math.floor(now / ADDRESS_RATE_WINDOW_MS) * ADDRESS_RATE_WINDOW_MS,
+    enforceAddressRateLimit: false,
+  });
+  if (!stored?.created) throw new AuthError('AUTH_STORAGE_UNAVAILABLE', 503);
+  return Response.json({
+    challengeId,
+    message: buildOwnershipChallengeMessage(siteName, body.address, body.network, challengeId, now, expiresAt),
+    expiresAt: new Date(expiresAt).toISOString(),
+    network: body.network,
+    site: siteName,
+    action: 'ownership-proof-only',
+  }, { headers: responseHeaders(headers) });
+}
+
+async function verifyOwnershipChallenge(request, env, headers) {
+  const now = Date.now();
+  if (await checkIpRateLimit(request, 'ownershipVerify')) throw new AuthError('AUTH_IP_RATE_LIMITED', 429);
+  await consumeDurableIpRate(env, request, 'ownershipVerify', now);
+  const body = await readJson(request);
+  const siteName = body.site;
+  if (!AUTH_SITES[siteName]) throw new AuthError('AUTH_INVALID_SITE', 400);
+  const site = siteForRequest(siteName, request);
+  if (!OWNERSHIP_NETWORKS.has(body.network)) throw new AuthError('AUTH_INVALID_OWNERSHIP_NETWORK', 400);
+  if (!isValidAddress(body.address)) throw new AuthError('AUTH_INVALID_ADDRESS', 400);
+  if (!isValidChallengeId(body.challengeId)) throw new AuthError('AUTH_INVALID_CHALLENGE', 400);
+  const witness = await decodeWitness(body.signature);
+  if (!witness) throw new AuthError('AUTH_INVALID_SIGNATURE', 400);
+  const idHash = await sha256Hex(body.challengeId);
+  const challenge = await authStorage(env, 'challenge/get', { idHash });
+  if (!challenge || challenge.site !== siteName || challenge.address !== body.address || challenge.network !== body.network || challenge.origin !== site.origin || challenge.usedAt || Number(challenge.expiresAt) <= now) {
+    throw new AuthError('AUTH_INVALID_CHALLENGE', 401);
+  }
+  const message = buildOwnershipChallengeMessage(siteName, body.address, body.network, body.challengeId, Number(challenge.issuedAt), Number(challenge.expiresAt));
+  let valid = false;
+  try { valid = await Verifier.verifySignature(body.address, message, witness); } catch { valid = false; }
+  if (!valid) throw new AuthError('AUTH_SIGNATURE_REJECTED', 401);
+  const consumed = await authStorage(env, 'challenge/consume-ownership', {
+    idHash,
+    site: siteName,
+    address: body.address,
+    network: body.network,
+    now: Date.now(),
+  });
+  if (!consumed?.created) throw new AuthError('AUTH_INVALID_CHALLENGE', 401);
+  return Response.json({ verified: true, site: siteName, address: body.address, network: body.network }, { headers: responseHeaders(headers) });
+}
+
 function readCookie(request, name) {
   const cookieHeader = request.headers.get('Cookie') || '';
   for (const part of cookieHeader.split(';')) {
@@ -358,6 +447,8 @@ export async function handleWalletAuth(request, env, headers) {
   try {
     if (request.method === 'POST' && url.pathname === '/api/auth/challenge') return await createChallenge(request, env, headers);
     if (request.method === 'POST' && url.pathname === '/api/auth/verify') return await verifyChallenge(request, env, headers);
+    if (request.method === 'POST' && url.pathname === '/api/auth/ownership/challenge') return await createOwnershipChallenge(request, env, headers);
+    if (request.method === 'POST' && url.pathname === '/api/auth/ownership/verify') return await verifyOwnershipChallenge(request, env, headers);
     if (request.method === 'GET' && url.pathname === '/api/auth/session') return await getSession(request, env, headers);
     if (request.method === 'POST' && url.pathname === '/api/auth/logout') return await logout(request, env, headers);
     return new Response('Not found', { status: 404, headers: responseHeaders(headers) });
@@ -392,9 +483,11 @@ export class AuthStorage {
         sql.exec('DELETE FROM auth_sessions WHERE expires_at <= ?', body.now);
         sql.exec('DELETE FROM auth_address_rates WHERE window_start < ?', body.now - 24 * ADDRESS_RATE_WINDOW_MS);
         sql.exec('DELETE FROM auth_ip_rates WHERE window_start < ?', body.now - 24 * IP_RATE_WINDOW_MS);
-        const row = sql.exec('SELECT count FROM auth_address_rates WHERE address_hash = ? AND window_start = ?', body.addressHash, body.rateWindowStart).toArray()[0];
-        if (Number(row?.count || 0) >= ADDRESS_RATE_LIMIT) return { created: false, code: 'AUTH_ADDRESS_RATE_LIMITED' };
-        sql.exec('INSERT INTO auth_address_rates (address_hash, window_start, count) VALUES (?, ?, 1) ON CONFLICT(address_hash, window_start) DO UPDATE SET count = count + 1', body.addressHash, body.rateWindowStart);
+        if (body.enforceAddressRateLimit !== false) {
+          const row = sql.exec('SELECT count FROM auth_address_rates WHERE address_hash = ? AND window_start = ?', body.addressHash, body.rateWindowStart).toArray()[0];
+          if (Number(row?.count || 0) >= ADDRESS_RATE_LIMIT) return { created: false, code: 'AUTH_ADDRESS_RATE_LIMITED' };
+          sql.exec('INSERT INTO auth_address_rates (address_hash, window_start, count) VALUES (?, ?, 1) ON CONFLICT(address_hash, window_start) DO UPDATE SET count = count + 1', body.addressHash, body.rateWindowStart);
+        }
         sql.exec('INSERT INTO auth_challenges (id_hash, site, address, address_hash, network, origin, issued_at, expires_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)', body.idHash, body.site, body.address, body.addressHash, body.network, body.origin, body.issuedAt, body.expiresAt);
         return { created: true };
       });
@@ -429,6 +522,17 @@ export class AuthStorage {
         sql.exec('DELETE FROM auth_sessions WHERE site = ? AND address = ?', body.site, body.address);
         sql.exec('INSERT INTO auth_sessions (token_hash, site, address, network, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)', body.tokenHash, body.site, body.address, body.network, body.now, body.expiresAt);
         return { created: true };
+      });
+      return Response.json(result, { status: result.created ? 200 : 409 });
+    }
+
+    if (url.pathname === '/challenge/consume-ownership') {
+      const result = this.ctx.storage.transactionSync(() => {
+        const row = sql.exec('SELECT site, address, network, expires_at AS expiresAt, used_at AS usedAt FROM auth_challenges WHERE id_hash = ?', body.idHash).toArray()[0];
+        if (!row || row.usedAt || Number(row.expiresAt) <= Number(body.now) || row.site !== body.site || row.address !== body.address || row.network !== body.network) return { created: false };
+        sql.exec('UPDATE auth_challenges SET used_at = ? WHERE id_hash = ? AND used_at IS NULL AND expires_at > ?', body.now, body.idHash, body.now);
+        const changed = Number(sql.exec('SELECT changes() AS changes').toArray()[0]?.changes || 0);
+        return { created: changed === 1 };
       });
       return Response.json(result, { status: result.created ? 200 : 409 });
     }

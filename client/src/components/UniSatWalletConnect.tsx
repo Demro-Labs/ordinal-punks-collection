@@ -9,6 +9,7 @@ import { shouldShowDustRelayGuidance } from "@/lib/wallet-error";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
 import { UniSatFbSendPanel } from "@/components/UniSatFbSendPanel";
 import { UniSatWalletAuth } from "@/components/UniSatWalletAuth";
+import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 
 type UniSatChain = {
   enum?: string;
@@ -73,6 +74,15 @@ type PsbtReviewState = {
 type PsbtReviewResolver = {
   resolve: (result: boolean | string) => void;
   reject: (cause: unknown) => void;
+};
+type MobileNativeTransferReady = {
+  contextKey: string;
+  address: string;
+  networkEnum: string;
+  recipient: string;
+  selected: UniSatInscription;
+  feeRate: number;
+  liveBefore: LiveInscription | null;
 };
 
 declare global {
@@ -244,7 +254,7 @@ function describeWalletError(cause: unknown, fallback: string) {
   return message ? `${message}${code}` : fallback;
 }
 
-export function UniSatWalletConnect() {
+export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "pokedex" } = {}) {
   const [providerAvailable, setProviderAvailable] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
   const [chain, setChain] = useState<UniSatChain | null>(null);
@@ -258,6 +268,9 @@ export function UniSatWalletConnect() {
   const [selectedInscriptionId, setSelectedInscriptionId] = useState("");
   const [destination, setDestination] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [ownershipProofKey, setOwnershipProofKey] = useState<string | null>(null);
+  const [ownershipProofVersion, setOwnershipProofVersion] = useState(0);
+  const [mobileNativeTransferReady, setMobileNativeTransferReady] = useState<MobileNativeTransferReady | null>(null);
   const [transferBusy, setTransferBusy] = useState(false);
   const [psbtReview, setPsbtReview] = useState<PsbtReviewState | null>(null);
   const [psbtSigning, setPsbtSigning] = useState(false);
@@ -303,6 +316,20 @@ export function UniSatWalletConnect() {
     available: number | null; unavailable: number | null; publicKey: string | null;
     utxoCount: number; utxoSats: number; refreshedAt: string;
   } | null>(null);
+  const ownershipContextKey = selectedInscriptionId && destination.trim()
+    ? JSON.stringify(["ordinal-transfer", site, address, chain?.enum, selectedInscriptionId, destination.trim()])
+    : "";
+  const mobileNativeReadyForContext = mobileNativeTransferReady?.contextKey === ownershipContextKey ? mobileNativeTransferReady : null;
+  useEffect(() => {
+    if (!isMobileUniSatDevice()) return;
+    setOwnershipProofKey(null);
+    setOwnershipProofVersion(version => version + 1);
+    setMobileNativeTransferReady(null);
+  }, [ownershipContextKey]);
+  useEffect(() => {
+    if (!isMobileUniSatDevice()) return;
+    if (!ownershipProofKey) setMobileNativeTransferReady(null);
+  }, [ownershipProofKey]);
 
   useEffect(() => {
     let active = true;
@@ -746,7 +773,18 @@ export function UniSatWalletConnect() {
     const review = psbtReview;
     const signPsbt = psbtReviewSignPsbtRef.current;
     if (!review || !signPsbt || !psbtReviewResolverRef.current) return;
+    if (isMobileUniSatDevice() && (!ownershipContextKey || ownershipProofKey !== ownershipContextKey)) {
+      const cause = new Error("La preuve de propriété BIP-322 est absente ou ne correspond plus au transfert. Aucun PSBT n’a été signé.");
+      setTransferError(cause.message);
+      rejectPsbtReview(cause);
+      return;
+    }
     setPsbtSigning(true);
+    if (isMobileUniSatDevice()) {
+      setOwnershipProofKey(null);
+      setOwnershipProofVersion(version => version + 1);
+      setMobileNativeTransferReady(null);
+    }
     try {
       // Invoke the UniSat bridge synchronously from this explicit user click.
       const signing = signPsbt(review.plan);
@@ -808,7 +846,12 @@ export function UniSatWalletConnect() {
       setTransferError("Review the inscription and destination, then confirm the transfer checkbox.");
       return;
     }
+    if (isMobileUniSatDevice() && (!ownershipContextKey || ownershipProofKey !== ownershipContextKey)) {
+      setTransferError("Signez d’abord la preuve de propriété BIP-322 affichée sous le reçu. Aucune transaction n’a été ouverte.");
+      return;
+    }
 
+    if (isMobileUniSatDevice()) setMobileNativeTransferReady(null);
     setTransferBusy(true);
     try {
       const currentChain = await provider.getChain();
@@ -836,6 +879,11 @@ export function UniSatWalletConnect() {
       let returnedTxid: string | undefined;
       if (useNativeInscription) {
         await ensureNativeInscriptionFeeBalance(provider, activeNetworkEnum, { location: selected.location }, feeRate);
+        if (isMobileUniSatDevice()) {
+          setMobileNativeTransferReady({ contextKey: ownershipContextKey, address, networkEnum: activeNetworkEnum, recipient, selected, feeRate, liveBefore });
+          setTransferError("Pré-vérification terminée. Touchez maintenant « Ouvrir UniSat » pour afficher l’approbation transactionnelle séparée.");
+          return;
+        }
         returnedTxid = await sendNativeUniSatInscription(provider, recipient, selected.inscriptionId, feeRate);
       } else if (useVerifiedPsbt) {
         const mempool = getMempoolConfig(activeNetworkEnum);
@@ -894,6 +942,10 @@ export function UniSatWalletConnect() {
         throw new Error("The transfer did not return a valid transaction ID. Check UniSat and Mempool before retrying.");
       }
       setTxid(returnedTxid);
+      if (isMobileUniSatDevice()) {
+        void refreshWalletDashboard();
+        window.setTimeout(() => void refreshWalletDashboard(), 3000);
+      }
       void trackTransaction(returnedTxid, currentChain.enum, liveBefore);
       setInscriptions(previous => previous.filter(item => item.inscriptionId !== selected.inscriptionId));
       setInscriptionTotal(previous => Math.max(0, previous - 1));
@@ -918,6 +970,61 @@ export function UniSatWalletConnect() {
       setPsbtSigning(false);
       setTransferBusy(false);
     }
+  };
+
+  const openMobileNativeTransfer = () => {
+    const ready = mobileNativeReadyForContext;
+    const provider = window.unisat;
+    if (!isMobileUniSatDevice() || !ready || !provider?.sendInscription || ready.address !== address || ready.networkEnum !== chain?.enum) {
+      setTransferError("Le transfert mobile doit être pré-vérifié avec le compte courant. Recommencez la préparation.");
+      setMobileNativeTransferReady(null);
+      return;
+    }
+    if (ownershipProofKey !== ready.contextKey || ready.contextKey !== ownershipContextKey) {
+      setTransferError("La preuve BIP-322 ne correspond plus à ce transfert. Préparez une nouvelle preuve avant de continuer.");
+      setMobileNativeTransferReady(null);
+      return;
+    }
+
+    setTransferError("");
+    setTxid("");
+    setTransferBusy(true);
+    setOwnershipProofKey(null);
+    setOwnershipProofVersion(version => version + 1);
+    setMobileNativeTransferReady(null);
+    let transferPromise: Promise<string>;
+    try {
+      // sendNativeUniSatInscription calls sendInscription before its first await,
+      // preserving UniSat Mobile's user-gesture requirement on this explicit tap.
+      transferPromise = sendNativeUniSatInscription(provider, ready.recipient, ready.selected.inscriptionId, ready.feeRate);
+    } catch (cause) {
+      setTransferBusy(false);
+      setTransferError(describeWalletError(cause, "Transfer was cancelled or failed in UniSat."));
+      return;
+    }
+    void transferPromise
+      .then(returnedTxid => {
+        if (!/^[a-f0-9]{64}$/i.test(returnedTxid)) throw new Error("The transfer did not return a valid transaction ID. Check UniSat and Mempool before retrying.");
+        setTxid(returnedTxid);
+        void refreshWalletDashboard();
+        window.setTimeout(() => void refreshWalletDashboard(), 3000);
+        void trackTransaction(returnedTxid, ready.networkEnum, ready.liveBefore);
+        setInscriptions(previous => previous.filter(item => item.inscriptionId !== ready.selected.inscriptionId));
+        setInscriptionTotal(previous => Math.max(0, previous - 1));
+        setSelectedInscriptionId("");
+        setConfirmed(false);
+        setDestination("");
+      })
+      .catch(cause => {
+        const message = describeWalletError(cause, "Transfer was cancelled or failed in UniSat.");
+        if (isTransferOutcomeUnclear(cause) || isTransferOutcomeUnclear(message)) {
+          setTransferOutcomeUnclear(true);
+          setTransferOutcomeChecked(false);
+          try { window.sessionStorage.setItem(TRANSFER_OUTCOME_UNCLEAR_SESSION_KEY, "1"); } catch { /* in-memory lock remains active */ }
+        }
+        setTransferError(message);
+      })
+      .finally(() => setTransferBusy(false));
   };
 
   const connectedToFractal = Boolean(address && isSupportedMainnet(chain?.enum));
@@ -1115,7 +1222,7 @@ export function UniSatWalletConnect() {
         <UniSatWalletAuth key={`${address ?? ""}:${chain?.enum ?? ""}`} site="punks" address={address ?? ""} network={chain?.enum ?? ""} provider={window.unisat} />
       )}
       {connectedToFractal && (
-        <UniSatFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} />
+        <UniSatFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} site={site} />
       )}
       {connectedToFractal && inscriptions.length > 0 && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-gallery-title">
@@ -1194,6 +1301,8 @@ export function UniSatWalletConnect() {
                 />
                 <span>I checked this inscription and destination. I understand the on-chain transfer cannot be reversed.</span>
               </label>
+              {isMobileUniSatDevice() && confirmed && selectedInscription && destination.trim() && address && isSupportedMainnet(chain?.enum) && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={window.unisat} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
+              {mobileNativeReadyForContext && <p className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#70c7a0]" role="status">Pré-vérification terminée. La preuve ownership est validée. Touchez à nouveau pour ouvrir la confirmation transactionnelle UniSat.</p>}
               {isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) && (
                 <button
                   type="button"
@@ -1205,11 +1314,11 @@ export function UniSatWalletConnect() {
               )}
               <button
                 type="button"
-                onClick={() => void sendSelectedInscription()}
-                disabled={transferOutcomeUnclear || (isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable)) || !confirmed || transferBusy || busy || transferLiveLoading}
+                onClick={() => mobileNativeReadyForContext ? openMobileNativeTransfer() : void sendSelectedInscription()}
+                disabled={transferOutcomeUnclear || (isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable)) || !confirmed || (isMobileUniSatDevice() && ownershipProofKey !== ownershipContextKey) || transferBusy || busy || transferLiveLoading}
                 className="mt-3 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {transferOutcomeUnclear ? "Transfer status unknown — verify first" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? verifiedOrdinalTransfer ? "Preparing verified transfer…" : "Opening UniSat approval…" : verifiedOrdinalTransfer ? "Prepare verified transfer" : "Review transfer in UniSat"}
+                {transferOutcomeUnclear ? "Transfer status unknown — verify first" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? verifiedOrdinalTransfer ? "Preparing verified transfer…" : "Preparing transfer…" : mobileNativeReadyForContext ? "Open UniSat · approve transaction" : verifiedOrdinalTransfer ? "Prepare verified transfer" : isMobileUniSatDevice() ? "Prepare transfer" : "Review transfer in UniSat"}
               </button>
               {connectedToFractal && <p className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]" role="note">{nativeInscriptionTransfer ? "UniSat sendInscription builds, reviews and broadcasts the ordinal transfer after wallet approval; the site tracks its TXID." : "Cloudflare supplies protocol-checked fee UTXOs; the site reviews the exact transaction, UniSat signs after approval, and the selected network Mempool validates and broadcasts it."}</p>}
             </div>
