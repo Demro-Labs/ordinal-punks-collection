@@ -105,6 +105,7 @@ type MobileReceiptWalletCardProps = {
 
 function MobileReceiptWalletCard({ address, chain, liveWallet, onRefresh }: MobileReceiptWalletCardProps) {
   const networkLabel = chain?.name ?? chain?.enum ?? "Non détecté";
+  const liveBalance = liveWallet?.total ?? liveWallet?.available ?? liveWallet?.confirmed;
   const formatBalance = (value: number | null | undefined) => value == null ? "Indisponible" : `${value.toLocaleString("fr-FR")} sats`;
   return <div className="mt-3 border border-[#d99a54]/50 bg-[#151a1f] p-3 font-mono text-[10px] text-[#d9d3c6]">
     <div className="flex items-center justify-between gap-3">
@@ -113,6 +114,10 @@ function MobileReceiptWalletCard({ address, chain, liveWallet, onRefresh }: Mobi
         <p className="mt-1 text-[#9ea7b3]">{address ? "Compte UniSat connecté" : "Compte UniSat non détecté"}</p>
       </div>
       <button type="button" onClick={onRefresh} className="shrink-0 border border-[#3b434d] px-2 py-1 text-[9px] uppercase text-[#f2bd63]">Actualiser</button>
+    </div>
+    <div className="mt-3 flex items-center justify-between gap-3 border border-[#d99a54]/40 bg-[#0d1115] px-3 py-2">
+      <span className="uppercase tracking-[0.08em] text-[#f2bd63]">Solde live UniSat</span>
+      <strong className="text-sm text-[#f2bd63]">{formatBalance(liveBalance)}</strong>
     </div>
     <div className="mt-3 grid gap-2 sm:grid-cols-2">
       <p className="break-all sm:col-span-2"><span className="text-[#718092]">Adresse connectée (live) :</span> {address || "Non détectée"}</p>
@@ -214,9 +219,8 @@ export function UniSatInscribePanel() {
       const [accounts, currentChain] = await Promise.all([provider.getAccounts?.(), provider.getChain?.()]);
       const activeAddress = accounts?.[0] ?? "";
       setAddress(activeAddress); setChain(currentChain ?? null);
-      const saved = isMobileUniSatDevice() ? readActiveMobileOrder() : null;
-      if (saved && activeAddress === saved.receipt.walletAddress && currentChain?.enum === saved.receipt.chain) {
-        void loadLiveWalletData(saved.receipt.chain, saved.receipt.walletAddress);
+      if (isMobileUniSatDevice() && activeAddress && currentChain?.enum) {
+        void loadLiveWalletData(currentChain.enum, activeAddress);
       } else if (isMobileUniSatDevice()) setLiveWallet(null);
     } catch { setAddress(""); setChain(null); if (isMobileUniSatDevice()) setLiveWallet(null); }
   };
