@@ -193,7 +193,7 @@ async function spendableUtxos(request, env, corsHeaders) {
   const requestedSize = parseBoundedInteger(url.searchParams.get('size'), 25, 25);
   if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new SpendableUtxoError('INVALID_QUERY', 400);
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
-  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
+  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}&withLowFee=true`, env));
   if (!Array.isArray(source?.utxo)) throw new SpendableUtxoError('UTXO_LIST_INVALID_RESPONSE');
   const raw = source.utxo;
   if (raw.length > requestedSize) throw new SpendableUtxoError('UTXO_PAGE_OVERSIZED');
@@ -211,7 +211,7 @@ async function spendableUtxos(request, env, corsHeaders) {
       !Number.isSafeInteger(satoshi) || satoshi < 600 ||
       !/^(?:[a-f0-9]{2})+$/.test(scriptPk) ||
       !Number.isSafeInteger(height) || height <= 0 ||
-      item?.isLowFee !== false || typeof item?.isOpInRBF !== 'boolean' ||
+      typeof item?.isLowFee !== 'boolean' || typeof item?.isOpInRBF !== 'boolean' ||
       !Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0
     ) continue;
     const detail = await spendableUtxoStage('UTXO_DETAIL', () => uniNetwork(base, `/v1/indexer/utxo/${txid}/${vout}`, env));
@@ -231,7 +231,7 @@ async function spendableUtxos(request, env, corsHeaders) {
       if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
       if (alkanes.length !== 0) continue;
     }
-    checked.push({ address, txid, vout, satoshi, scriptPk, height, isLowFee: false, isOpInRBF: item.isOpInRBF, inscriptions: [], inscriptionsRunesAlkanesChecked: true });
+    checked.push({ address, txid, vout, satoshi, scriptPk, height, isLowFee: item.isLowFee, isOpInRBF: item.isOpInRBF, inscriptions: [], inscriptionsRunesAlkanesChecked: true });
   }
   return Response.json({ chain, address, cursor, nextCursor: cursor + raw.length, total: Number.isSafeInteger(source?.total) ? source.total : cursor + raw.length, scannedCount: raw.length, utxo: checked }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
