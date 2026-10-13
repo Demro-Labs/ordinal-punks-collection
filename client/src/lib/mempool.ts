@@ -68,7 +68,7 @@ export async function getRecommendedFeeRate(network: string) {
   return Math.ceil(estimate.feeRate);
 }
 
-export type SpendableUtxo = { address: string; txid: string; vout: number; satoshi: number; scriptPk: string; height: number; inscriptionsRunesAlkanesChecked: true; isLowFee: false; isOpInRBF: boolean; inscriptions: [] };
+export type SpendableUtxo = { address: string; txid: string; vout: number; satoshi: number; scriptPk: string; inscriptionsRunesAlkanesChecked: true; isLowFee: false; isOpInRBF: false; inscriptions: [] };
 
 /** Fetch only confirmed, non-asset UTXOs verified by the server-side UniSat indexer. */
 export async function getSpendableUtxos(network: string, address: string, minimumSats: number): Promise<SpendableUtxo[]> {
@@ -95,8 +95,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       typeof item.vout === "number" && Number.isSafeInteger(item.vout) && item.vout >= 0 &&
       typeof item.satoshi === "number" && Number.isSafeInteger(item.satoshi) && item.satoshi >= 600 &&
       typeof item.scriptPk === "string" && /^(?:[a-f0-9]{2})+$/i.test(item.scriptPk) &&
-      typeof item.height === "number" && Number.isSafeInteger(item.height) && item.height > 0 &&
-      item.inscriptionsRunesAlkanesChecked === true && item.isLowFee === false && typeof item.isOpInRBF === "boolean" &&
+      item.inscriptionsRunesAlkanesChecked === true && item.isLowFee === false && item.isOpInRBF === false &&
       Array.isArray(item.inscriptions) && item.inscriptions.length === 0
     );
     collected.push(...safe);

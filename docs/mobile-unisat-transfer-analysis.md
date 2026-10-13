@@ -4,13 +4,7 @@
 **Dépôt analysé :** `Demro-Labs/ordinal-punks-collection`
 **Commit `main` examiné :** `687b79c2e20a6d1a10cfc19e839292be37e8db05` — fusion de la PR #113, « Pause failing UniSat mobile transfers on Fractal ».
 
-## Addendum — voie Cloudflare mobile en préparation, 13 octobre 2026
-
-Le parcours natif `sendInscription` a été essayé sur mobile et a renvoyé l’erreur `Cannot read property 'toAddress' of undefined`; il ne doit pas être réutilisé pour le transfert Ordinal Fractal. La branche `fix/mobile-cloudflare-ordinal-transfer-20261013` réactive pour **Fractal mobile seulement** le constructeur PSBT testé : Worker Cloudflare pour les UTXO de frais vérifiés, revue exacte dans le site, signature UniSat `signPsbt`, vérification de la transaction signée puis soumission à Fractal Mempool. Le parcours desktop reste natif et inchangé; le parcours Inscribe File conserve le Worker V5 et le paiement natif `sendBitcoin`.
-
-Les tests hors ligne, le typecheck et le build passent sur les deux dépôts. Aucun appareil réel, signature, UTXO réel ni diffusion mainnet n’a été utilisé; un essai UniSat Mobile sur l’appareil ciblé reste requis. Cet addendum décrit le correctif local en cours et ne signifie pas que les branches sont déjà fusionnées ou publiées. Voir aussi [`experimental-ordinal-psbt.md`](experimental-ordinal-psbt.md) pour le flux actif proposé.
-
-## État final historique après correctifs de l’analyse initiale
+## État final après correctifs fusionnés
 
 Les constats et recommandations historiques ci-dessous décrivent l’état initial du dépôt; ils sont supersédés par les changements fusionnés dans les PR [#117](https://github.com/Demro-Labs/ordinal-punks-collection/pull/117) et [#118](https://github.com/Demro-Labs/ordinal-punks-collection/pull/118). Pour corriger l’échec `toAddress` sur Fractal mobile, le site remplace maintenant, **uniquement dans le navigateur intégré UniSat Mobile sur Fractal Bitcoin**, l’appel natif `sendInscription` par un parcours PSBT avec `signPsbt`. L’écran de revue affiche l’inscription, le destinataire, les sorties, le taux et le total des frais; après approbation UniSat, le site valide le réseau, les sorties et les signatures avant de diffuser la transaction vérifiée vers Mempool Fractal. Le transfert Bitcoin mobile et les autres chemins restent inchangés.
 
@@ -66,7 +60,7 @@ Un deuxième point à valider concerne le bouton « Open this page in UniSat » 
 
 5. **Blocage serveur possible, mais distinct.** Le composant attend `fetchLiveInscription` avant d’appeler le wallet. Une erreur du Worker, un binding `UNISAT_API_KEY` absent/inopérant ou une origine non autorisée peut donc empêcher un transfert avant même l’ouverture de l’approbation UniSat. Le Worker n’autorise notamment que les origines déclarées dans `ALLOWED_ORIGINS`; l’origine GitHub Pages de production figure dans cette liste. C’est à vérifier seulement si le message est de type « Live UniSat data unavailable », erreur de frais ou erreur CORS, pas si l’écran affiche le garde-fou Fractal mobile. [2] [7]
 
-6. **Documentation PSBT périmée et contradictoire — corrigée sur la branche locale.** Ce constat était exact au moment de l’analyse : le document affirmait qu’un transfert PSBT personnalisé était actif alors que le composant utilisait `sendInscription`. La documentation `experimental-ordinal-psbt.md` a depuis été remplacée par l’état du parcours natif préparé dans l’addendum ci-dessus; cette mise à jour doit encore être fusionnée et publiée avec le correctif. [2] [8]
+6. **Documentation PSBT périmée et contradictoire.** `docs/experimental-ordinal-psbt.md` affirme qu’un transfert PSBT personnalisé est activé et remplace `sendInscription`. Pourtant, le composant actif appelle `sendInscription`, n’importe pas `sendOrdinalInscriptionWithCustomPsbt`, et indique dans l’interface qu’aucun PSBT personnalisé n’est utilisé. Cette note peut induire en erreur lors d’un futur dépannage. Le constructeur PSBT et ses tests existent, mais leur présence ne les rend pas actifs dans le parcours actuel. [2] [8]
 
 7. **Avertissement peu visible.** Le message de pause se trouve à l’intérieur du panneau rendu seulement après sélection d’une inscription et saisie d’une adresse destinataire. Un utilisateur mobile peut donc ne pas comprendre immédiatement pourquoi le transfert est indisponible. C’est un problème d’interface, pas la cause native. [2]
 

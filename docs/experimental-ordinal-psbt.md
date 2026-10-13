@@ -1,41 +1,38 @@
-# Ordinal Punks — transferts mobiles UniSat et inscriptions de fichiers
+# Transfert Ordinal mobile Fractal par PSBT
 
-## Parcours actif
+## État de l’implémentation
 
-### Transfert ordinal Fractal sur mobile
+Le correctif local branche le flux PSBT personnalisé **uniquement pour Fractal Bitcoin dans le navigateur intégré UniSat Mobile**. Le transfert Bitcoin mobile et les autres chemins natifs continuent d’utiliser `sendInscription`. Le site vérifie la présence des méthodes UniSat requises et refuse de se rabattre silencieusement sur l’ancien appel natif si `signPsbt` n’est pas disponible.
 
-Le parcours mobile Fractal ne dépend plus de `sendInscription`, qui renvoyait une réponse incomplète dans UniSat Mobile. Il réutilise le constructeur PSBT audité et testé :
+Avant la signature, une boîte de dialogue séparée affiche le réseau, l’inscription, le destinataire, les sorties destinataire et monnaie, le taux de frais estimé et le montant total des frais. L’utilisateur doit approuver cette revue, puis confirmer la signature dans UniSat. Après la signature, le client vérifie le compte, la clé publique et le réseau, contrôle cryptographiquement les signatures et les sorties, finalise localement, puis diffuse uniquement la transaction vérifiée vers l’API Mempool Fractal. Une erreur ou réponse de diffusion incertaine bloque les nouvelles tentatives jusqu’à vérification de l’activité UniSat et de Mempool.
 
-1. Mempool valide l’adresse destinataire et fournit le taux de frais courant.
-2. Le Worker Cloudflare récupère la liste de UTXO dépensables UniSat avec vérification explicite des inscriptions, Runes et Alkanes; le client recoupe ces UTXO avec ceux du wallet et contrôle les données de transaction auprès de Fractal Mempool.
-3. L’application affiche une revue exacte du réseau, de l’inscription, du destinataire, des sorties, de la monnaie rendue et des frais. Le signataire doit confirmer cette revue avant d’ouvrir UniSat.
-4. UniSat Mobile signe le PSBT après son propre écran d’approbation. Le client vérifie alors la transaction signée et revérifie le compte, la clé et le réseau avant de la soumettre à Fractal Mempool.
-5. Fractal Mempool valide/rejette la soumission et diffuse la transaction; l’application vérifie le TXID puis suit son état dans Mempool.
+Les entrées signalent l’opt-in RBF avec la séquence `0xfffffffd`. **Le site ne construit ni ne diffuse de remplacement et ne propose aucun bouton d’augmentation de frais.** RBF indique une possibilité de remplacement selon les règles de relais et de mempool; il ne garantit ni confirmation ni acceptation par tous les nœuds. Tout remplacement ultérieur doit passer par une action autorisée dans le wallet.
 
-Si l’issue de la diffusion est incertaine, une nouvelle tentative est verrouillée jusqu’à vérification de l’activité UniSat et de Mempool. Aucun PSBT n’est signé ou diffusé si la revue exacte est refusée ou si les contrôles d’actifs, de compte ou de réseau échouent.
+Le correctif Worker de la PR #117 est fusionné et déployé sur `fractal-ordinal-live`. Le contenu a été remplacé par l’endpoint Cloudflare `PUT .../workers/scripts/{script_name}/content`, documenté comme contenu-seul, sans changement de configuration ni de métadonnées. Le binding `UNISAT_API_KEY` est toujours présent (`secret_text`, noms/types seulement vérifiés); sa valeur n’a pas été lue ni copiée dans le client. Un GET non transactionnel de `spendable-utxos` avec une adresse de démonstration et les paramètres requis a répondu HTTP 200; aucun transfert réel n’a été signé ou diffusé. À l’inverse, un appel sans paramètres retourne un 503 générique, car la route transforme actuellement les erreurs de validation en indisponibilité amont; le client envoie bien `chain`, `address`, `cursor` et `size`. C’est une amélioration d’observabilité non bloquante, distincte du transfert.
 
-### Desktop et Bitcoin mobile
+## Protections et limites des contrôles d’actifs
 
-Le parcours desktop n’est pas modifié : il conserve l’appel natif UniSat `sendInscription`. Le transfert Bitcoin sur mobile conserve également le parcours natif `sendInscription`; le PSBT Cloudflare décrit ci-dessus est limité au mobile Fractal.
+Le Worker ne retourne un UTXO comme candidat de frais qu’après avoir confirmé l’adresse, le txid/vout, le script, la valeur, une hauteur confirmée, `isSpent: false`, `isOpInRBF: false`, `isLowFee: false` et une liste d’inscriptions explicitement vide. Il interroge ensuite l’API officielle UniSat de solde Runes par outpoint sur Bitcoin et Fractal. Pour Fractal, il interroge également le solde Alkanes. Chaque réponse doit être explicitement un tableau vide; une erreur, une réponse absente ou malformée entraîne une erreur fermée et aucune attestation.
 
-### Inscription de fichier
+Le champ d’attestation `inscriptionsRunesAlkanesChecked: true` décrit **uniquement** ces contrôles. Les inscriptions (y compris BRC-20 signalées comme inscriptions par UniSat), Runes et Alkanes sont ainsi couvertes dans les limites des données renvoyées par leurs indexeurs. Les autres protocoles qui ne sont pas vérifiés par ces endpoints ne sont pas certifiés sûrs par cette attestation; un UTXO connu pour porter un autre actif ne doit pas être utilisé comme entrée de frais.
 
-Le panneau Inscribe File utilise le Worker Cloudflare pour créer et suivre les commandes UniSat Inscribe API V5; la clé `UNISAT_API_KEY` reste côté Worker et n’est pas exposée au navigateur. Le même endpoint est utilisé sur desktop et mobile. Avant le paiement, l’application vérifie le réseau de la commande, valide l’adresse de paiement avec le Mempool correspondant et récupère les frais courants. UniSat présente ensuite le paiement `sendBitcoin` pour approbation. La transaction de paiement est suivie dans Mempool et l’état de la commande est interrogé auprès du Worker.
+La sortie portant l’inscription sélectionnée reste l’entrée 0. Le constructeur vérifie son outpoint et son offset à partir de la source, puis l’envoie au destinataire avec au moins 1 200 sats ou `offset + 1`, selon la position du sat inscrit. Les sorties de monnaie inférieures à 1 200 sats sont refusées. Les entrées de frais doivent être présentes à la fois dans les UTXO du wallet et dans la liste vérifiée par le Worker; les sorties contenant des inscriptions sont exclues.
 
-## Rôle de chaque service
+Les styles de scripts pris en charge et les hypothèses d’entrée sont détaillés dans le code et les tests. Les signatures ECDSA/Schnorr, l’ordre des entrées, les scripts et montants de sortie, le seuil dust et la comptabilité des frais sont vérifiés avant toute diffusion. L’estimation de frais ne permet pas de contourner une politique dust ou les règles de relais du réseau.
 
-- **Cloudflare Worker** : proxy UniSat Inscribe V5 et source des UTXO de frais vérifiés; il ne signe aucune transaction.
-- **UniSat Mobile** : présente l’approbation du PSBT et signe avec la clé du wallet.
-- **Mempool** : valide les adresses, fournit les frais, vérifie les données des entrées, accepte ou rejette la soumission de transaction, la diffuse et en suit les confirmations. L’API publique ne constitue pas une approbation protocolaire préalable à la signature; les écrans de revue du site et d’UniSat restent essentiels.
+## Tests et vérifications manuelles
 
-## Vérification
+Les tests hors ligne ne signent ni ne diffusent de transaction réelle. Ils utilisent des clés et UTXO de test, des réponses UniSat/Mempool simulées et couvrent notamment le contrôle de revue avant signature, le signal RBF dans chaque entrée, la vérification de signature, la diffusion après vérification, l’annulation sans signature et le refus des réponses Worker incomplètes ou porteuses de Runes/Alkanes.
 
-Les tests unitaires du PSBT couvrent la revue exacte avant signature, le refus sans signature ni diffusion, les marqueurs de vérification des actifs, le contrôle des entrées/sorties et le broadcast RBF à Mempool. La suite locale, le contrôle TypeScript, le build de production et `git diff --check` ont passé sur la branche de correctif. Aucun wallet réel n’a signé et aucune transaction n’a été diffusée pendant ces tests; un essai sur l’appareil UniSat Mobile ciblé reste requis avant mise en production.
+Avant un transfert réel, il reste nécessaire de vérifier sur l’application UniSat ciblée que `signPsbt` est disponible dans son navigateur intégré et que l’écran UniSat présente les mêmes éléments. N’approuver qu’après comparaison du réseau, de l’inscription, du destinataire et des montants/frais. Aucun essai avec un actif réel n’est requis pour les tests logiciels.
 
 ## Références
 
 - [UniSat Wallet API](https://docs.unisat.io/developer-support/open-api-documentation/unisat-wallet)
-- [Connexion à UniSat Mobile](https://docs.unisat.io/developer-support/open-api-documentation/unisat-wallet/connect-with-unisat-mobile-wallet)
-- [UniSat Inscribe API V5](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/open-api/auto-generated/docs/inscribe-v5.md)
-- [Mempool REST API](https://mempool.space/docs/api/rest)
-- [Mempool FAQ](https://mempool.space/docs/faq)
+- [UniSat — connexion au portefeuille mobile](https://docs.unisat.io/developer-support/open-api-documentation/unisat-wallet/connect-with-unisat-mobile-wallet)
+- [UniSat — schéma de l’indexeur Blockchain, dont l’état `isSpent`](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/open-api/auto-generated/docs/blockchain-indexer.md)
+- [UniSat — solde Runes par UTXO](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/open-api/auto-generated/docs/runes-indexer.md)
+- [UniSat — solde Alkanes par UTXO](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/open-api/auto-generated/docs/alkanes-indexer.md)
+- [Bitcoin Core — opt-in RBF](https://bitcoincore.org/en/faq/optin-rbf/)
+- [Mempool — FAQ](https://mempool.space/docs/faq)
+- [Cloudflare API — Replace Worker Script Content](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/content/methods/update/) — précise que l’opération remplace le contenu du Worker sans toucher à sa configuration ni à ses métadonnées.

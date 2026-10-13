@@ -274,30 +274,28 @@ test('routes Bitcoin order status to the Bitcoin API rather than Fractal', async
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag and rejects unconfirmed outputs', async () => {
+test('attests only Fractal UTXOs with empty inscription, Rune, and Alkane checks', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
   const scriptPk = '0014' + '11'.repeat(20);
-  const records = ['a', 'b', 'c', 'd'].map((marker, index) => ({
+  const records = ['a', 'b', 'c'].map((marker, index) => ({
     address,
     txid: marker.repeat(64),
     vout: 0,
     satoshi: 10000,
     scriptPk,
-    height: index === 3 ? 0 : 100,
-    isLowFee: index === 0,
-    isOpInRBF: index === 0 || index === 3,
+    height: 100,
+    isLowFee: false,
+    isOpInRBF: false,
     inscriptions: [],
     index,
   }));
   const calls = [];
-  const lowFeeOptions = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     calls.push(url.pathname);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
     if (url.pathname.endsWith('/available-utxo-data')) {
-      lowFeeOptions.push(url.searchParams.get('withLowFee'));
       return Response.json({ code: 0, data: { total: records.length, utxo: records } });
     }
     const pathParts = url.pathname.split('/');
@@ -320,11 +318,7 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     assert.equal(response.status, 200);
     assert.equal(data.utxo.length, 1);
     assert.equal(data.utxo[0].txid, records[0].txid);
-    assert.equal(data.utxo[0].isOpInRBF, true);
-    assert.equal(data.utxo[0].isLowFee, true);
     assert.equal(data.utxo[0].inscriptionsRunesAlkanesChecked, true);
-    assert.deepEqual(lowFeeOptions, ['true']);
-    assert.equal(data.utxo.some(item => item.txid === records[3].txid), false);
     assert.ok(calls.includes(`/v1/indexer/runes/utxo/${records[0].txid}/0/balance`));
     assert.ok(calls.includes(`/v1/indexer/alkanes/utxo/${records[0].txid}/0/balance`));
     assert.equal(calls.includes(`/v1/indexer/alkanes/utxo/${records[1].txid}/0/balance`), false);

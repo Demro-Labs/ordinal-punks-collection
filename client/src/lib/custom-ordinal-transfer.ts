@@ -235,13 +235,13 @@ async function loadIndexedSpendableRefs(
         !/^(?:[a-f0-9]{2})+$/i.test(scriptHex) ||
         !Number.isSafeInteger(item.height) ||
         Number(item.height) <= 0 ||
-        typeof item.isLowFee !== "boolean" ||
-        typeof item.isOpInRBF !== "boolean" ||
+        item.isLowFee === true ||
+        item.isOpInRBF === true ||
         !Array.isArray(item.inscriptions) ||
         item.inscriptions.length !== 0
       ) {
         throw new Error(
-          "UniSat's safe-UTXO response contained an unconfirmed, asset-bearing, or malformed output, or omitted a required safety flag; refusing to spend it."
+          "UniSat's safe-UTXO response contained an unconfirmed, low-fee, asset-bearing, or malformed output; refusing to spend it."
         );
       }
       const key = outpoint(txid, vout);
@@ -369,7 +369,7 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
   selectedInscription: OrdinalLocation;
   ownedInscriptions: OrdinalLocation[];
   feeRateSatVb: number;
-  beforeSign?: (plan: OrdinalTransferPlan) => Promise<boolean | string>;
+  beforeSign?: (plan: OrdinalTransferPlan) => Promise<boolean>;
   beforeBroadcast?: (publicKeyHex: string) => Promise<void>;
 }) {
   const {
@@ -438,8 +438,7 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
     feeRateSatVb,
   });
 
-  const approval = params.beforeSign ? await params.beforeSign(plan) : true;
-  if (approval === false) {
+  if (params.beforeSign && !(await params.beforeSign(plan))) {
     throw new Error(
       "Transfer cancelled before signing; no transaction was signed or broadcast."
     );
@@ -451,26 +450,14 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
     publicKeyHex
   );
 
-  let signedPsbtHex: string;
-  if (typeof approval === "string") {
-    // Mobile callers may obtain this signature from the final review button so
-    // UniSat's signing request is dispatched in the user's direct click handler.
-    signedPsbtHex = approval;
-  } else {
-    try {
-      signedPsbtHex = await provider.signPsbt(plan.psbtHex, {
-        autoFinalized: false,
-        toSignInputs: plan.inputs.map((input, index) => ({
-          index,
-          address: currentAddress,
-          ...(input.spendType === "taproot" ? { useTweakedSigner: true } : {}),
-        })),
-      });
-    } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : String(cause);
-      throw new Error(`UNISAT_PSBT_SIGN_FAILED: ${detail}`);
-    }
-  }
+  const signedPsbtHex = await provider.signPsbt(plan.psbtHex, {
+    autoFinalized: false,
+    toSignInputs: plan.inputs.map((input, index) => ({
+      index,
+      address: currentAddress,
+      ...(input.spendType === "taproot" ? { useTweakedSigner: true } : {}),
+    })),
+  });
   await assertWalletSession(
     provider,
     currentAddress,
