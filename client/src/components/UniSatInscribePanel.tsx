@@ -148,6 +148,7 @@ export function UniSatInscribePanel() {
   const [historySortKey, setHistorySortKey] = useState<HistorySortKey>("date");
   const [historySortDirection, setHistorySortDirection] = useState<"asc" | "desc">("desc");
   const [finalReceipt, setFinalReceipt] = useState<MempoolReceipt | null>(null);
+  const filePickerRef = useRef<HTMLInputElement>(null);
   const paymentReceiptRef = useRef<{ historyKey: string; orderId: string; receipt: MempoolReceipt } | null>(null);
   const totalBytes = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
   const totalInscribed = orderFiles.filter(file => file.inscriptionId).length;
@@ -273,19 +274,6 @@ export function UniSatInscribePanel() {
 
   useEffect(() => { void refreshWallet(); const listener = () => void refreshWallet(); window.unisat?.on?.("accountsChanged", listener); window.unisat?.on?.("chainChanged", listener); return () => { window.unisat?.removeListener?.("accountsChanged", listener); window.unisat?.removeListener?.("chainChanged", listener); }; }, []);
   useEffect(() => {
-    if (!isMobileUniSatDevice()) return;
-    const saved = readActiveMobileOrder();
-    if (!saved) return;
-    setReceipt(saved.receipt);
-    setTxid(saved.txid);
-    setStage(saved.txid || saved.paymentStarted ? "tracking" : "awaiting-approval");
-    setOpen(true);
-    setMessage(saved.txid
-      ? "Reçu mobile restauré avec son TXID. Reprenez le suivi sans relancer de paiement."
-      : saved.paymentStarted ? "Une demande de paiement UniSat avait déjà été ouverte. Vérifiez l’activité du wallet; aucun second paiement ne sera proposé."
-      : "Reçu mobile restauré. Aucun second reçu ne sera créé; vérifiez-le avant de signer.");
-  }, []);
-  useEffect(() => {
     if (!address || !chain?.enum) { setInscriptionHistory([]); setHistoryPage(0); setSelectedHistoryItem(null); setSelectedHistoryBatches([]); return; }
     const key = `fractal-inscription-history:${chain.enum}:${address.toLowerCase()}`;
     const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - HISTORY_RETENTION_MONTHS);
@@ -301,6 +289,7 @@ export function UniSatInscribePanel() {
   }, [address, chain?.enum]);
   const chooseFiles = (next: File[]) => {
     if (receipt) return setMessage("Un reçu existe déjà pour ce lot. Ne modifiez pas les fichiers; utilisez le paiement de ce reçu.");
+    if (isMobileUniSatDevice() && readActiveMobileOrder()) return setMessage("Une commande mobile est sauvegardée. Examinez-la ou effacez son reçu non payé avant d’ajouter des fichiers.");
     if (!next.length) return;
     const combined = [...files, ...next];
     if (combined.length > MAX_FILES) { setMessage(`Maximum ${MAX_FILES} fichiers par commande.`); return; }
@@ -314,8 +303,7 @@ export function UniSatInscribePanel() {
     const mobileUniSat = isMobileUniSatDevice();
     const saved = mobileUniSat ? readActiveMobileOrder() : null;
     if (saved) {
-      setReceipt(saved.receipt); setTxid(saved.txid); setStage(saved.txid || saved.paymentStarted ? "tracking" : "awaiting-approval"); setOpen(true);
-      return setMessage(saved.txid ? "Un paiement mobile existe déjà sous ce TXID. Reprenez le suivi sans repayer." : `La commande mobile ${saved.receipt.orderId} existe déjà. Aucun second paiement ne sera lancé.`);
+      return setMessage("Une commande mobile est sauvegardée. Choisissez « Examiner le reçu mobile » avant toute reprise; aucune nouvelle commande n’a été créée.");
     }
     let createdReceipt: InscribeReceipt | null = null; setMessage(""); setStatus(""); setReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]);
     if (!provider?.getPublicKey) return setMessage(mobileUniSat
@@ -463,9 +451,15 @@ export function UniSatInscribePanel() {
     void handleApprovedPayment(paymentPromise, receipt);
   };
   const close = () => { if (["preparing", "paying"].includes(stage)) return; setOpen(false); if (stage === "tracking") return; setMessage(""); setStatus(""); setStage("idle"); setReceipt(null); setFinalReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]); };
+  const reviewSavedMobileOrder = () => {
+    const saved = readActiveMobileOrder();
+    if (!isMobileUniSatDevice() || !saved) return setMessage("Aucun reçu mobile sauvegardé n’est disponible.");
+    setReceipt(saved.receipt); setTxid(saved.txid); setStage(saved.txid || saved.paymentStarted ? "tracking" : "awaiting-approval");
+    setMessage(saved.txid ? "Reçu mobile affiché à votre demande. Reprenez le suivi sans relancer le paiement." : saved.paymentStarted ? "Reçu affiché à votre demande. Vérifiez l’activité UniSat avant toute autre action; aucun second paiement ne sera lancé." : "Reçu mobile affiché à votre demande. Aucun paiement n’est enregistré comme commencé.");
+  };
   const clearUnpaidMobileReceipt = () => {
     const saved = readActiveMobileOrder();
-    if (!isMobileUniSatDevice() || !receipt || !saved || saved.receipt.orderId !== receipt.orderId || saved.txid || saved.paymentStarted) {
+    if (!isMobileUniSatDevice() || !saved || (receipt && saved.receipt.orderId !== receipt.orderId) || saved.txid || saved.paymentStarted || txid) {
       setMessage("This receipt may have a payment attempt. Check UniSat and resume tracking; it was not cleared.");
       return;
     }
@@ -494,16 +488,20 @@ export function UniSatInscribePanel() {
   };
   const canApprovePayment = Boolean(receipt && (receipt.paymentFeeRate ?? receipt.feeRate) > 0 && receipt.amount > 0 && receipt.payAddress);
   const busy = ["preparing", "paying"].includes(stage);
-  const savedMobileOrder = isMobileUniSatDevice() ? readActiveMobileOrder() : null;
-  const canClearUnpaidMobileReceipt = Boolean(isMobileUniSatDevice() && receipt && stage === "awaiting-approval" && !txid && savedMobileOrder && savedMobileOrder.receipt.orderId === receipt.orderId && !savedMobileOrder.txid && !savedMobileOrder.paymentStarted);
+  const mobileDevice = isMobileUniSatDevice();
+  const savedMobileOrder = mobileDevice ? readActiveMobileOrder() : null;
+  const canClearUnpaidMobileReceipt = Boolean(mobileDevice && savedMobileOrder && (!receipt || savedMobileOrder.receipt.orderId === receipt.orderId) && !savedMobileOrder.txid && !savedMobileOrder.paymentStarted && !txid && !busy);
+  const fileSelectionLocked = busy || stage === "awaiting-approval" || Boolean(mobileDevice && savedMobileOrder);
   return <>
     <button type="button" onClick={() => setOpen(true)} className="inline-flex items-center gap-2 border border-[#d99a54] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63] hover:bg-[#d99a54]/10"><FilePlus2 size={13} /> Inscribe files</button>
     {open && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#07090c]/80 p-4" role="dialog" aria-modal="true" aria-labelledby="inscribe-modal-title"><div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto border border-[#3b434d] bg-[#14191f] p-5 shadow-2xl">
       <div className="flex items-start justify-between gap-4"><div><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#d99a54]">Fractal Bitcoin Ordinals · UniSat approved</p><h2 id="inscribe-modal-title" className="mt-2 font-display text-2xl text-[#f3efe5]">Inscribe files dashboard</h2></div><button type="button" onClick={close} className="p-2 text-[#9ea7b3] hover:text-[#f3efe5]" aria-label="Fermer"><X size={18} /></button></div>
       <p className="mt-2 font-mono text-[10px] leading-5 text-[#7f8b99]">Images, texte, HTML, JSON, SVG, audio, vidéo, PDF et fichiers binaires sont acceptés. Chaque fichier respecte la limite UniSat de 365 KB.</p>
       <div className="mt-5 grid gap-2 sm:grid-cols-4"><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Fichiers</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{files.length} / {MAX_FILES}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Taille totale</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{formatBytes(totalBytes)}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Réseau</p><p className="mt-1 truncate font-mono text-xs text-[#f2bd63]">{chain?.name ?? chain?.enum}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Statut live</p><p className="mt-1 font-mono text-xs text-[#f2bd63]">{status ? describeStatus(status) : "Prêt"}</p></div></div>
-      {canClearUnpaidMobileReceipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]"><p>A saved mobile receipt is locking file selection. Only clear it after checking UniSat and confirming no payment was sent. This removes the receipt from this device; it does not cancel the pending UniSat order.</p><button type="button" onClick={clearUnpaidMobileReceipt} className="mt-2 border border-[#e0b45f]/60 px-3 py-2 underline">I confirmed no payment was sent — clear receipt and choose files</button></div>}
-      <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); chooseFiles(Array.from(event.dataTransfer.files ?? [])); }} className="mt-5 flex cursor-pointer flex-col items-center justify-center border border-dashed border-[#d99a54]/70 bg-[#10151a] px-5 py-8 text-center hover:bg-[#d99a54]/5"><Upload size={22} className="text-[#d99a54]" /><span className="mt-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#d9d3c6]">Déplacer ou ajouter les fichiers à minter</span><span className="mt-2 font-mono text-[10px] text-[#718092]">Maximum {MAX_FILES} fichiers · 365 KB par fichier · sélection multiple</span><input type="file" multiple accept="*/*" className="sr-only" disabled={busy || stage === "awaiting-approval"} onChange={event => chooseFiles(Array.from(event.target.files ?? []))} /></label>
+{mobileDevice && savedMobileOrder && !receipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="status"><p>Un reçu mobile sauvegardé existe. Il ne s’ouvrira pas automatiquement. Examinez-le pour reprendre la commande; si aucun paiement n’a été envoyé, vous pouvez effacer uniquement la copie locale.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={reviewSavedMobileOrder} className="border border-[#e0b45f]/60 px-3 py-2 underline">Examiner le reçu mobile</button>{canClearUnpaidMobileReceipt && <button type="button" onClick={clearUnpaidMobileReceipt} className="border border-[#e0b45f]/60 px-3 py-2 underline">J’ai vérifié : aucun paiement envoyé — effacer le reçu local</button>}</div></div>}
+{canClearUnpaidMobileReceipt && receipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]"><p>Confirmez qu’aucun paiement n’a été envoyé avant de libérer l’ajout de fichiers. Cette action efface le reçu de cet appareil; elle n’annule pas la commande UniSat en attente.</p><button type="button" onClick={clearUnpaidMobileReceipt} className="mt-2 border border-[#e0b45f]/60 px-3 py-2 underline">J’ai vérifié : aucun paiement envoyé — effacer le reçu local</button></div>}
+{mobileDevice && <button type="button" onClick={() => filePickerRef.current?.click()} disabled={fileSelectionLocked} className="mt-5 w-full border border-[#d99a54]/70 bg-[#10151a] px-5 py-4 font-mono text-[11px] uppercase tracking-[0.1em] text-[#d9d3c6] disabled:cursor-not-allowed disabled:opacity-40">Choisir ou ajouter des fichiers depuis le téléphone</button>}
+<label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); chooseFiles(Array.from(event.dataTransfer.files ?? [])); }} className="mt-5 flex cursor-pointer flex-col items-center justify-center border border-dashed border-[#d99a54]/70 bg-[#10151a] px-5 py-8 text-center hover:bg-[#d99a54]/5"><Upload size={22} className="text-[#d99a54]" /><span className="mt-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#d9d3c6]">Déplacer ou ajouter les fichiers à minter</span><span className="mt-2 font-mono text-[10px] text-[#718092]">Maximum {MAX_FILES} fichiers · 365 KB par fichier · sélection multiple</span><input ref={filePickerRef} type="file" multiple accept="*/*" className="sr-only" disabled={fileSelectionLocked} onChange={event => { chooseFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ""; }} /></label>
       {fileLoadProgress.total > 0 && stage === "preparing" && <div className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3" role="status" aria-live="polite"><div className="flex items-center justify-between gap-3 font-mono text-[10px] uppercase text-[#f2bd63]"><span>Chargement des fichiers</span><span>{fileLoadProgress.completed} / {fileLoadProgress.total}</span></div><div className="mt-2 h-1.5 overflow-hidden bg-[#2c323a]"><div className="h-full bg-[#d99a54] transition-[width] duration-150" style={{ width: `${Math.round((fileLoadProgress.completed / fileLoadProgress.total) * 100)}%` }} /></div></div>}
       {files.length > 0 && <div className="mt-4 overflow-hidden border border-[#3b434d] bg-[#10151a]"><div className="flex items-center justify-between border-b border-[#3b434d] px-3 py-2"><span className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#d9d3c6]"><Files size={13} /> File queue</span><button type="button" disabled={busy || Boolean(receipt)} onClick={() => setFiles([])} className="font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">Vider</button></div><div className="max-h-48 overflow-y-auto">{files.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 border-b border-[#2c323a] px-3 py-2 last:border-b-0"><div className="min-w-0"><p className="truncate font-mono text-[10px] text-[#d9d3c6]">{index + 1}. {file.name}</p><p className="font-mono text-[9px] text-[#718092]">{fileKind(file)} · {formatBytes(file.size)}</p></div><button type="button" disabled={busy || Boolean(receipt)} onClick={() => removeFile(index)} className="shrink-0 font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">Retirer</button></div>)}</div></div>}
       <p className="mt-4 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">Fee rate dynamique · cible 30 min · consensus côté serveur = maximum des recommandations Mempool et UniSat. Si les estimateurs sont indisponibles, aucune valeur manuelle ancienne n’est utilisée. UniSat affiche toujours le coût final avant votre signature.</p>
