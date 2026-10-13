@@ -359,7 +359,20 @@ export function UniSatInscribePanel() {
     if (!receipt) return setMessage("Aucune commande d’inscription n’est en attente d’approbation.");
     if (!provider?.getChain) return setMessage("UniSat ne permet pas l’approbation du paiement depuis ce navigateur.");
     if (mobileUniSat) {
-      if (!provider.signPsbt || !mobilePaymentPlan) return setMessage("Le PSBT mobile n’est pas prêt. Relancez uniquement sa préparation; aucun paiement n’a été lancé.");
+      const approveNativeMobilePayment = () => {
+        if (!provider.sendBitcoin || !Number.isSafeInteger(receipt.feeRate) || receipt.feeRate < 1) {
+          setMessage("UniSat mobile ne fournit ni signPsbt ni sendBitcoin natif dans ce navigateur. Ouvrez la page dans le navigateur intégré UniSat à jour; aucun paiement n’a été lancé.");
+          return;
+        }
+        setStage("paying");
+        setMobilePaymentSignTimedOut(false);
+        setMessage(`Approbation native envoyée à UniSat depuis ce clic. Vérifiez ${receipt.amount.toLocaleString()} sats vers l’adresse du reçu avant de confirmer.`);
+        const paymentPromise = sendNativeUniSatBitcoinPayment(provider, receipt.payAddress, receipt.amount, receipt.feeRate);
+        void handleApprovedPayment(paymentPromise, receipt);
+      };
+      // Some UniSat Mobile builds expose sendBitcoin but do not expose a working signPsbt bridge.
+      // Keep the fallback inside this click handler so the wallet retains mobile user activation.
+      if (!provider.signPsbt || !mobilePaymentPlan) return approveNativeMobilePayment();
       if (chain?.enum !== receipt.chain || address !== receipt.walletAddress) return setMessage("Le compte ou réseau UniSat a changé depuis le prévol. Repréparez la commande; aucun paiement n’a été lancé.");
       if (mobilePaymentPlan.network !== receipt.chain || mobilePaymentPlan.walletAddress !== receipt.walletAddress || mobilePaymentPlan.paymentAddress !== receipt.payAddress || mobilePaymentPlan.paymentSats !== receipt.amount) return setMessage("Le PSBT ne correspond plus au reçu visible. Préparez à nouveau le PSBT avant toute signature.");
       setStage("paying");
@@ -372,6 +385,7 @@ export function UniSatInscribePanel() {
         signingResponse = provider.signPsbt(mobilePaymentPlan.psbtHex, getInscribePaymentSignOptions(mobilePaymentPlan, receipt.walletAddress));
       } catch (error) {
         const canceled = isWalletCancellation(error);
+        if (!canceled && provider.sendBitcoin) return approveNativeMobilePayment();
         setStage("awaiting-approval");
         setMessage(canceled
           ? `Approbation annulée dans UniSat. Détail : ${walletErrorMessage(error)}`
