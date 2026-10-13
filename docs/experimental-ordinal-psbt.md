@@ -20,6 +20,10 @@ Si l’issue de la diffusion est incertaine, une nouvelle tentative est verrouil
 
 Le panneau Inscribe File utilise le Worker Cloudflare pour créer et suivre les commandes UniSat Inscribe API V5; la clé `UNISAT_API_KEY` reste côté Worker et n’est pas exposée au navigateur. Le même endpoint est utilisé sur desktop et mobile. Avant le paiement, l’application vérifie le réseau de la commande, valide l’adresse de paiement avec le Mempool correspondant et récupère les frais courants. L’application ouvre `sendBitcoin(payAddress, amount, { feeRate })` dans UniSat Desktop ou Mobile; le wallet construit, présente, signe et diffuse le paiement après approbation. Le TXID retourné est contrôlé puis suivi dans Mempool. Ce paiement en BTC est distinct du transfert de l’inscription. La transaction de paiement est suivie dans Mempool et l’état de la commande est interrogé auprès du Worker.
 
+### Envoi FB depuis le dashboard UniSat desktop et mobile
+
+Le dashboard propose le même formulaire de transfert FB dans UniSat Desktop et dans le navigateur intégré UniSat Mobile. Le site valide le montant décimal et le convertit exactement en satoshis, vérifie l’adresse sur Mempool Fractal, affiche le taux `sat/vB` live, puis appelle `sendBitcoin(destinataire, satoshis, { feeRate })`. Un transfert FB exige `FRACTAL_BITCOIN_MAINNET`; si UniSat est sur un autre réseau, l’utilisateur peut demander le changement explicite via `switchChain`, lorsque cette méthode est exposée, ou sélectionner manuellement Fractal dans le wallet. UniSat présente toujours la transaction et recueille l’approbation. Le site contrôle le TXID retourné, enregistre un reçu local et suit l’état dans Mempool Fractal. Les changements de compte et de réseau réactualisent l’interface. Ce transfert de FB est distinct du transfert d’Ordinal et n’utilise pas la clé Cloudflare.
+
 ## Rôle de chaque service
 
 - **Cloudflare Worker** : proxy UniSat Inscribe V5 et proxy UniSat Inscribe V5; il ne signe aucune transaction.

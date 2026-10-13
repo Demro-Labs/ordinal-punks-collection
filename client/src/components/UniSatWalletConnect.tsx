@@ -7,7 +7,7 @@ import type { OrdinalTransferPlan } from "@/lib/ordinal-transfer-psbt";
 import { getUniSatInscriptionUrl, isTransferOutcomeUnclear } from "@/lib/transfer-safety";
 import { shouldShowDustRelayGuidance } from "@/lib/wallet-error";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
-import { MobileFbSendPanel } from "@/components/MobileFbSendPanel";
+import { UniSatFbSendPanel } from "@/components/UniSatFbSendPanel";
 
 type UniSatChain = {
   enum?: string;
@@ -1109,8 +1109,8 @@ export function UniSatWalletConnect() {
           <div className="mt-3 grid gap-2 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] text-[#9ea7b3] sm:grid-cols-2"><p className="break-all sm:col-span-2"><span className="text-[#718092]">Connected address:</span> {address}</p><p><span className="text-[#718092]">Confirmed:</span> {formatSats(walletDashboard?.confirmed)}</p><p><span className="text-[#718092]">Unconfirmed:</span> {formatSats(walletDashboard?.unconfirmed)}</p><p><span className="text-[#718092]">Unavailable:</span> {formatSats(walletDashboard?.unavailable)}</p><p><span className="text-[#718092]">Last refresh:</span> {walletDashboard ? new Date(walletDashboard.refreshedAt).toLocaleTimeString() : "Loading…"}</p>{walletDashboard?.publicKey && <p className="break-all sm:col-span-2"><span className="text-[#718092]">Public key:</span> {walletDashboard.publicKey}</p>}</div>
         </section>
       )}
-      {isMobileBrowser() && connectedToFractal && (
-        <MobileFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} />
+      {connectedToFractal && (
+        <UniSatFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} />
       )}
       {connectedToFractal && inscriptions.length > 0 && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-gallery-title">
