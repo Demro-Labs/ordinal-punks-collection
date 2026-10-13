@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { sendNativeUniSatBitcoinPayment, sendNativeUniSatInscription } from "./native-unisat-actions";
+import { ensureNativeInscriptionFeeBalance, sendNativeUniSatBitcoinPayment, sendNativeUniSatInscription } from "./native-unisat-actions";
 
 const TXID = "a".repeat(64);
 const INSCRIPTION_ID = `${"b".repeat(64)}i0`;
+const INSCRIPTION_LOCATION = `${"c".repeat(64)}:0:0`;
 
 describe("native UniSat wallet actions", () => {
   it("uses UniSat native sendInscription and returns its transaction ID", async () => {
@@ -23,6 +24,30 @@ describe("native UniSat wallet actions", () => {
     await expect(sendNativeUniSatBitcoinPayment({ sendBitcoin }, "bc1qpayment", 12_345, 4))
       .resolves.toBe(TXID);
     expect(sendBitcoin).toHaveBeenCalledWith("bc1qpayment", 12_345, { feeRate: 4 });
+  });
+
+  it("accepts sufficient fee balance only with a separate spendable UTXO", async () => {
+    const getBalanceV2 = vi.fn().mockResolvedValue({ available: 10_000 });
+    const getBitcoinUtxos = vi.fn().mockResolvedValue([{ txid: "d".repeat(64), vout: 1 }]);
+    await expect(ensureNativeInscriptionFeeBalance(
+      { getBalanceV2, getBitcoinUtxos }, "FRACTAL_BITCOIN_MAINNET", { location: INSCRIPTION_LOCATION }, 3,
+    )).resolves.toBeUndefined();
+  });
+
+  it("rejects when only the inscription outpoint is available for fees", async () => {
+    const getBitcoinUtxos = vi.fn().mockResolvedValue([{ txid: "c".repeat(64), vout: 0 }]);
+    await expect(ensureNativeInscriptionFeeBalance(
+      { getBitcoinUtxos }, "FRACTAL_BITCOIN_MAINNET", { location: INSCRIPTION_LOCATION }, 3,
+    )).rejects.toThrow(/No separate spendable FB fee UTXO/);
+  });
+
+  it("rejects a low mobile fee balance before UniSat transfer can be invoked", async () => {
+    const getBalanceV2 = vi.fn().mockResolvedValue({ available: 500 });
+    const getBitcoinUtxos = vi.fn();
+    await expect(ensureNativeInscriptionFeeBalance(
+      { getBalanceV2, getBitcoinUtxos }, "BITCOIN_MAINNET", { location: INSCRIPTION_LOCATION }, 3,
+    )).rejects.toThrow(/Insufficient spendable BTC/);
+    expect(getBitcoinUtxos).not.toHaveBeenCalled();
   });
 
   it.each([
