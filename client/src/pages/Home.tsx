@@ -630,6 +630,16 @@ export default function Home() {
               "Les clés privées restent dans UniSat; le parcours desktop n’est pas modifié.",
             ],
           },
+          {
+            title: "Dernière mise à jour — parcours mobile",
+            text: "La mise à jour récente renforce les opérations UniSat sur téléphone sans modifier la version desktop : une preuve de propriété doit précéder l’approbation de transaction et le portefeuille est relu après une opération réussie.",
+            bullets: [
+              "Transfert ordinal ou envoi FB : signer BIP-322 avant l’ouverture de la signature transactionnelle.",
+              "Inscribe : examiner le reçu → confirmer le paiement → signer BIP-322 → ouvrir séparément l’approbation UniSat.",
+              "Après confirmation, le solde est actualisé à partir des données live du wallet; la sélection mobile conserve le sélecteur de fichier natif et la revue du reçu.",
+              "Le flux desktop opérationnel reste inchangé.",
+            ],
+          },
         ]}
       />
       <div
