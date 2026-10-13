@@ -60,7 +60,14 @@ Après tout rollback, relancer les quatre requêtes de la section 1, puis vérif
 
 - L’étape de vérification post-déploiement utilise un POST Inscribe `text/plain` qui doit être rejeté `415` avant tout accès fournisseur ou création de commande. **Ne jamais tester en créant une vraie commande ou en diffusant une transaction.**
 
-## 5. Prévention et limites connues
+## 5. Preuve de propriété mobile (BIP-322)
+
+- Les clients mobiles Punks et Pokédex appellent `/api/auth/ownership/challenge`, puis `/api/auth/ownership/verify`, après revue du reçu et avant toute approbation UniSat de transaction. La preuve est liée au site, à l’adresse, au réseau et au contexte de l’opération; elle expire rapidement et n’ouvre aucune session.
+- Ces routes valident le contrôle de la clé, mais ne signent, ne diffusent et n’autorisent jamais un paiement ou transfert. L’approbation transactionnelle UniSat reste séparée et obligatoire. Le parcours desktop n’utilise pas ces gardes.
+- Après tout changement du Worker, exécuter `node --test workers/fractal-ordinal-live.test.mjs` et `bash scripts/smoke-worker-runtime.sh`. Le smoke vérifie les challenges Bitcoin et Fractal pour les deux sites, sans demander de signature ni créer de transaction.
+- La vérification Production appelle les mêmes challenges sans signature, puis contrôle leur préflight CORS. Ne pas utiliser un vrai wallet ou une vraie opération pour vérifier ces routes.
+
+## 6. Prévention et limites connues
 
 - Toute modification passe par le dry-run Wrangler, le démarrage `workerd` local, les contrôles CI et les vérifications post-déploiement Punks/Pokedex.
 - Le même Worker sert les deux sites; ne pas créer un Worker `production` séparé ni une deuxième base `AuthStorage` depuis le dépôt Pokedex.

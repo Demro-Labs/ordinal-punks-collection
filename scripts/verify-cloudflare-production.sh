@@ -37,13 +37,24 @@ for site in punks pokedex; do
   echo "Anonymous auth session verified for ${site}."
 done
 
+test_address='bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l'
+for site in punks pokedex; do
+  for network in BITCOIN_MAINNET FRACTAL_BITCOIN_MAINNET; do
+    payload="$(jq -n --arg site "${site}" --arg address "${test_address}" --arg network "${network}" '{site:$site,address:$address,network:$network}')"
+    response="$(curl -fsS --retry 2 --max-time 20 -X POST "${BASE_URL}/api/auth/ownership/challenge" \
+      -H 'Origin: https://demro-labs.github.io' -H 'Content-Type: application/json' --data-binary "${payload}")"
+    printf '%s' "${response}" | jq -e --arg site "${site}" --arg network "${network}" '.site == $site and .network == $network and .action == "ownership-proof-only" and (.message | contains("does not authorize, sign, or broadcast a payment or transfer"))' >/dev/null
+    echo "Ownership-only challenge verified for ${site} on ${network}."
+  done
+done
+
 for origin in "https://demro-labs.github.io" "https://punksgallery-mlwdpcwl.manus.space"; do
   headers_file="${TMP_DIR}/preflight.headers"
   status="$(curl -sS --max-time 15 -D "${headers_file}" -o /dev/null -w '%{http_code}' -X OPTIONS \
     -H "Origin: ${origin}" \
     -H 'Access-Control-Request-Method: POST' \
     -H 'Access-Control-Request-Headers: content-type' \
-    "${BASE_URL}/api/auth/challenge" || true)"
+    "${BASE_URL}/api/auth/ownership/challenge" || true)"
   [[ "${status}" == "204" ]] || { echo "Auth preflight for ${origin} returned HTTP ${status}." >&2; exit 1; }
   grep -Fqi "access-control-allow-origin: ${origin}" "${headers_file}" || { echo "Auth preflight did not allow ${origin}." >&2; exit 1; }
   echo "Auth CORS preflight verified for ${origin}."
