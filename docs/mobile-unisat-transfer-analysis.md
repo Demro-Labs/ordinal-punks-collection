@@ -4,13 +4,13 @@
 **Dépôt analysé :** `Demro-Labs/ordinal-punks-collection`
 **Commit `main` examiné :** `687b79c2e20a6d1a10cfc19e839292be37e8db05` — fusion de la PR #113, « Pause failing UniSat mobile transfers on Fractal ».
 
-## Addendum — correctif natif préparé sur branche, 13 octobre 2026
+## Addendum — voie Cloudflare mobile en préparation, 13 octobre 2026
 
-Après le constat que le parcours PSBT Fractal ne fonctionnait pas sur mobile, le code de la branche de travail a été basculé vers les méthodes wallet natives UniSat : `sendInscription` pour les transferts et `sendBitcoin` pour le paiement d’inscription de fichier. L’application valide au préalable les adresses auprès de Mempool, puis suit le TXID après l’approbation et la diffusion du wallet. Elle échoue sans fallback si la méthode native n’est pas exposée. La construction, la signature et la diffusion de la transaction relèvent de l’écran UniSat; Mempool fournit validation d’adresse, estimation de frais et suivi, pas une approbation pré-signature.
+Le parcours natif `sendInscription` a été essayé sur mobile et a renvoyé l’erreur `Cannot read property 'toAddress' of undefined`; il ne doit pas être réutilisé pour le transfert Ordinal Fractal. La branche `fix/mobile-cloudflare-ordinal-transfer-20261013` réactive pour **Fractal mobile seulement** le constructeur PSBT testé : Worker Cloudflare pour les UTXO de frais vérifiés, revue exacte dans le site, signature UniSat `signPsbt`, vérification de la transaction signée puis soumission à Fractal Mempool. Le parcours desktop reste natif et inchangé; le parcours Inscribe File conserve le Worker V5 et le paiement natif `sendBitcoin`.
 
-Les modules PSBT expérimentaux restent isolés des composants mobiles actifs. Les tests hors ligne, le typecheck et le build passent sur les deux dépôts; aucun appareil réel, signature, UTXO réel ni diffusion mainnet n’a été utilisé. Cet addendum décrit le travail local préparé et ne signifie pas que la branche est déjà fusionnée ou publiée.
+Les tests hors ligne, le typecheck et le build passent sur les deux dépôts. Aucun appareil réel, signature, UTXO réel ni diffusion mainnet n’a été utilisé; un essai UniSat Mobile sur l’appareil ciblé reste requis. Cet addendum décrit le correctif local en cours et ne signifie pas que les branches sont déjà fusionnées ou publiées. Voir aussi [`experimental-ordinal-psbt.md`](experimental-ordinal-psbt.md) pour le flux actif proposé.
 
-## État final après correctifs fusionnés
+## État final historique après correctifs de l’analyse initiale
 
 Les constats et recommandations historiques ci-dessous décrivent l’état initial du dépôt; ils sont supersédés par les changements fusionnés dans les PR [#117](https://github.com/Demro-Labs/ordinal-punks-collection/pull/117) et [#118](https://github.com/Demro-Labs/ordinal-punks-collection/pull/118). Pour corriger l’échec `toAddress` sur Fractal mobile, le site remplace maintenant, **uniquement dans le navigateur intégré UniSat Mobile sur Fractal Bitcoin**, l’appel natif `sendInscription` par un parcours PSBT avec `signPsbt`. L’écran de revue affiche l’inscription, le destinataire, les sorties, le taux et le total des frais; après approbation UniSat, le site valide le réseau, les sorties et les signatures avant de diffuser la transaction vérifiée vers Mempool Fractal. Le transfert Bitcoin mobile et les autres chemins restent inchangés.
 
