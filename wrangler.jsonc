@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "fractal-ordinal-live",
+  "main": "workers/fractal-ordinal-live.js",
+  // L’API Cloudflare actuelle renvoie une date vide; son défaut effectif est 2021-11-02.
+  // La figer évite de basculer silencieusement vers la date courante lors du premier deploy Wrangler.
+  "compatibility_date": "2021-11-02",
+  "workers_dev": true,
+  "upload_source_maps": false,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AUTH_STORAGE",
+        "class_name": "AuthStorage",
+      },
+    ],
+  },
+  "exports": {
+    "AuthStorage": {
+      "type": "durable-object",
+      "storage": "sqlite",
+    },
+  },
+}
