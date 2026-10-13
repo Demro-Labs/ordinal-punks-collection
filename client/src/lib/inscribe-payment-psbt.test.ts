@@ -97,7 +97,7 @@ describe("mobile inscription payment PSBT", () => {
     const result = await broadcastSignedInscribePayment({ signedPsbtHex, plan, provider: fixture.provider });
     expect(result.txid).toMatch(/^[a-f0-9]{64}$/);
     expect(fixture.getBroadcasts()).toBe(1);
-    expect(getInscribePaymentSignOptions(plan, WALLET_ADDRESS).toSignInputs).toEqual([{ index: 0, address: WALLET_ADDRESS }]);
+    expect(getInscribePaymentSignOptions(plan, WALLET_ADDRESS).toSignInputs).toEqual([{ index: 0, address: WALLET_ADDRESS, publicKey: PUBLIC_KEY_HEX }]);
   });
 
   it("never broadcasts if the user-signed PSBT changes the receipt amount", async () => {

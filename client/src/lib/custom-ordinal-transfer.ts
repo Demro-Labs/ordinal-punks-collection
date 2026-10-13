@@ -463,6 +463,7 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
         toSignInputs: plan.inputs.map((input, index) => ({
           index,
           address: currentAddress,
+          publicKey: publicKeyHex,
           ...(input.spendType === "taproot" ? { useTweakedSigner: true } : {}),
         })),
       });
