@@ -235,8 +235,8 @@ async function loadIndexedSpendableRefs(
         !/^(?:[a-f0-9]{2})+$/i.test(scriptHex) ||
         !Number.isSafeInteger(item.height) ||
         Number(item.height) <= 0 ||
-        item.isLowFee === true ||
-        item.isOpInRBF === true ||
+        item.isLowFee !== false ||
+        typeof item.isOpInRBF !== "boolean" ||
         !Array.isArray(item.inscriptions) ||
         item.inscriptions.length !== 0
       ) {
