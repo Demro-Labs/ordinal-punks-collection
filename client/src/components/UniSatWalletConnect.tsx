@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, Wallet } from "lucide-react";
 import { fetchLiveInscription, type LiveInscription } from "@/lib/live";
 import { describeFeeSources, getRecommendedFeeEstimate } from "@/lib/mempool";
-import { ensureNativeInscriptionFeeBalance, requiresVerifiedPsbtForMobileFractalTransfer, sendNativeUniSatInscription } from "@/lib/native-unisat-actions";
+import { ensureNativeInscriptionFeeBalance, getMobileUtxoErrorGuidance, requiresVerifiedPsbtForMobileFractalTransfer, sendNativeUniSatInscription } from "@/lib/native-unisat-actions";
 import type { OrdinalTransferPlan } from "@/lib/ordinal-transfer-psbt";
 import { getUniSatInscriptionUrl, isTransferOutcomeUnclear } from "@/lib/transfer-safety";
 import { shouldShowDustRelayGuidance } from "@/lib/wallet-error";
@@ -960,9 +960,10 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       setConfirmed(false);
       setDestination("");
     } catch (cause) {
-      const message = describeWalletError(cause, "Transfer was cancelled or failed in UniSat.");
+      const mobileUtxoGuidance = isMobileUniSatDevice() ? getMobileUtxoErrorGuidance(cause, "ordinal-transfer") : null;
+      const message = mobileUtxoGuidance?.message ?? describeWalletError(cause, "Transfer was cancelled or failed in UniSat.");
       const signingFailedBeforeSiteBroadcast = cause instanceof Error && cause.message.includes("UNISAT_PSBT_SIGN_FAILED:");
-      if (!signingFailedBeforeSiteBroadcast && (isTransferOutcomeUnclear(cause) || isTransferOutcomeUnclear(message))) {
+      if (!signingFailedBeforeSiteBroadcast && !mobileUtxoGuidance?.definitelyNotBroadcast && (isTransferOutcomeUnclear(cause) || isTransferOutcomeUnclear(message))) {
         setTransferOutcomeUnclear(true);
         setTransferOutcomeChecked(false);
         try {
@@ -1006,7 +1007,8 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       transferPromise = sendNativeUniSatInscription(provider, ready.recipient, ready.selected.inscriptionId, ready.feeRate);
     } catch (cause) {
       setTransferBusy(false);
-      setTransferError(describeWalletError(cause, "Transfer was cancelled or failed in UniSat."));
+      const mobileUtxoGuidance = getMobileUtxoErrorGuidance(cause, "ordinal-transfer");
+      setTransferError(mobileUtxoGuidance?.message ?? describeWalletError(cause, "Transfer was cancelled or failed in UniSat."));
       return;
     }
     void transferPromise
@@ -1023,8 +1025,9 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         setDestination("");
       })
       .catch(cause => {
-        const message = describeWalletError(cause, "Transfer was cancelled or failed in UniSat.");
-        if (isTransferOutcomeUnclear(cause) || isTransferOutcomeUnclear(message)) {
+        const mobileUtxoGuidance = getMobileUtxoErrorGuidance(cause, "ordinal-transfer");
+        const message = mobileUtxoGuidance?.message ?? describeWalletError(cause, "Transfer was cancelled or failed in UniSat.");
+        if (!mobileUtxoGuidance?.definitelyNotBroadcast && (isTransferOutcomeUnclear(cause) || isTransferOutcomeUnclear(message))) {
           setTransferOutcomeUnclear(true);
           setTransferOutcomeChecked(false);
           try { window.sessionStorage.setItem(TRANSFER_OUTCOME_UNCLEAR_SESSION_KEY, "1"); } catch { /* in-memory lock remains active */ }

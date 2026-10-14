@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { canUseMobileNativePaymentFallback, ensureNativeInscriptionFeeBalance, requiresVerifiedPsbtForMobileFractalTransfer, sendNativeUniSatBitcoinPayment, sendNativeUniSatInscription } from "./native-unisat-actions";
+import { canUseMobileNativePaymentFallback, ensureNativeInscriptionFeeBalance, getMobileUtxoErrorGuidance, requiresVerifiedPsbtForMobileFractalTransfer, sendNativeUniSatBitcoinPayment, sendNativeUniSatInscription } from "./native-unisat-actions";
 
 const TXID = "a".repeat(64);
 const INSCRIPTION_ID = `${"b".repeat(64)}i0`;
@@ -85,5 +85,27 @@ describe("native UniSat wallet actions", () => {
     const sendBitcoin = vi.fn().mockResolvedValue({});
     await expect(sendNativeUniSatBitcoinPayment({ sendBitcoin }, "bc1qpayment", 1000, 2))
       .rejects.toThrow(/Check UniSat activity and Mempool before retrying/);
+  });
+
+  it("explains a proven pre-broadcast ordinal UTXO failure without claiming a transaction was sent", () => {
+    const guidance = getMobileUtxoErrorGuidance(
+      new Error("Insufficient compatible non-inscription UTXOs to fund the safe inscription output, network fee, and non-dust change. No transaction was signed or broadcast."),
+      "ordinal-transfer",
+    );
+    expect(guidance?.definitelyNotBroadcast).toBe(true);
+    expect(guidance?.message).toContain("UTXO de frais sûrs insuffisants");
+    expect(guidance?.message).toContain("Aucune transaction n’a été signée ni diffusée");
+  });
+
+  it("gives Inscribe payment guidance but preserves uncertainty for a generic wallet balance refusal", () => {
+    const guidance = getMobileUtxoErrorGuidance({ message: "Insufficient balance for transaction" }, "inscribe-payment");
+    expect(guidance?.definitelyNotBroadcast).toBe(false);
+    expect(guidance?.message).toContain("Garde le reçu existant");
+    expect(guidance?.message).toContain("vérifie UniSat et Mempool avant de réessayer");
+  });
+
+  it("ignores cancellation and unrelated errors", () => {
+    expect(getMobileUtxoErrorGuidance(new Error("User rejected the request"), "fb-transfer")).toBeNull();
+    expect(getMobileUtxoErrorGuidance(new Error("Network unavailable"), "fb-transfer")).toBeNull();
   });
 });
