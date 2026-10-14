@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CheckCircle2, ExternalLink, FilePlus2, Files, ShieldCheck, Upload, X } from "lucide-react";
 import { describeFeeSources, getRecommendedFeeEstimate, trackMempoolTransaction, validateMempoolAddress, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
-import { sendNativeUniSatBitcoinPayment } from "@/lib/native-unisat-actions";
+import { getMobileUtxoErrorGuidance, sendNativeUniSatBitcoinPayment } from "@/lib/native-unisat-actions";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 
 const API_BASE = "https://fractal-ordinal-live.servostar23.workers.dev";
@@ -442,6 +442,17 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
         setMessage(`Le paiement a déjà été diffusé sous le TXID ${returnedPaymentTxid}. Ne payez pas une seconde fois. Erreur du suivi de l’inscription : ${detail}`);
         return;
       }
+      const mobileUtxoGuidance = isMobileUniSatDevice() ? getMobileUtxoErrorGuidance(error, "inscribe-payment") : null;
+      if (mobileUtxoGuidance && !canceled) {
+        if (mobileUtxoGuidance.definitelyNotBroadcast) {
+          saveActiveMobileOrder(activeReceipt, "", false);
+          setStage("awaiting-approval");
+        } else {
+          setStage("tracking");
+        }
+        setMessage(`${mobileUtxoGuidance.message} Détail UniSat : ${detail}`);
+        return;
+      }
       if (canceled && isMobileUniSatDevice()) saveActiveMobileOrder(activeReceipt, "", false);
       const mayHaveBeenSent = paymentReturned || !canceled;
       setStage(mayHaveBeenSent ? "tracking" : "awaiting-approval");
@@ -476,9 +487,12 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     } catch (error) {
       if (isMobileUniSatDevice()) saveActiveMobileOrder(receipt, "", false);
       setStage("awaiting-approval");
+      const mobileUtxoGuidance = isMobileUniSatDevice() ? getMobileUtxoErrorGuidance(error, "inscribe-payment") : null;
       setMessage(isWalletCancellation(error)
         ? `Approbation annulée dans UniSat. Aucun paiement n’a été confirmé. Détail : ${walletErrorMessage(error)}`
-        : `UniSat n’a pas pu ouvrir sendBitcoin. Vérifiez l’activité du wallet avant de réessayer. Détail : ${walletErrorMessage(error)}`);
+        : mobileUtxoGuidance
+          ? `${mobileUtxoGuidance.message} Détail UniSat : ${walletErrorMessage(error)}`
+          : `UniSat n’a pas pu ouvrir sendBitcoin. Vérifiez l’activité du wallet avant de réessayer. Détail : ${walletErrorMessage(error)}`);
       return;
     }
     void handleApprovedPayment(paymentPromise, receipt);

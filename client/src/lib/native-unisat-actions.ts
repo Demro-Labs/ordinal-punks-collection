@@ -27,6 +27,40 @@ export function canUseMobileNativePaymentFallback(gate: MobileNativePaymentFallb
 
 const TXID_PATTERN = /^[a-f0-9]{64}$/i;
 
+export type MobileUtxoOperation = "ordinal-transfer" | "fb-transfer" | "inscribe-payment";
+export type MobileUtxoErrorGuidance = { message: string; definitelyNotBroadcast: boolean };
+
+function getWalletErrorText(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const value = error as { message?: unknown; shortMessage?: unknown; reason?: unknown };
+    for (const detail of [value.message, value.shortMessage, value.reason]) {
+      if (typeof detail === "string" && detail.trim()) return detail.trim();
+    }
+  }
+  return "";
+}
+
+/** Turn insufficient mobile wallet funds into actionable guidance without guessing transaction status. */
+export function getMobileUtxoErrorGuidance(error: unknown, operation: MobileUtxoOperation): MobileUtxoErrorGuidance | null {
+  const detail = getWalletErrorText(error);
+  const insufficient = /(?:insufficient|not enough|insuffisant|insuffisante|insuffisants|insuffisantes)/i.test(detail)
+    && /(?:utxos?|funds?|balance|sats?|fees?|solde|fonds)/i.test(detail);
+  if (!insufficient) return null;
+
+  const definitelyNotBroadcast = /no transaction was signed or broadcast|no transaction was broadcast|no (?:payment|transfer) was sent|aucune transaction n[’']a été (?:signée|diffusée)/i.test(detail);
+  const action = operation === "ordinal-transfer"
+    ? "UTXO de frais sûrs insuffisants pour ce transfert Ordinal. L’Ordinal doit rester hors des fonds utilisés pour les frais. Ajoute des sats du réseau affiché dans un UTXO distinct, confirmé et sans inscription."
+    : operation === "fb-transfer"
+      ? "Solde dépensable insuffisant pour le montant FB et les frais. Ajoute des sats FB dans un UTXO distinct, confirmé et sans inscription sur l’adresse Fractal."
+      : "Solde dépensable insuffisant pour payer ce reçu Inscribe et les frais. Ajoute des sats dans un UTXO distinct, confirmé et sans inscription sur la même adresse et le même réseau. Garde le reçu existant; ne crée pas une nouvelle commande.";
+  const outcome = definitelyNotBroadcast
+    ? "Aucune transaction n’a été signée ni diffusée."
+    : "Le wallet n’a pas confirmé l’issue; vérifie UniSat et Mempool avant de réessayer, car la transaction pourrait déjà avoir été envoyée.";
+  return { message: `${action} ${outcome}`, definitelyNotBroadcast };
+}
+
 /** UniSat Mobile's native Fractal inscription transfer is not used; preserve desktop and Bitcoin behavior. */
 export function requiresVerifiedPsbtForMobileFractalTransfer(isMobileUniSat: boolean, networkEnum?: string) {
   return isMobileUniSat && networkEnum === "FRACTAL_BITCOIN_MAINNET";

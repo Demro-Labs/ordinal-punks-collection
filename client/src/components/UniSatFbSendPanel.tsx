@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, Loader2, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { describeFeeSources, getRecommendedFeeEstimate, trackMempoolTransaction, validateMempoolAddress, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
 import { normalizeUniSatTxid, parseFbAmountToSats } from "@/lib/native-fb-send";
+import { getMobileUtxoErrorGuidance } from "@/lib/native-unisat-actions";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 
@@ -128,7 +129,7 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
       paymentPromise = provider.sendBitcoin(to, sats, { feeRate });
     } catch (cause) {
       setSending(false);
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(getMobileUtxoErrorGuidance(cause, "fb-transfer")?.message ?? (cause instanceof Error ? cause.message : String(cause)));
       return;
     }
     void Promise.resolve(paymentPromise)
@@ -154,11 +155,12 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
         const message = cause instanceof Error ? cause.message : String(cause);
         const code = cause && typeof cause === "object" ? (cause as { code?: unknown }).code : undefined;
         const cancelled = code === 4001 || /user (rejected|denied)|cancelled by user|request rejected/i.test(message);
-        if (!cancelled) {
+        const mobileUtxoGuidance = getMobileUtxoErrorGuidance(cause, "fb-transfer");
+        if (!cancelled && !mobileUtxoGuidance?.definitelyNotBroadcast) {
           setOutcomeUnclear(true);
           try { sessionStorage.setItem(`${storageKey(address)}:unclear`, "1"); } catch { /* in-memory safety lock remains */ }
         }
-        setError(message || "L’envoi UniSat a échoué ou a été refusé.");
+        setError(mobileUtxoGuidance?.message ?? (message || "L’envoi UniSat a échoué ou a été refusé."));
       })
       .finally(() => setSending(false));
   };
@@ -211,11 +213,12 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
       const message = cause instanceof Error ? cause.message : String(cause);
       const code = cause && typeof cause === "object" ? (cause as { code?: unknown }).code : undefined;
       const cancelled = code === 4001 || /user (rejected|denied)|cancelled by user|request rejected/i.test(message);
-      if (walletPromptOpened && !cancelled) {
+      const mobileUtxoGuidance = isMobileUniSatDevice() ? getMobileUtxoErrorGuidance(cause, "fb-transfer") : null;
+      if (walletPromptOpened && !cancelled && !mobileUtxoGuidance?.definitelyNotBroadcast) {
         setOutcomeUnclear(true);
         try { sessionStorage.setItem(`${storageKey(address)}:unclear`, "1"); } catch { /* in-memory safety lock remains */ }
       }
-      setError(message || "L’envoi UniSat a échoué ou a été refusé.");
+      setError(mobileUtxoGuidance?.message ?? (message || "L’envoi UniSat a échoué ou a été refusé."));
     } finally { setSending(false); }
   };
 
