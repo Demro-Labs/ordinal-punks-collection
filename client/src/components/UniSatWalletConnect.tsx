@@ -10,6 +10,7 @@ import { isMobileUniSatDevice } from "@/lib/mobile-context";
 import { UniSatFbSendPanel } from "@/components/UniSatFbSendPanel";
 import { UniSatWalletAuth } from "@/components/UniSatWalletAuth";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
+import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 
 type UniSatChain = {
   enum?: string;
@@ -1344,7 +1345,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
               Load more inscriptions ({inscriptionCursor} of {inscriptionTotal})
             </button>
           )}
-          {transferError && <p className="mt-3 font-mono text-[10px] text-[#e08b7d]" role="alert">{transferError}</p>}
+          <UniSatMobileOpenDappLink site={site} walletMethodAvailable={typeof window.unisat?.sendInscription === "function"} methodLabel="sendInscription" />{transferError && <p className="mt-3 font-mono text-[10px] text-[#e08b7d]" role="alert">{transferError}</p>}
           {txid && (
             <>
               <p className="mt-3 break-all font-mono text-[10px] text-[#70c7a0]" role="status">

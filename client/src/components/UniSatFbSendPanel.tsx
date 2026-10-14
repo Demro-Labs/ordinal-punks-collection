@@ -4,6 +4,7 @@ import { describeFeeSources, getRecommendedFeeEstimate, trackMempoolTransaction,
 import { normalizeUniSatTxid, parseFbAmountToSats } from "@/lib/native-fb-send";
 import { getMobileUtxoErrorGuidance } from "@/lib/native-unisat-actions";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
+import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 
 const NETWORK = "FRACTAL_BITCOIN_MAINNET";
@@ -223,6 +224,7 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
   };
 
   return <section className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3 sm:p-4" aria-labelledby="fb-send-title">
+    <UniSatMobileOpenDappLink site={site} walletMethodAvailable={typeof provider?.sendBitcoin === "function"} methodLabel="sendBitcoin" />
     <div className="flex items-start gap-2"><Send size={15} className="mt-0.5 shrink-0 text-[#f2bd63]" /><div><p className="font-mono text-[9px] uppercase tracking-[0.15em] text-[#d99a54]">Dashboard UniSat · Fractal Bitcoin</p><h3 id="fb-send-title" className="mt-1 font-display text-lg text-[#f3efe5]">Envoyer des FB</h3><p className="mt-1 font-mono text-[10px] leading-5 text-[#9ea7b3]">Disponible sur desktop et mobile. UniSat affiche la transaction finale et exige ton approbation. Un FB vaut 100 000 000 sats.</p></div></div>
     {!connected ? <div className="mt-3 border border-[#3b434d] p-3 font-mono text-[10px] text-[#e0b45f]" role="status"><p>FB transfers require the Fractal Bitcoin mainnet network. {provider?.switchChain ? "You can request the network switch below." : "Select this network in UniSat, then try again."}</p>{provider?.switchChain && <button type="button" onClick={() => void onSwitchToFractal()} disabled={walletBusy || sending} className="mt-2 min-h-10 border border-[#d99a54] px-3 py-2 uppercase tracking-[0.08em] text-[#f2bd63] disabled:opacity-40">Switch UniSat to Fractal Bitcoin</button>}</div> : <>
       <div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#9ea7b3]">Recipient address<input value={recipient} onChange={event => { setRecipient(event.target.value); setConfirmed(false); }} disabled={isMobileUniSatDevice() && sending} autoComplete="off" spellCheck={false} inputMode="text" maxLength={100} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0d10] px-3 py-2 font-mono text-xs normal-case text-[#f3efe5] outline-none focus:border-[#d99a54]" placeholder="Adresse Fractal Bitcoin" /></label><label className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#9ea7b3]">Amount to send (FB)<input value={amount} onChange={event => { setAmount(event.target.value); setConfirmed(false); }} disabled={isMobileUniSatDevice() && sending} autoComplete="off" inputMode="decimal" type="text" className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0d10] px-3 py-2 font-mono text-xs normal-case text-[#f3efe5] outline-none focus:border-[#d99a54]" placeholder="0.00000000" /></label></div>
