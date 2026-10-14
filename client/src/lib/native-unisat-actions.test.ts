@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({ getSpendableUtxos: vi.fn() }));
+vi.mock("@/lib/mempool", () => ({ getSpendableUtxos: mocks.getSpendableUtxos }));
 import { canUseMobileNativePaymentFallback, ensureNativeInscriptionFeeBalance, getMobileUtxoErrorGuidance, requiresVerifiedPsbtForMobileFractalTransfer, sendNativeUniSatBitcoinPayment, sendNativeUniSatInscription } from "./native-unisat-actions";
 
 const TXID = "a".repeat(64);
@@ -47,30 +49,32 @@ describe("native UniSat wallet actions", () => {
     expect(sendBitcoin).toHaveBeenCalledWith("bc1qpayment", 12_345, { feeRate: 4 });
   });
 
-  it("accepts sufficient fee balance only with a separate spendable UTXO", async () => {
-    const getBalanceV2 = vi.fn().mockResolvedValue({ available: 10_000 });
-    const getBitcoinUtxos = vi.fn().mockResolvedValue([{ txid: "d".repeat(64), vout: 1 }]);
+  beforeEach(() => mocks.getSpendableUtxos.mockReset());
+  it("accepts a Worker-verified, confirmed, uninscribed fee UTXO large enough for the transfer", async () => {
+    mocks.getSpendableUtxos.mockResolvedValue([{ address: "bc1qwallet", txid: "d".repeat(64), vout: 1, satoshi: 2_000 }]);
     await expect(ensureNativeInscriptionFeeBalance(
-      { getBalanceV2, getBitcoinUtxos }, "FRACTAL_BITCOIN_MAINNET", { location: INSCRIPTION_LOCATION }, 3,
+      "BITCOIN_MAINNET", "bc1qwallet", { location: INSCRIPTION_LOCATION }, 3,
     )).resolves.toBeUndefined();
+    expect(mocks.getSpendableUtxos).toHaveBeenCalledWith("BITCOIN_MAINNET", "bc1qwallet", 1_650);
   });
-
-  it("rejects when only the inscription outpoint is available for fees", async () => {
-    const getBitcoinUtxos = vi.fn().mockResolvedValue([{ txid: "c".repeat(64), vout: 0 }]);
+  it("rejects the Ordinal outpoint itself even if the safe service erroneously returns it", async () => {
+    mocks.getSpendableUtxos.mockResolvedValue([{ address: "bc1qwallet", txid: "c".repeat(64), vout: 0, satoshi: 20_000 }]);
     await expect(ensureNativeInscriptionFeeBalance(
-      { getBitcoinUtxos }, "FRACTAL_BITCOIN_MAINNET", { location: INSCRIPTION_LOCATION }, 3,
-    )).rejects.toThrow(/No separate spendable FB fee UTXO/);
+      "BITCOIN_MAINNET", "bc1qwallet", { location: INSCRIPTION_LOCATION }, 3,
+    )).rejects.toThrow(/The Ordinal must remain outside fee funds.*No transaction was signed or broadcast/);
   });
-
-  it("rejects a low mobile fee balance before UniSat transfer can be invoked", async () => {
-    const getBalanceV2 = vi.fn().mockResolvedValue({ available: 500 });
-    const getBitcoinUtxos = vi.fn();
+  it("blocks before wallet approval if no single confirmed, uninscribed fee UTXO is sufficient", async () => {
+    mocks.getSpendableUtxos.mockResolvedValue([{ address: "bc1qwallet", txid: "d".repeat(64), vout: 1, satoshi: 1_000 }]);
     await expect(ensureNativeInscriptionFeeBalance(
-      { getBalanceV2, getBitcoinUtxos }, "BITCOIN_MAINNET", { location: INSCRIPTION_LOCATION }, 3,
-    )).rejects.toThrow(/Insufficient spendable BTC/);
-    expect(getBitcoinUtxos).not.toHaveBeenCalled();
+      "BITCOIN_MAINNET", "bc1qwallet", { location: INSCRIPTION_LOCATION }, 3,
+    )).rejects.toThrow(/Add at least 650 more BTC sats.*confirmed.*no inscription.*No transaction was signed or broadcast/);
   });
-
+  it("fails closed with explicit funding guidance when no safe UTXOs are returned", async () => {
+    mocks.getSpendableUtxos.mockResolvedValue([]);
+    await expect(ensureNativeInscriptionFeeBalance(
+      "FRACTAL_BITCOIN_MAINNET", "bc1qwallet", { location: INSCRIPTION_LOCATION }, 3,
+    )).rejects.toThrow(/Fractal Bitcoin.*confirmed.*no inscription.*No transaction was signed or broadcast/);
+  });
   it.each([
     ["missing native inscription method", () => sendNativeUniSatInscription({}, "bc1qrecipient", INSCRIPTION_ID, 2)],
     ["malformed inscription ID", () => sendNativeUniSatInscription({ sendInscription: vi.fn() }, "bc1qrecipient", "bad", 2)],
@@ -97,6 +101,12 @@ describe("native UniSat wallet actions", () => {
     expect(guidance?.message).toContain("No transaction was signed or broadcast");
   });
 
+  it("preserves the exact mobile fee amount, network and destination address", () => {
+    const detail = "Insufficient safe fee UTXO for this Ordinal transfer on Bitcoin. Add 650 more BTC sats to bc1qwallet. No transaction was signed or broadcast.";
+    const guidance = getMobileUtxoErrorGuidance(new Error(detail), "ordinal-transfer");
+    expect(guidance?.definitelyNotBroadcast).toBe(true);
+    expect(guidance?.message).toBe(detail);
+  });
   it("gives Inscribe payment guidance but preserves uncertainty for a generic wallet balance refusal", () => {
     const guidance = getMobileUtxoErrorGuidance({ message: "Insufficient balance for transaction" }, "inscribe-payment");
     expect(guidance?.definitelyNotBroadcast).toBe(false);

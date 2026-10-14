@@ -885,7 +885,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       setMempoolFeeRate(feeRate);
       let returnedTxid: string | undefined;
       if (useNativeInscription) {
-        await ensureNativeInscriptionFeeBalance(provider, activeNetworkEnum, { location: selected.location }, feeRate);
+        if (isMobileUniSatDevice()) await ensureNativeInscriptionFeeBalance(activeNetworkEnum, address, { location: selected.location }, feeRate);
         if (isMobileUniSatDevice()) {
           setMobileNativeTransferReady({ contextKey: ownershipContextKey, address, networkEnum: activeNetworkEnum, recipient, selected, feeRate, liveBefore });
           setTransferError("Pre-check complete. Tap again to open the separate UniSat transaction approval.");

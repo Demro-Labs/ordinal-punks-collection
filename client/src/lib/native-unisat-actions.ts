@@ -1,9 +1,9 @@
+import { getSpendableUtxos } from "@/lib/mempool";
 export type UniSatTxResult = string | { txid?: string };
 
 type UniSatBalance = { confirmed?: number; unconfirmed?: number; total?: number };
 type UniSatBalanceV2 = { available?: number; unavailable?: number; total?: number };
 
-type FeeUtxo = { txid?: unknown; vout?: unknown };
 
 export type NativeUniSatProvider = {
   sendInscription?: (recipient: string, inscriptionId: string, options?: { feeRate?: number }) => Promise<UniSatTxResult>;
@@ -50,6 +50,9 @@ export function getMobileUtxoErrorGuidance(error: unknown, operation: MobileUtxo
   if (!insufficient) return null;
 
   const definitelyNotBroadcast = /no transaction was signed or broadcast|no transaction was broadcast|no (?:payment|transfer) was sent|aucune transaction n[’']a été (?:signée|diffusée)/i.test(detail);
+  if (operation === "ordinal-transfer" && /Insufficient safe fee UTXO for this Ordinal transfer/i.test(detail)) {
+    return { message: detail, definitelyNotBroadcast };
+  }
   const action = operation === "ordinal-transfer"
     ? "Insufficient safe fee UTXOs for this Ordinal transfer. The Ordinal must remain outside fee funds. Add sats from the displayed network in a separate confirmed UTXO with no inscription."
     : operation === "fb-transfer"
@@ -74,10 +77,10 @@ function requireTxid(result: UniSatTxResult, action: string) {
   return txid.toLowerCase();
 }
 
-/** Desktop-style fee-UTXO preflight; call only from the mobile transfer path. */
+/** Mobile-only preflight: require one confirmed, verified asset-free fee UTXO separate from the Ordinal. */
 export async function ensureNativeInscriptionFeeBalance(
-  provider: NativeUniSatProvider,
   networkEnum: string,
+  address: string,
   inscription: { location?: string },
   feeRate: number,
 ) {
@@ -85,58 +88,31 @@ export async function ensureNativeInscriptionFeeBalance(
     ? "Bitcoin"
     : networkEnum === "FRACTAL_BITCOIN_MAINNET" ? "Fractal Bitcoin" : "selected network";
   const feeAsset = networkEnum === "BITCOIN_MAINNET" ? "BTC" : "FB";
-  // Reserve a conservative 350 vB for the inscription transfer plus a non-dust change output.
+  // Conservative estimate for the transfer plus a non-dust change output.
   const minimumFeeBalance = Math.max(1_000, Math.ceil(feeRate * 350) + 600);
-  let availableBalance: number | null = null;
-
-  if (provider.getBalanceV2) {
-    const balance = await provider.getBalanceV2();
-    const available = Number(balance.available ?? 0);
-    if (!Number.isFinite(available) || available <= 0) {
-      throw new Error(`UniSat reports no spendable ${feeAsset} fee balance on ${networkLabel}. Add a separate, non-dust ${feeAsset} UTXO before transferring.`);
-    }
-    availableBalance = available;
-    if (available < minimumFeeBalance) {
-      const additional = Math.ceil(minimumFeeBalance - available);
-      throw new Error(`Insufficient spendable ${feeAsset} on ${networkLabel} for fees and non-dust change. UniSat reports ${Math.floor(available)} sats available; add about ${additional} more sats (estimated minimum ${minimumFeeBalance} sats at ${feeRate} sat/vB).`);
-    }
+  const location = typeof inscription.location === "string" ? inscription.location : "";
+  const inscriptionOutpoint = location.match(/^([a-f0-9]{64}):(\d+)(?::\d+)?$/i);
+  let verifiedUtxos: Awaited<ReturnType<typeof getSpendableUtxos>>;
+  try {
+    // The Worker verifies confirmation, no inscriptions, no Runes/Alkanes, and current spendability.
+    verifiedUtxos = await getSpendableUtxos(networkEnum, address, minimumFeeBalance);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `Could not verify a safe fee UTXO on ${networkLabel} for ${address}. Add at least ${minimumFeeBalance.toLocaleString()} ${feeAsset} sats to this address in a separate confirmed UTXO with no inscription, Runes, or Alkanes, then check again. No transaction was signed or broadcast. Verification detail: ${detail}`,
+    );
   }
-
-  if (provider.getBitcoinUtxos) {
-    const result = await provider.getBitcoinUtxos(0, 100);
-    const utxos: unknown[] = Array.isArray(result)
-      ? result
-      : result && typeof result === "object" && "list" in result && Array.isArray(result.list)
-        ? result.list
-        : [];
-    const location = typeof inscription.location === "string" ? inscription.location : "";
-    const inscriptionOutpoint = location.match(/^([a-f0-9]{64}):(\d+)(?::\d+)?$/i);
-    const spendableUtxos = inscriptionOutpoint
-      ? utxos.filter(item => {
-          if (!item || typeof item !== "object") return false;
-          const utxo = item as FeeUtxo;
-          return typeof utxo.txid === "string"
-            && typeof utxo.vout === "number"
-            && `${utxo.txid}:${utxo.vout}`.toLowerCase() !== `${inscriptionOutpoint[1]}:${inscriptionOutpoint[2]}`.toLowerCase();
-        })
-      : utxos;
-    if (spendableUtxos.length === 0) {
-      throw new Error(`No separate spendable ${feeAsset} fee UTXO is available on ${networkLabel}. The inscription output itself is reserved for the Ordinal and cannot also pay network fees; add another non-dust UTXO.`);
-    }
-    return;
-  }
-
-  if (availableBalance !== null) return;
-  if (!provider.getBalance) return;
-  const balance = await provider.getBalance();
-  const confirmed = Number(balance.confirmed ?? 0);
-  const unconfirmed = Number(balance.unconfirmed ?? 0);
-  const total = Number(balance.total ?? confirmed + unconfirmed);
-  if (!Number.isFinite(total) || total <= 0) {
-    throw new Error(`Add a separate, spendable ${feeAsset} UTXO to this UniSat wallet to pay the ${networkLabel} network fee before transferring.`);
+  const feeUtxos = verifiedUtxos.filter(utxo =>
+    !inscriptionOutpoint || `${utxo.txid}:${utxo.vout}`.toLowerCase() !== `${inscriptionOutpoint[1]}:${inscriptionOutpoint[2]}`.toLowerCase(),
+  );
+  const largestSafeUtxo = feeUtxos.reduce((largest, utxo) => Math.max(largest, utxo.satoshi), 0);
+  if (largestSafeUtxo < minimumFeeBalance) {
+    const additional = minimumFeeBalance - largestSafeUtxo;
+    throw new Error(
+      `Insufficient safe fee UTXO for this Ordinal transfer on ${networkLabel}. The Ordinal must remain outside fee funds. Add at least ${additional.toLocaleString()} more ${feeAsset} sats to ${address} so one separate UTXO reaches ${minimumFeeBalance.toLocaleString()} sats; it must be confirmed and contain no inscription, Runes, or Alkanes. No transaction was signed or broadcast.`,
+    );
   }
 }
-
 /** Ask UniSat itself to construct, review, sign, and broadcast an inscription transfer. */
 export async function sendNativeUniSatInscription(
   provider: NativeUniSatProvider,
