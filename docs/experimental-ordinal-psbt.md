@@ -4,15 +4,15 @@
 
 ### Transfert ordinal Bitcoin et Fractal sur desktop et mobile
 
-Le transfert ordinal utilise `sendInscription` natif UniSat sur desktop et mobile si le wallet l’expose; sinon, il utilise le parcours PSBT vérifié comme solution de repli.
+Le desktop conserve le transfert natif UniSat `sendInscription` si le wallet l’expose, avec repli sur le PSBT vérifié si cette API manque. Sur UniSat Mobile et Fractal Bitcoin mainnet, le site utilise toujours le PSBT vérifié — même si le provider expose `sendInscription` — car la méthode native mobile a renvoyé une réponse incomplète (`toAddress` indéfini) dans le cas rapporté. Le transfert natif Bitcoin mobile reste inchangé; le PSBT vérifié sert de repli si l’API native manque.
 
 1. Mempool valide l’adresse destinataire et fournit le taux de frais courant.
 2. Le Worker Cloudflare récupère la liste de UTXO dépensables UniSat avec vérification explicite des inscriptions, Runes et Alkanes; le client recoupe ces UTXO avec ceux du wallet et contrôle les données de transaction auprès du Mempool du réseau sélectionné.
-3. Si `sendInscription` existe, UniSat construit, fait approuver et diffuse le transfert ordinal nativement; l’application contrôle le TXID et suit la transaction.
-4. Si cette méthode n’est pas exposée, l’application affiche la revue PSBT exacte du réseau, de l’inscription, du destinataire, des sorties, de la monnaie et des frais. Après approbation, le client vérifie le PSBT signé et le compte, la clé et le réseau avant de soumettre la transaction au Mempool sélectionné.
+3. Sur desktop (et sur Bitcoin mobile si l’API native est exposée), UniSat construit, fait approuver et diffuse le transfert ordinal avec `sendInscription`; l’application contrôle le TXID et suit la transaction.
+4. Sur Fractal mobile, l’application affiche la revue PSBT exacte du réseau, de l’inscription, du destinataire, des sorties, de la monnaie et des frais. Une action explicite ouvre `signPsbt` dans UniSat. Après approbation, le client vérifie le PSBT signé et le compte, la clé et le réseau avant de soumettre la transaction au Mempool Fractal.
 5. Le Mempool sélectionné valide/rejette la soumission et diffuse la transaction PSBT; l’application suit le TXID.
 
-Sur mobile, la page doit toujours être ouverte dans le navigateur intégré UniSat. Sur desktop, l’extension UniSat peut utiliser `sendInscription`; si l’API manque, le wallet doit exposer `getBitcoinUtxos`, `getPublicKey`, `signPsbt` et `getAccounts` pour le repli PSBT.
+Sur mobile, la page doit toujours être ouverte dans le navigateur intégré UniSat. Le chemin Fractal mobile requiert `getBitcoinUtxos`, `getPublicKey`, `signPsbt` et `getAccounts`; si l’une de ces méthodes manque, le site bloque le transfert au lieu de retenter le chemin natif. Sur desktop, le comportement `sendInscription` est conservé; le wallet doit exposer ces mêmes méthodes uniquement si l’API native n’est pas disponible et que le repli PSBT est requis.
 
 Si l’issue de la diffusion est incertaine, une nouvelle tentative est verrouillée jusqu’à vérification de l’activité UniSat et de Mempool. Aucun PSBT n’est signé ou diffusé si la revue exacte est refusée ou si les contrôles d’actifs, de compte ou de réseau échouent.
 
@@ -27,7 +27,7 @@ Le dashboard propose le même formulaire de transfert FB dans UniSat Desktop et 
 ## Rôle de chaque service
 
 - **Cloudflare Worker** : proxy UniSat Inscribe V5 et proxy UniSat Inscribe V5; il ne signe aucune transaction.
-- **UniSat Desktop ou Mobile** : exécute `sendBitcoin` pour le paiement Inscribe; pour les transferts ordinaux, exécute `sendInscription` si disponible, sinon signe le PSBT vérifié.
+- **UniSat Desktop ou Mobile** : exécute `sendBitcoin` pour le paiement Inscribe; pour les transferts ordinaux, desktop conserve `sendInscription` si disponible, tandis que Fractal mobile signe le PSBT vérifié après la revue explicite. Bitcoin mobile conserve le chemin natif s’il est disponible.
 - **Mempool** : valide les adresses, fournit les frais, vérifie les données des entrées, accepte ou rejette la soumission de transaction, la diffuse et en suit les confirmations. L’API publique ne constitue pas une approbation protocolaire préalable à la signature; les écrans de revue du site et d’UniSat restent essentiels.
 
 ## Vérification
@@ -40,6 +40,7 @@ Le binding Worker `UNISAT_API_KEY` est un secret serveur. Sa valeur ne doit jama
 
 ## Références
 
+- [Stratégie Gemini partagée pour UniSat et Fractal Bitcoin](https://share.gemini.google/qNr4Tdf7Amrv)
 - [UniSat Wallet API](https://docs.unisat.io/developer-support/open-api-documentation/unisat-wallet)
 - [Connexion à UniSat Mobile](https://docs.unisat.io/developer-support/open-api-documentation/unisat-wallet/connect-with-unisat-mobile-wallet)
 - [UniSat Inscribe API V5](https://github.com/unisat-wallet/unisat-dev-docs/blob/master/open-api/auto-generated/docs/inscribe-v5.md)

@@ -27,6 +27,11 @@ export function canUseMobileNativePaymentFallback(gate: MobileNativePaymentFallb
 
 const TXID_PATTERN = /^[a-f0-9]{64}$/i;
 
+/** UniSat Mobile's native Fractal inscription transfer is not used; preserve desktop and Bitcoin behavior. */
+export function requiresVerifiedPsbtForMobileFractalTransfer(isMobileUniSat: boolean, networkEnum?: string) {
+  return isMobileUniSat && networkEnum === "FRACTAL_BITCOIN_MAINNET";
+}
+
 function requireTxid(result: UniSatTxResult, action: string) {
   const txid = typeof result === "string" ? result : result?.txid;
   if (!txid || !TXID_PATTERN.test(txid)) {

@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
-import { canUseMobileNativePaymentFallback, ensureNativeInscriptionFeeBalance, sendNativeUniSatBitcoinPayment, sendNativeUniSatInscription } from "./native-unisat-actions";
+import { canUseMobileNativePaymentFallback, ensureNativeInscriptionFeeBalance, requiresVerifiedPsbtForMobileFractalTransfer, sendNativeUniSatBitcoinPayment, sendNativeUniSatInscription } from "./native-unisat-actions";
 
 const TXID = "a".repeat(64);
 const INSCRIPTION_ID = `${"b".repeat(64)}i0`;
 const INSCRIPTION_LOCATION = `${"c".repeat(64)}:0:0`;
 
 describe("native UniSat wallet actions", () => {
+  it("requires a verified PSBT only for UniSat Mobile on Fractal mainnet", () => {
+    expect(requiresVerifiedPsbtForMobileFractalTransfer(true, "FRACTAL_BITCOIN_MAINNET")).toBe(true);
+    expect(requiresVerifiedPsbtForMobileFractalTransfer(false, "FRACTAL_BITCOIN_MAINNET")).toBe(false);
+    expect(requiresVerifiedPsbtForMobileFractalTransfer(true, "BITCOIN_MAINNET")).toBe(false);
+    expect(requiresVerifiedPsbtForMobileFractalTransfer(true, undefined)).toBe(false);
+  });
+
   it("uses UniSat native sendInscription and returns its transaction ID", async () => {
     const sendInscription = vi.fn().mockResolvedValue({ txid: TXID });
     await expect(sendNativeUniSatInscription({ sendInscription }, "bc1qrecipient", INSCRIPTION_ID, 3))

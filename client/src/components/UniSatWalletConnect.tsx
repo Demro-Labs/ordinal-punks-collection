@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, Wallet } from "lucide-react";
 import { fetchLiveInscription, type LiveInscription } from "@/lib/live";
 import { describeFeeSources, getRecommendedFeeEstimate } from "@/lib/mempool";
-import { ensureNativeInscriptionFeeBalance, sendNativeUniSatInscription } from "@/lib/native-unisat-actions";
+import { ensureNativeInscriptionFeeBalance, requiresVerifiedPsbtForMobileFractalTransfer, sendNativeUniSatInscription } from "@/lib/native-unisat-actions";
 import type { OrdinalTransferPlan } from "@/lib/ordinal-transfer-psbt";
 import { getUniSatInscriptionUrl, isTransferOutcomeUnclear } from "@/lib/transfer-safety";
 import { shouldShowDustRelayGuidance } from "@/lib/wallet-error";
@@ -832,10 +832,17 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       setTransferError("Select an inscription loaded from your connected UniSat wallet.");
       return;
     }
-    const useNativeInscription = Boolean(provider.sendInscription);
+    const mobileFractalRequiresPsbt = requiresVerifiedPsbtForMobileFractalTransfer(isMobileUniSatDevice(), chain?.enum);
+    const useNativeInscription = Boolean(provider.sendInscription) && !mobileFractalRequiresPsbt;
     const useVerifiedPsbt = isSupportedMainnet(chain?.enum) && !useNativeInscription;
-    if (!isSupportedMainnet(chain?.enum) || (useVerifiedPsbt && (!provider.getBitcoinUtxos || !provider.getPublicKey || !provider.getAccounts || !provider.signPsbt))) {
+    if (!isSupportedMainnet(chain?.enum)) {
       setTransferError("This UniSat version exposes neither sendInscription nor all verified PSBT methods required for this network. Update UniSat; no transfer was signed or broadcast.");
+      return;
+    }
+    if (useVerifiedPsbt && (!provider.getBitcoinUtxos || !provider.getPublicKey || !provider.getAccounts || !provider.signPsbt)) {
+      setTransferError(mobileFractalRequiresPsbt
+        ? "Fractal mobile ordinal transfers require UniSat's verified PSBT methods (getBitcoinUtxos, getPublicKey, getAccounts, signPsbt). Update UniSat; no transfer was signed or broadcast."
+        : "This UniSat version exposes neither sendInscription nor all verified PSBT methods required for this network. Update UniSat; no transfer was signed or broadcast.");
       return;
     }
     if (!recipient || recipient.length > 100) {
@@ -1029,7 +1036,8 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
 
   const connectedToFractal = Boolean(address && isSupportedMainnet(chain?.enum));
   const currentNetwork = getMempoolConfig(chain?.enum);
-  const nativeInscriptionTransfer = Boolean(window.unisat?.sendInscription);
+  const nativeInscriptionTransfer = Boolean(window.unisat?.sendInscription)
+    && !requiresVerifiedPsbtForMobileFractalTransfer(isMobileUniSatDevice(), chain?.enum);
   const verifiedOrdinalTransfer = isSupportedMainnet(chain?.enum) && !nativeInscriptionTransfer;
   const walletPageSize = 10;
   const normalizedInscriptionSearch = inscriptionSearch.trim().toLowerCase();
