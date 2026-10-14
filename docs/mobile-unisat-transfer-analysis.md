@@ -6,11 +6,11 @@
 **Dépôt analysé :** `Demro-Labs/ordinal-punks-collection`
 **Commit `main` examiné :** `687b79c2e20a6d1a10cfc19e839292be37e8db05` — fusion de la PR #113, « Pause failing UniSat mobile transfers on Fractal ».
 
-## Addendum — voie Cloudflare mobile en préparation, 13 octobre 2026
+## Addendum — parcours PSBT vérifié sur Fractal mobile, 14 octobre 2026
 
-Le parcours natif `sendInscription` a été essayé sur mobile et a renvoyé l’erreur `Cannot read property 'toAddress' of undefined`; il ne doit pas être réutilisé pour le transfert Ordinal Fractal. La branche `fix/mobile-cloudflare-ordinal-transfer-20261013` réactive pour **Fractal mobile seulement** le constructeur PSBT testé : Worker Cloudflare pour les UTXO de frais vérifiés, revue exacte dans le site, signature UniSat `signPsbt`, vérification de la transaction signée puis soumission à Fractal Mempool. Le parcours desktop reste natif et inchangé; le parcours Inscribe File conserve le Worker V5 et le paiement natif `sendBitcoin`.
+Le transfert natif `sendInscription` a renvoyé sur mobile l’erreur `Cannot read property 'toAddress' of undefined`; il n’est donc pas utilisé pour les Ordinaux Fractal depuis UniSat Mobile, même si le provider expose cette méthode. Les deux sites imposent maintenant le parcours PSBT vérifié sur **Fractal mobile seulement** : UTXO de frais attestés par le Worker Cloudflare, contrôle des sorties, aperçu exact dans le site, action explicite qui déclenche `signPsbt`, vérification de la transaction signée, puis soumission au Mempool Fractal. Si UniSat n’expose pas les méthodes PSBT requises, le site bloque l’action et n’essaie pas le chemin natif.
 
-Les tests hors ligne, le typecheck et le build passent sur les deux dépôts. Aucun appareil réel, signature, UTXO réel ni diffusion mainnet n’a été utilisé; un essai UniSat Mobile sur l’appareil ciblé reste requis. Cet addendum décrit le correctif local en cours et ne signifie pas que les branches sont déjà fusionnées ou publiées. Voir aussi [`experimental-ordinal-psbt.md`](experimental-ordinal-psbt.md) pour le flux actif proposé.
+Le transfert natif desktop reste inchangé. Le comportement natif mobile Bitcoin et le paiement `sendBitcoin` du panneau Inscribe File restent également inchangés. Les tests hors ligne, le typecheck et le build peuvent vérifier le code, mais aucun appareil réel, signature, UTXO réel ni diffusion mainnet n’est utilisé; un essai UniSat Mobile sur l’appareil ciblé reste nécessaire avant toute diffusion. Voir aussi [`experimental-ordinal-psbt.md`](experimental-ordinal-psbt.md) pour le flux détaillé.
 
 ## État final historique après correctifs de l’analyse initiale
 
