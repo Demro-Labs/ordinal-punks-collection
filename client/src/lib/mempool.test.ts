@@ -89,7 +89,7 @@ describe("getSpendableUtxos", () => {
     }));
 
     await expect(getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 5_000))
-      .rejects.toThrow(/page cohérente d’UTXO sûrs/i);
+      .rejects.toThrow(/consistent safe-UTXO page/i);
   });
 
   it("emits the typed shortage signal only when no verified UTXOs cover the minimum", async () => {
