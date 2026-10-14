@@ -51,13 +51,13 @@ export function getMobileUtxoErrorGuidance(error: unknown, operation: MobileUtxo
 
   const definitelyNotBroadcast = /no transaction was signed or broadcast|no transaction was broadcast|no (?:payment|transfer) was sent|aucune transaction n[’']a été (?:signée|diffusée)/i.test(detail);
   const action = operation === "ordinal-transfer"
-    ? "UTXO de frais sûrs insuffisants pour ce transfert Ordinal. L’Ordinal doit rester hors des fonds utilisés pour les frais. Ajoute des sats du réseau affiché dans un UTXO distinct, confirmé et sans inscription."
+    ? "Insufficient safe fee UTXOs for this Ordinal transfer. The Ordinal must remain outside fee funds. Add sats from the displayed network in a separate confirmed UTXO with no inscription."
     : operation === "fb-transfer"
-      ? "Solde dépensable insuffisant pour le montant FB et les frais. Ajoute des sats FB dans un UTXO distinct, confirmé et sans inscription sur l’adresse Fractal."
-      : "Solde dépensable insuffisant pour payer ce reçu Inscribe et les frais. Ajoute des sats dans un UTXO distinct, confirmé et sans inscription sur la même adresse et le même réseau. Garde le reçu existant; ne crée pas une nouvelle commande.";
+      ? "Insufficient spendable balance for the FB amount and fees. Add FB sats in a separate confirmed UTXO with no inscription on the Fractal address."
+      : "Insufficient spendable balance to pay this Inscribe receipt and fees. Add sats in a separate confirmed UTXO with no inscription on the same address and network. Keep the existing receipt; do not create a new order.";
   const outcome = definitelyNotBroadcast
-    ? "Aucune transaction n’a été signée ni diffusée."
-    : "Le wallet n’a pas confirmé l’issue; vérifie UniSat et Mempool avant de réessayer, car la transaction pourrait déjà avoir été envoyée.";
+    ? "No transaction was signed or broadcast."
+    : "The wallet did not confirm the outcome; check UniSat and Mempool before retrying because the transaction may already have been sent.";
   return { message: `${action} ${outcome}`, definitelyNotBroadcast };
 }
 

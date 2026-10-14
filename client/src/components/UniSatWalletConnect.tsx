@@ -677,7 +677,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         const liveAfter = await fetchLiveInscription(inscriptionId, controller.signal, networkEnum, true);
         if (run !== trackingRunRef.current) return;
         setFinalReceipt(current => current && current.txid === transactionId
-          ? { ...current, status: "confirmed", message: "Transaction confirmée on-chain. Données live actualisées.", checkedAt: new Date().toISOString(), liveAfter }
+          ? { ...current, status: "confirmed", message: "Transaction confirmed on-chain. Données live actualisées.", checkedAt: new Date().toISOString(), liveAfter }
           : current);
         return;
       } catch {
@@ -689,7 +689,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     }
     if (run !== trackingRunRef.current) return;
     setFinalReceipt(current => current && current.txid === transactionId
-      ? { ...current, status: "confirmed", message: "Transaction confirmée on-chain. Les données UniSat live restent indisponibles; la confirmation Mempool est conservée.", checkedAt: new Date().toISOString() }
+      ? { ...current, status: "confirmed", message: "Transaction confirmed on-chain. Les données UniSat live restent indisponibles; la confirmation Mempool est conservée.", checkedAt: new Date().toISOString() }
       : current);
   };
 
@@ -701,7 +701,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     setMempoolNetwork(config.label);
     setMempoolBlockHeight(null);
     setMempoolExplorerUrl(`${config.explorer}${encodeURIComponent(transactionId)}`);
-    setFinalReceipt({ txid: transactionId, network: config.label, status: "checking", message: "Recherche de la transaction dans Mempool…", blockHeight: null, explorerUrl: `${config.explorer}${encodeURIComponent(transactionId)}`, checkedAt: new Date().toISOString(), liveBefore });
+    setFinalReceipt({ txid: transactionId, network: config.label, status: "checking", message: "Searching for the transaction in Mempool…", blockHeight: null, explorerUrl: `${config.explorer}${encodeURIComponent(transactionId)}`, checkedAt: new Date().toISOString(), liveBefore });
 
     for (let attempt = 0; attempt < 180; attempt += 1) {
       if (run !== trackingRunRef.current) return;
@@ -718,7 +718,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
             setMempoolStatus("confirmed");
             setMempoolMessage("Transaction confirmed on-chain.");
             setMempoolBlockHeight(typeof status.block_height === "number" ? status.block_height : null);
-            setFinalReceipt(current => current ? { ...current, status: "confirmed", message: liveBefore ? "Transaction confirmée on-chain. Synchronisation des données UniSat en cours…" : "Transaction confirmée on-chain.", blockHeight: typeof status.block_height === "number" ? status.block_height : null, checkedAt: new Date().toISOString() } : current);
+            setFinalReceipt(current => current ? { ...current, status: "confirmed", message: liveBefore ? "Transaction confirmed on-chain. Synchronisation des données UniSat en cours…" : "Transaction confirmed on-chain.", blockHeight: typeof status.block_height === "number" ? status.block_height : null, checkedAt: new Date().toISOString() } : current);
             if (liveBefore) void refreshConfirmedLiveData(transactionId, liveBefore.inscriptionId, networkEnum ?? FRACTAL_MAINNET, run);
             return;
           }
@@ -735,7 +735,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         if (run !== trackingRunRef.current) return;
         setMempoolStatus("error");
         setMempoolMessage("Mempool is temporarily unavailable; retrying automatically.");
-        setFinalReceipt(current => current ? { ...current, status: "error", message: "Mempool est temporairement indisponible ; nouvelle tentative automatique.", checkedAt: new Date().toISOString() } : current);
+        setFinalReceipt(current => current ? { ...current, status: "error", message: "Mempool is temporarily unavailable; retrying automatically.", checkedAt: new Date().toISOString() } : current);
       } finally {
         window.clearTimeout(timeout);
       }
@@ -744,7 +744,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     if (run === trackingRunRef.current) {
       setMempoolStatus("timeout");
       setMempoolMessage("No confirmation received after 30 minutes. Check the transaction in Mempool.");
-      setFinalReceipt(current => current ? { ...current, status: "timeout", message: "Aucune confirmation après 30 minutes.", checkedAt: new Date().toISOString() } : current);
+      setFinalReceipt(current => current ? { ...current, status: "timeout", message: "No confirmation after 30 minutes.", checkedAt: new Date().toISOString() } : current);
     }
   };
 
@@ -774,7 +774,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     const signPsbt = psbtReviewSignPsbtRef.current;
     if (!review || !signPsbt || !psbtReviewResolverRef.current) return;
     if (isMobileUniSatDevice() && (!ownershipContextKey || ownershipProofKey !== ownershipContextKey)) {
-      const cause = new Error("La preuve de propriété BIP-322 est absente ou ne correspond plus au transfert. Aucun PSBT n’a été signé.");
+      const cause = new Error("The BIP-322 ownership proof is missing or no longer matches the transfer. No PSBT was signed.");
       setTransferError(cause.message);
       rejectPsbtReview(cause);
       return;
@@ -854,7 +854,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       return;
     }
     if (isMobileUniSatDevice() && (!ownershipContextKey || ownershipProofKey !== ownershipContextKey)) {
-      setTransferError("Signez d’abord la preuve de propriété BIP-322 affichée sous le reçu. Aucune transaction n’a été ouverte.");
+      setTransferError("Sign the BIP-322 ownership proof shown below the receipt first. No transaction was opened.");
       return;
     }
 
@@ -888,7 +888,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         await ensureNativeInscriptionFeeBalance(provider, activeNetworkEnum, { location: selected.location }, feeRate);
         if (isMobileUniSatDevice()) {
           setMobileNativeTransferReady({ contextKey: ownershipContextKey, address, networkEnum: activeNetworkEnum, recipient, selected, feeRate, liveBefore });
-          setTransferError("Pré-vérification terminée. Touchez maintenant « Ouvrir UniSat » pour afficher l’approbation transactionnelle séparée.");
+          setTransferError("Pre-check complete. Tap again to open the separate UniSat transaction approval.");
           return;
         }
         returnedTxid = await sendNativeUniSatInscription(provider, recipient, selected.inscriptionId, feeRate);
@@ -984,12 +984,12 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     const ready = mobileNativeReadyForContext;
     const provider = window.unisat;
     if (!isMobileUniSatDevice() || !ready || !provider?.sendInscription || ready.address !== address || ready.networkEnum !== chain?.enum) {
-      setTransferError("Le transfert mobile doit être pré-vérifié avec le compte courant. Recommencez la préparation.");
+      setTransferError("The mobile transfer must be pre-checked with the current account. Prepare it again.");
       setMobileNativeTransferReady(null);
       return;
     }
     if (ownershipProofKey !== ready.contextKey || ready.contextKey !== ownershipContextKey) {
-      setTransferError("La preuve BIP-322 ne correspond plus à ce transfert. Préparez une nouvelle preuve avant de continuer.");
+      setTransferError("The BIP-322 proof no longer matches this transfer. Prepare a new proof before continuing.");
       setMobileNativeTransferReady(null);
       return;
     }
@@ -1313,7 +1313,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                 <span>I checked this inscription and destination. I understand the on-chain transfer cannot be reversed.</span>
               </label>
               {isMobileUniSatDevice() && confirmed && selectedInscription && destination.trim() && address && isSupportedMainnet(chain?.enum) && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={window.unisat} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
-              {mobileNativeReadyForContext && <p className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#70c7a0]" role="status">Pré-vérification terminée. La preuve ownership est validée. Touchez à nouveau pour ouvrir la confirmation transactionnelle UniSat.</p>}
+              {mobileNativeReadyForContext && <p className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#70c7a0]" role="status">Pre-check complete. Ownership proof is valid. Tap again to open UniSat transaction confirmation.</p>}
               {isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) && (
                 <button
                   type="button"
@@ -1350,7 +1350,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
               <p className="mt-3 break-all font-mono text-[10px] text-[#70c7a0]" role="status">
                 UniSat returned transaction ID: {txid}.
               </p>
-              {finalReceipt && <div className="mt-4 border border-[#d99a54]/70 bg-[#10151a] p-4 font-mono text-[10px] leading-5" aria-label="Reçu final live du transfert"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Reçu final live · transfert</p><p><span className="text-[#718092]">Statut :</span> {finalReceipt.message}</p><p><span className="text-[#718092]">Réseau :</span> {finalReceipt.network}</p><p className="break-all"><span className="text-[#718092]">TXID :</span> {finalReceipt.txid}</p>{finalReceipt.blockHeight !== null && <p><span className="text-[#718092]">Bloc :</span> {finalReceipt.blockHeight}</p>}<p><span className="text-[#718092]">Vérifié :</span> {new Date(finalReceipt.checkedAt).toLocaleString()}</p>{finalReceipt.liveBefore && <div className="mt-2 border-t border-[#2c323a] pt-2"><p className="uppercase text-[#f2bd63]">Live data avant confirmation</p><p className="break-all"><span className="text-[#718092]">Owner :</span> {finalReceipt.liveBefore.owner ?? "Indisponible"}</p><p><span className="text-[#718092]">Listing :</span> {finalReceipt.liveBefore.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Rafraîchi :</span> {new Date(finalReceipt.liveBefore.refreshedAt).toLocaleString()}</p></div>}{finalReceipt.liveAfter && <div className="mt-2 border-t border-[#2c323a] pt-2"><p className="uppercase text-[#f2bd63]">Live data après confirmation</p><p className="break-all"><span className="text-[#718092]">Owner :</span> {finalReceipt.liveAfter.owner ?? "Indisponible"}</p><p><span className="text-[#718092]">Listing :</span> {finalReceipt.liveAfter.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Rafraîchi :</span> {new Date(finalReceipt.liveAfter.refreshedAt).toLocaleString()}</p></div>}<a className="mt-1 inline-flex items-center gap-1 text-[#d99a54] underline" href={finalReceipt.explorerUrl} target="_blank" rel="noreferrer">Ouvrir dans Mempool <ExternalLink size={11} /></a></div>}
+              {finalReceipt && <div className="mt-4 border border-[#d99a54]/70 bg-[#10151a] p-4 font-mono text-[10px] leading-5" aria-label="Live final receipt du transfert"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live final receipt · transfer</p><p><span className="text-[#718092]">Status:</span> {finalReceipt.message}</p><p><span className="text-[#718092]">Network:</span> {finalReceipt.network}</p><p className="break-all"><span className="text-[#718092]">TXID:</span> {finalReceipt.txid}</p>{finalReceipt.blockHeight !== null && <p><span className="text-[#718092]">Block:</span> {finalReceipt.blockHeight}</p>}<p><span className="text-[#718092]">Verified:</span> {new Date(finalReceipt.checkedAt).toLocaleString()}</p>{finalReceipt.liveBefore && <div className="mt-2 border-t border-[#2c323a] pt-2"><p className="uppercase text-[#f2bd63]">Live data before confirmation</p><p className="break-all"><span className="text-[#718092]">Owner :</span> {finalReceipt.liveBefore.owner ?? "Unavailable"}</p><p><span className="text-[#718092]">Listing :</span> {finalReceipt.liveBefore.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Refreshed:</span> {new Date(finalReceipt.liveBefore.refreshedAt).toLocaleString()}</p></div>}{finalReceipt.liveAfter && <div className="mt-2 border-t border-[#2c323a] pt-2"><p className="uppercase text-[#f2bd63]">Live data after confirmation</p><p className="break-all"><span className="text-[#718092]">Owner :</span> {finalReceipt.liveAfter.owner ?? "Unavailable"}</p><p><span className="text-[#718092]">Listing :</span> {finalReceipt.liveAfter.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Refreshed:</span> {new Date(finalReceipt.liveAfter.refreshedAt).toLocaleString()}</p></div>}<a className="mt-1 inline-flex items-center gap-1 text-[#d99a54] underline" href={finalReceipt.explorerUrl} target="_blank" rel="noreferrer">Open in Mempool <ExternalLink size={11} /></a></div>}
           {mempoolStatus !== "idle" && (
                 <div className="mt-2 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]" role="status" aria-live="polite">
                   <p><span className="text-[#718092]">{mempoolNetwork} Mempool:</span> {mempoolMessage}</p>

@@ -49,18 +49,18 @@ export type FeeEstimate = {
 };
 
 export function describeFeeSources(strategy: FeeEstimate["strategy"], sources: FeeEstimate["sources"]) {
-  if (strategy === "maximum-of-mempool-and-unisat") return "Mempool + UniSat (taux live le plus élevé)";
+  if (strategy === "maximum-of-mempool-and-unisat") return "Mempool + UniSat (highest live rate)";
   return sources.mempool.available ? "Mempool seul (UniSat indisponible)" : "UniSat seul (Mempool indisponible)";
 }
 
 /** Server-side consensus: compare the live Mempool and UniSat estimates without exposing the UniSat API key. */
 export async function getRecommendedFeeEstimate(network: string): Promise<FeeEstimate> {
   const config = getMempoolConfig(network);
-  if (!config) throw new Error("Sélectionnez Bitcoin mainnet ou Fractal Bitcoin mainnet dans UniSat.");
+  if (!config) throw new Error("Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat.");
   const query = new URLSearchParams({ chain: network, target: "halfHour" });
   const result = await requestJson<FeeEstimate & { error?: string }>(`${LIVE_DATA_API_BASE}/api/fees/recommended?${query}`, 10_000);
   if (!Number.isFinite(result.feeRate) || result.feeRate < 1 || result.feeRate > 10_000 || result.network !== network || result.target !== "halfHour") {
-    throw new Error(result.error || "Les estimateurs de frais Mempool/UniSat n’ont pas renvoyé de taux valide.");
+    throw new Error(result.error || "Mempool/UniSat fee estimators did not return a valid rate.");
   }
   return result;
 }
@@ -91,7 +91,7 @@ const MAX_SPENDABLE_UTXO_PAGES = 20;
 export async function getSpendableUtxos(network: string, address: string, minimumSats: number): Promise<SpendableUtxo[]> {
   const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
   if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0) {
-    throw new Error("Réseau, adresse ou montant invalide pour vérifier les UTXO dépensables.");
+    throw new Error("Invalid network, address, or amount for spendable UTXO verification.");
   }
   const collected: SpendableUtxo[] = [];
   let cursor = 0;
@@ -113,7 +113,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       !Number.isSafeInteger(nextCursor) || nextCursor !== cursor + pageScannedCount! ||
       !Number.isSafeInteger(total) || total! < 0 || nextCursor! > total! || page.utxo.length > pageScannedCount!
     ) {
-      throw new Error("Le serveur n’a pas confirmé une page cohérente d’UTXO sûrs pour cette adresse.");
+      throw new Error("The server did not confirm a consistent safe-UTXO page for this address.");
     }
     scannedCount += pageScannedCount!;
     sourceTotal = total!;
@@ -135,7 +135,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
   if (safeSats < minimumSats) {
     const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
-    throw new InsufficientSafeUtxosError(`UniSat/Worker n’a validé que ${safeSats.toLocaleString("fr-FR")} sats dans ${collected.length} UTXO sûrs, après analyse de ${scannedLabel} sorties (plafond ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). Minimum requis : ${minimumSats.toLocaleString("fr-FR")} sats. Aucun paiement n’a été lancé.`);
+    throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.`);
   }
   return collected;
 }
@@ -143,7 +143,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
 /** Recheck the exact PSBT inputs with the Fractal Worker before UniSat is asked to sign or pay. */
 export async function confirmFractalSpendableUtxos(address: string, minimumSats: number, utxos: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk">>): Promise<WorkerSafeUtxoAttestation> {
   if (!address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0 || !Array.isArray(utxos) || utxos.length < 1 || utxos.length > 20) {
-    throw new Error("Le jeu d’UTXO à confirmer auprès du Worker est invalide.");
+    throw new Error("The UTXO set to confirm with the Worker is invalid.");
   }
   const result = await requestJson<Partial<WorkerSafeUtxoConfirmationResponse>>(
     `${LIVE_DATA_API_BASE}/api/spendable-utxos/confirm`,
@@ -163,38 +163,38 @@ export async function confirmFractalSpendableUtxos(address: string, minimumSats:
     result.chain !== "fractal" || result.address !== address || result.minimumSats !== minimumSats ||
     !Number.isSafeInteger(result.safeSats) || !Number.isSafeInteger(result.verifiedUtxoCount) ||
     result.verifiedUtxoCount !== utxos.length || typeof result.sufficient !== "boolean" || typeof result.confirmedAt !== "string"
-  ) throw new Error("Le Worker n’a pas renvoyé une attestation complète des UTXO Fractal sélectionnés.");
+  ) throw new Error("The Worker did not return a complete attestation for the selected Fractal UTXOs.");
   if (!result.sufficient || result.safeSats! < minimumSats) {
-    throw new InsufficientSafeUtxosError(`Le Worker n’a confirmé que ${result.safeSats!.toLocaleString("fr-FR")} sats sûrs sur les entrées du PSBT; ${minimumSats.toLocaleString("fr-FR")} sats sont nécessaires. Aucun paiement ne peut être approuvé.`);
+    throw new InsufficientSafeUtxosError(`The Worker confirmed only ${result.safeSats!.toLocaleString("en-US")} safe sats across the PSBT inputs; ${minimumSats.toLocaleString("en-US")} sats are required. No payment can be approved.`);
   }
   return result as WorkerSafeUtxoAttestation;
 }
 
 export async function validateMempoolAddress(network: string, address: string) {
   const config = getMempoolConfig(network);
-  if (!config) throw new Error("Réseau principal non pris en charge.");
+  if (!config) throw new Error("Unsupported mainnet network.");
   const result = await requestJson<{ isvalid?: boolean }>(`${config.api}/api/v1/validate-address/${encodeURIComponent(address)}`);
   if (!result.isvalid) throw new Error(`L’adresse destinataire n’est pas valide pour ${config.label}.`);
 }
 
 export async function trackMempoolTransaction(txid: string, network: string, onUpdate?: (receipt: MempoolReceipt) => void) {
   const config = getMempoolConfig(network);
-  if (!config) throw new Error("Aucun endpoint Mempool n’est configuré pour ce réseau.");
+  if (!config) throw new Error("No Mempool endpoint is configured for this network.");
   const explorerUrl = `${config.explorer}${encodeURIComponent(txid)}`;
   const emit = (status: MempoolReceipt["status"], message: string, blockHeight: number | null = null) => {
     const receipt = { txid, network: config.label, status, message, blockHeight, explorerUrl, checkedAt: new Date().toISOString() } satisfies MempoolReceipt;
     onUpdate?.(receipt); return receipt;
   };
-  emit("checking", "Recherche de la transaction dans Mempool…");
+  emit("checking", "Searching for the transaction in Mempool…");
   for (let attempt = 0; attempt < 180; attempt += 1) {
     try {
       const status = await requestJson<{ confirmed?: boolean; block_height?: number }>(`${config.api}/api/tx/${encodeURIComponent(txid)}/status`, 10_000);
-      if (status.confirmed) return emit("confirmed", "Transaction confirmée on-chain.", typeof status.block_height === "number" ? status.block_height : null);
+      if (status.confirmed) return emit("confirmed", "Transaction confirmed on-chain.", typeof status.block_height === "number" ? status.block_height : null);
       emit("pending", "Transaction visible dans le mempool, en attente de confirmation.");
     } catch (error) {
       emit("error", error instanceof Error ? `${error.message}. Nouvelle tentative automatique.` : "Mempool est temporairement indisponible. Nouvelle tentative automatique.");
     }
     await new Promise(resolve => window.setTimeout(resolve, 10_000));
   }
-  return emit("timeout", "Aucune confirmation après 30 minutes. Vérifiez la transaction dans Mempool.");
+  return emit("timeout", "No confirmation after 30 minutes. Verify la transaction dans Mempool.");
 }

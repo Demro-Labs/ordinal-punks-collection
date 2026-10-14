@@ -93,15 +93,15 @@ describe("native UniSat wallet actions", () => {
       "ordinal-transfer",
     );
     expect(guidance?.definitelyNotBroadcast).toBe(true);
-    expect(guidance?.message).toContain("UTXO de frais sûrs insuffisants");
-    expect(guidance?.message).toContain("Aucune transaction n’a été signée ni diffusée");
+    expect(guidance?.message).toContain("Insufficient safe fee UTXOs");
+    expect(guidance?.message).toContain("No transaction was signed or broadcast");
   });
 
   it("gives Inscribe payment guidance but preserves uncertainty for a generic wallet balance refusal", () => {
     const guidance = getMobileUtxoErrorGuidance({ message: "Insufficient balance for transaction" }, "inscribe-payment");
     expect(guidance?.definitelyNotBroadcast).toBe(false);
-    expect(guidance?.message).toContain("Garde le reçu existant");
-    expect(guidance?.message).toContain("vérifie UniSat et Mempool avant de réessayer");
+    expect(guidance?.message).toContain("Keep the existing receipt");
+    expect(guidance?.message).toContain("check UniSat and Mempool before retrying");
   });
 
   it("ignores cancellation and unrelated errors", () => {

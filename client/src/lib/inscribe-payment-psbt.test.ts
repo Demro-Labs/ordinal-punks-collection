@@ -124,7 +124,7 @@ describe("mobile inscription payment PSBT", () => {
     expect(amountIndex).toBeGreaterThanOrEqual(0);
     Buffer.from("0f27000000000000", "hex").copy(alteredBytes, amountIndex);
     const alteredSigned = await sign(alteredBytes.toString("hex"));
-    await expect(broadcastSignedInscribePayment({ signedPsbtHex: alteredSigned, plan, provider: fixture.provider })).rejects.toThrow(/modifié|plan exact|signature|frais/i);
+    await expect(broadcastSignedInscribePayment({ signedPsbtHex: alteredSigned, plan, provider: fixture.provider })).rejects.toThrow(/changed|exact plan|signature|fee/i);
     expect(fixture.getBroadcasts()).toBe(0);
   });
 
@@ -147,7 +147,7 @@ describe("mobile inscription payment PSBT", () => {
   it("fails closed when the previous transaction does not match the safe UTXO metadata", async () => {
     const fixture = setup();
     mocks.getSpendableUtxos.mockResolvedValue([{ ...fixture.utxo, satoshi: fixture.utxo.satoshi + 1 }]);
-    await expect(prepare(fixture)).rejects.toThrow(/valeur ou le script/i);
+    await expect(prepare(fixture)).rejects.toThrow(/value or script/i);
     expect(fixture.getBroadcasts()).toBe(0);
   });
 });

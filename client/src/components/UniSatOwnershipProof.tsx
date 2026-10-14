@@ -14,9 +14,9 @@ type OwnershipProvider = {
 type OwnershipChallenge = { challengeId: string; message: string; expiresAt: string; network: string; site: string; action: string; contextKey: string };
 
 function describeOwnershipError(cause: unknown) {
-  if (cause instanceof UniSatSignTimeoutError) return "UniSat n’a pas répondu dans les 30 secondes. Vérifiez qu’aucune demande n’est encore ouverte avant de réessayer.";
+  if (cause instanceof UniSatSignTimeoutError) return "UniSat did not répondu dans les 30 secondes. Verify qu’aucune demande n’est encore ouverte avant de réessayer.";
   if (cause instanceof Error) return cause.message;
-  return "La preuve BIP-322 n’a pas pu être validée.";
+  return "The BIP-322 proof could not be validated.";
 }
 
 export function UniSatOwnershipProof({
@@ -54,7 +54,7 @@ export function UniSatOwnershipProof({
     const timer = window.setTimeout(() => {
       setVerifiedContext("");
       setChallenge(null);
-      setError("La preuve de propriété a expiré côté interface. Signez une nouvelle preuve avant la transaction.");
+      setError("The ownership proof expired in the interface. Sign a new proof before the transaction.");
       onVerified(null);
     }, 2 * 60 * 1000);
     return () => window.clearTimeout(timer);
@@ -68,14 +68,14 @@ export function UniSatOwnershipProof({
     }
     const [accounts, chain] = await Promise.all([provider.getAccounts(), provider.getChain()]);
     if (!accounts.includes(address) || chain.enum !== network) {
-      throw new Error("Le compte ou le réseau UniSat a changé. Reconnectez le bon wallet et recommencez la preuve.");
+      throw new Error("The UniSat account or network changed. Reconnect the correct wallet and restart the proof.");
     }
   };
 
   const requestChallenge = async () => {
     setError("");
     if (!contextKey || !address || !["BITCOIN_MAINNET", "FRACTAL_BITCOIN_MAINNET"].includes(network)) {
-      setError("Sélectionnez une adresse et le réseau Bitcoin ou Fractal mainnet avant la preuve.");
+      setError("Select an address and the Bitcoin or Fractal mainnet network before the proof.");
       return;
     }
     setWorking(true);
@@ -90,7 +90,7 @@ export function UniSatOwnershipProof({
       });
       const data = await response.json().catch(() => null) as Partial<OwnershipChallenge> & { error?: string } | null;
       if (!response.ok || typeof data?.challengeId !== "string" || typeof data.message !== "string" || typeof data.expiresAt !== "string") {
-        throw new Error(data?.error || "Le Worker n’a pas pu préparer le challenge BIP-322.");
+        throw new Error(data?.error || "The Worker could not prepare the BIP-322 challenge.");
       }
       setChallenge({ challengeId: data.challengeId, message: data.message, expiresAt: data.expiresAt, network, site, action: data.action ?? "ownership-proof-only", contextKey });
     } catch (cause) {
@@ -108,7 +108,7 @@ export function UniSatOwnershipProof({
     }
     if (Date.parse(activeChallenge.expiresAt) <= Date.now()) {
       setChallenge(null);
-      setError("Le challenge a expiré. Préparez-en un nouveau avant de signer.");
+      setError("The challenge expired. Prepare a new one before signing.");
       return;
     }
 
@@ -134,7 +134,7 @@ export function UniSatOwnershipProof({
           body: JSON.stringify({ site, address, network, challengeId: activeChallenge.challengeId, signature }),
         });
         const data = await response.json().catch(() => null) as { verified?: boolean; error?: string } | null;
-        if (!response.ok || data?.verified !== true) throw new Error(data?.error || "Le Worker n’a pas validé cette preuve de propriété.");
+        if (!response.ok || data?.verified !== true) throw new Error(data?.error || "The Worker did not validate this ownership proof.");
         setVerifiedContext(contextKey);
         onVerified(contextKey);
       })
@@ -143,13 +143,13 @@ export function UniSatOwnershipProof({
   };
 
   return <section className="mt-3 border border-[#d99a54]/60 bg-[#151a1f] p-3 font-mono text-[10px] leading-5" aria-label="Preuve mobile BIP-322 de propriété du wallet">
-    <p className="flex items-center gap-2 uppercase tracking-[0.1em] text-[#f2bd63]"><ShieldCheck size={13} /> Signature de propriété requise · BIP-322</p>
-    <p className="mt-1 text-[#9ea7b3]">Cette signature prouve uniquement le contrôle du wallet {address ? `${address.slice(0, 10)}…${address.slice(-6)}` : "connecté"} sur {network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"}. Elle ne paie rien et ne signe pas la transaction.</p>
-    {verified ? <p className="mt-2 flex items-center gap-2 text-[#70c7a0]" role="status"><CheckCircle2 size={13} /> Propriété vérifiée. L’approbation transactionnelle UniSat reste une étape distincte.</p> : <div className="mt-2 flex flex-wrap gap-2">
-      <button type="button" onClick={() => void requestChallenge()} disabled={working || !contextKey || !address || !provider?.getAccounts || !provider.getChain} className="min-h-10 border border-[#3b434d] px-3 py-2 uppercase tracking-[0.06em] text-[#d9d3c6] disabled:opacity-40">{working && !activeChallenge ? <><Loader2 size={12} className="mr-1 inline animate-spin" /> Préparation…</> : "1 · Préparer la preuve"}</button>
-      {activeChallenge && <button type="button" onClick={signOwnership} disabled={working || !provider?.signMessage} className="min-h-10 border border-[#d99a54] bg-[#d99a54] px-3 py-2 uppercase tracking-[0.06em] text-[#0b0d10] disabled:opacity-40">{working ? <><Loader2 size={12} className="mr-1 inline animate-spin" /> Vérification…</> : "2 · Signer la propriété"}</button>}
+    <p className="flex items-center gap-2 uppercase tracking-[0.1em] text-[#f2bd63]"><ShieldCheck size={13} /> Ownership signature required · BIP-322</p>
+    <p className="mt-1 text-[#9ea7b3]">This signature only proves control of the wallet {address ? `${address.slice(0, 10)}…${address.slice(-6)}` : "connected"} sur {network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"}. It does not pay anything or sign the transaction.</p>
+    {verified ? <p className="mt-2 flex items-center gap-2 text-[#70c7a0]" role="status"><CheckCircle2 size={13} /> Ownership verified. UniSat transaction approval remains a separate step.</p> : <div className="mt-2 flex flex-wrap gap-2">
+      <button type="button" onClick={() => void requestChallenge()} disabled={working || !contextKey || !address || !provider?.getAccounts || !provider.getChain} className="min-h-10 border border-[#3b434d] px-3 py-2 uppercase tracking-[0.06em] text-[#d9d3c6] disabled:opacity-40">{working && !activeChallenge ? <><Loader2 size={12} className="mr-1 inline animate-spin" /> Preparing…</> : "1 · Prepare proof"}</button>
+      {activeChallenge && <button type="button" onClick={signOwnership} disabled={working || !provider?.signMessage} className="min-h-10 border border-[#d99a54] bg-[#d99a54] px-3 py-2 uppercase tracking-[0.06em] text-[#0b0d10] disabled:opacity-40">{working ? <><Loader2 size={12} className="mr-1 inline animate-spin" /> Verifying…</> : "2 · Sign ownership"}</button>}
     </div>}
-    {activeChallenge && !verified && <p className="mt-2 text-[#718092]">Challenge valable jusqu’au {new Date(activeChallenge.expiresAt).toLocaleTimeString("fr-FR")} · aucun paiement ou transfert n’est autorisé par ce message.</p>}
+    {activeChallenge && !verified && <p className="mt-2 text-[#718092]">Challenge valid until {new Date(activeChallenge.expiresAt).toLocaleTimeString("en-US")} · no payment ou transfert n’est autorisé par ce message.</p>}
     {error && <p className="mt-2 text-[#e08b7d]" role="alert">{error}</p>}
   </section>;
 }
