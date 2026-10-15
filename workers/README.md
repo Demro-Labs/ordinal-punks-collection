@@ -26,7 +26,7 @@ La production utilise le binding Cloudflare secret `UNISAT_API_KEY`. Ne jamais m
 
 ## CI/CD Cloudflare
 
-Le workflow `.github/workflows/deploy-cloudflare-worker.yml` déploie uniquement le Worker et seulement pour les changements de `workers/**`, de `wrangler.jsonc`, des dépendances ou du workflow. Il exécute le dry-run Wrangler épinglé, le smoke test workerd et les contrôles de production pour les deux applications. Le premier déploiement de réconciliation omet `--strict`, car le Worker actif avait été publié avec l’ancienne Script API; après cette migration, réactiver le mode strict pour les déploiements ordinaires. Le workflow utilise l’environnement GitHub `cloudflare-production` et un verrou de concurrence.
+Le workflow `.github/workflows/deploy-cloudflare-worker.yml` déploie uniquement le Worker et seulement pour les changements de `workers/**`, de `wrangler.jsonc`, des dépendances ou du workflow. Il exécute le dry-run Wrangler épinglé, le smoke test workerd et les contrôles de production pour les deux applications. La première réconciliation de l’ancien upload Script API vers `wrangler.jsonc` a réussi; les déploiements ordinaires exigent maintenant `--strict` afin qu’une configuration incompatible ou inconnue ne soit pas silencieusement ignorée. Le workflow utilise l’environnement GitHub `cloudflare-production` et un verrou de concurrence.
 
 Les secrets GitHub requis sont :
 
