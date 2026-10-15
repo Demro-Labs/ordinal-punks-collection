@@ -432,6 +432,47 @@ test('mobile UTXO mode accepts UniSat available outputs that omit optional fee f
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('desktop UTXO mode accepts an omitted isLowFee flag and still verifies Rune and Alkane balances', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qdesktoptestaddress00000000000000000000';
+  const record = {
+    address, txid: '2'.repeat(64), vout: 0, satoshi: 120000,
+    scriptPk: '0014' + '77'.repeat(20), height: 100, inscriptions: [],
+  };
+  const checkedPaths = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    checkedPaths.push(url.pathname);
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      assert.equal(url.searchParams.get('withLowFee'), 'true');
+      return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
+    }
+    if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) {
+      return Response.json({ code: 0, data: { ...record, isSpent: false } });
+    }
+    if (url.pathname.endsWith(`/runes/utxo/${record.txid}/0/balance`)) {
+      return Response.json({ code: 0, data: [] });
+    }
+    if (url.pathname.endsWith(`/alkanes/utxo/${record.txid}/0/balance`)) {
+      return Response.json({ code: 0, data: [] });
+    }
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(
+      makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.242' }),
+      { UNISAT_API_KEY: 'test-only' }
+    );
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.utxo.length, 1);
+    assert.equal(data.utxo[0].isLowFee, false);
+    assert.ok(checkedPaths.includes(`/v1/indexer/runes/utxo/${record.txid}/0/balance`));
+    assert.ok(checkedPaths.includes(`/v1/indexer/alkanes/utxo/${record.txid}/0/balance`));
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('Worker attests that the exact Fractal PSBT inputs cover payment plus fees', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
