@@ -402,17 +402,19 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('mobile UTXO mode accepts UniSat available outputs that omit optional fee flags', async () => {
+test('desktop and mobile accept optional fee metadata omissions with the same Fractal UTXO checks', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qmobiletestaddress000000000000000000000';
   const record = {
     address, txid: '1'.repeat(64), vout: 0, satoshi: 120000,
     scriptPk: '0014' + '66'.repeat(20), height: 100, inscriptions: [],
   };
+  const upstreamMobileModes = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
     if (url.pathname.endsWith('/available-utxo-data')) {
+      upstreamMobileModes.push(url.searchParams.get('mobile'));
       assert.equal(url.searchParams.get('withLowFee'), 'true');
       return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
     }
@@ -422,13 +424,20 @@ test('mobile UTXO mode accepts UniSat available outputs that omit optional fee f
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
-    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25&mobile=1`, { ip: '192.0.2.241' }), { UNISAT_API_KEY: 'test-only' });
-    const data = await response.json();
-    assert.equal(response.status, 200);
-    assert.equal(data.utxo.length, 1);
-    assert.equal(data.utxo[0].satoshi, 120000);
-    assert.equal(data.utxo[0].isLowFee, false);
-    assert.equal(data.utxo[0].isOpInRBF, false);
+    for (const [mode, query, ip] of [
+      ['desktop', '', '192.0.2.241'],
+      ['mobile', '&mobile=1', '192.0.2.242'],
+    ]) {
+      const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25${query}`, { ip }), { UNISAT_API_KEY: 'test-only' });
+      const data = await response.json();
+      assert.equal(response.status, 200, mode);
+      assert.equal(data.utxo.length, 1, mode);
+      assert.equal(data.utxo[0].satoshi, 120000, mode);
+      assert.equal(data.utxo[0].isLowFee, false, mode);
+      assert.equal(data.utxo[0].isOpInRBF, false, mode);
+      assert.equal(data.utxo[0].inscriptionsRunesAlkanesChecked, true, mode);
+    }
+    assert.deepEqual(upstreamMobileModes, [null, null]);
   } finally { globalThis.fetch = previousFetch; }
 });
 

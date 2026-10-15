@@ -348,9 +348,9 @@ export function UniSatRunesSendPanel({
       );
       return;
     }
-    if (isMobileUniSatDevice() && ownershipProofKey !== transferContextKey) {
+    if (ownershipProofKey !== transferContextKey) {
       setError(
-        "Sign the BIP-322 ownership proof for this exact Rune transfer before preflight."
+        "Complete the wallet ownership check for this exact Rune transfer before preflight."
       );
       return;
     }
@@ -467,10 +467,10 @@ export function UniSatRunesSendPanel({
       );
       return;
     }
-    if (isMobileUniSatDevice() && ownershipProofKey !== transferContextKey) {
+    if (ownershipProofKey !== transferContextKey) {
       setPrepared(null);
       setError(
-        "The mobile BIP-322 proof is missing or expired. Sign a new proof before opening UniSat."
+        "The wallet ownership check is missing or expired. Complete it again before opening UniSat."
       );
       return;
     }
@@ -481,10 +481,8 @@ export function UniSatRunesSendPanel({
     const feeSource = prepared.feeSource;
     setSending(true);
     setPrepared(null);
-    if (isMobileUniSatDevice()) {
-      setOwnershipProofKey(null);
-      setOwnershipProofVersion(version => version + 1);
-    }
+    setOwnershipProofKey(null);
+    setOwnershipProofVersion(version => version + 1);
     let sendPromise: Promise<unknown>;
     try {
       // Call UniSat synchronously in this explicit tap so mobile wallet prompts retain the user gesture.
@@ -838,7 +836,7 @@ export function UniSatRunesSendPanel({
                   final dans UniSat.
                 </span>
               </label>
-              {isMobileUniSatDevice() && confirmed && transferContextKey && (
+              {confirmed && transferContextKey && (
                 <UniSatOwnershipProof
                   key={`${transferContextKey}:${ownershipProofVersion}`}
                   site={site}
@@ -857,8 +855,7 @@ export function UniSatRunesSendPanel({
                     preparing ||
                     sending ||
                     !confirmed ||
-                    (isMobileUniSatDevice() &&
-                      ownershipProofKey !== transferContextKey) ||
+                    ownershipProofKey !== transferContextKey ||
                     !provider?.sendRunes ||
                     outcomeUnclear
                   }
@@ -880,8 +877,7 @@ export function UniSatRunesSendPanel({
                     disabled={
                       sending ||
                       !confirmed ||
-                      (isMobileUniSatDevice() &&
-                        ownershipProofKey !== transferContextKey)
+                      ownershipProofKey !== transferContextKey
                     }
                     className="inline-flex min-h-11 items-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[9px] uppercase tracking-[0.08em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
                   >

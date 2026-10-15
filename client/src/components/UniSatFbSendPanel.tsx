@@ -54,7 +54,10 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
   const sats = parseFbAmountToSats(amount);
   const connected = Boolean(address && chain?.enum === NETWORK);
   const ownershipContextKey = recipient.trim() && sats ? JSON.stringify(["fb-transfer", site, address, chain?.enum, recipient.trim(), sats]) : "";
-  const mobileReady = isMobileUniSatDevice() && mobileReadyContextKey === ownershipContextKey && Boolean(ownershipContextKey);
+  const currentMobilePreflightKey = ownershipContextKey && feeEstimate && Number.isFinite(feeEstimate.feeRate) && feeEstimate.feeRate > 0
+    ? `${ownershipContextKey}:${Math.ceil(feeEstimate.feeRate)}`
+    : "";
+  const mobileReady = isMobileUniSatDevice() && Boolean(currentMobilePreflightKey) && mobileReadyContextKey === currentMobilePreflightKey;
   useEffect(() => {
     if (!isMobileUniSatDevice()) return;
     setOwnershipProofKey(null);
@@ -115,7 +118,7 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
   const openMobilePayment = () => {
     const to = recipient.trim();
     const estimate = feeEstimate;
-    if (!isMobileUniSatDevice() || !ownershipContextKey || !mobileReady || ownershipProofKey !== ownershipContextKey) { setError("The BIP-322 proof or mobile pre-check is no longer valid. Restart before any payment."); return; }
+    if (!isMobileUniSatDevice() || !ownershipContextKey || !mobileReady || ownershipProofKey !== ownershipContextKey) { setError("The wallet ownership check or mobile pre-check is no longer valid. Restart before any payment."); return; }
     if (!connected || !provider?.sendBitcoin || !estimate || !sats || !confirmed || outcomeUnclear) { setError("The wallet, preview, or confirmation no longer matches this send."); return; }
     const feeRate = Math.ceil(estimate.feeRate);
     if (!Number.isFinite(feeRate) || feeRate < 1 || feeRate > 10_000) { setError("The live fee rate is invalid; no send was requested."); return; }
@@ -176,7 +179,7 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
     const to = recipient.trim();
     if (!to || to.length > 100) { setError("Enter a valid Fractal receiving address."); return; }
     if (!confirmed) { setError("Verify the network, address and amount, then check the confirmation."); return; }
-    if (isMobileUniSatDevice() && (!ownershipContextKey || ownershipProofKey !== ownershipContextKey)) { setError("Sign the BIP-322 ownership proof shown below the preview first."); return; }
+    if (isMobileUniSatDevice() && (!ownershipContextKey || ownershipProofKey !== ownershipContextKey)) { setError("Complete the wallet ownership check shown below the preview first."); return; }
     setSending(true);
     try {
       const [accounts, currentChain] = await Promise.all([provider.getAccounts?.(), provider.getChain()]);
@@ -187,14 +190,14 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
       setFeeEstimate(estimate);
       setFeeError("");
       const feeRate = Math.ceil(estimate.feeRate);
+      await ensureNativePaymentBalance(NETWORK, address, sats, feeRate, "fb-transfer", { mobile: isMobileUniSatDevice() });
       if (isMobileUniSatDevice()) {
-        await ensureNativePaymentBalance(NETWORK, address, sats, feeRate, "fb-transfer");
-        setMobileReadyContextKey(ownershipContextKey);
+        setMobileReadyContextKey(`${ownershipContextKey}:${feeRate}`);
         setError("Pre-check complete. Tap again to open transaction approval in UniSat.");
         return;
       }
       walletPromptOpened = true;
-      const result = await provider.sendBitcoin(to, sats, { feeRate });
+      const result = await sendNativeUniSatBitcoinPayment(provider, to, sats, feeRate);
       const txid = normalizeUniSatTxid(result);
       if (!txid) {
         setOutcomeUnclear(true);
@@ -234,7 +237,7 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
       {sats && feeEstimate && <div className="mt-3 border border-[#d99a54]/40 bg-[#151a1f] p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]" aria-label="Pre-authorization preview"><p className="flex items-center gap-2 uppercase tracking-[0.1em] text-[#f2bd63]"><ShieldCheck size={13} /> UniSat pre-approval preview</p><p className="mt-1 break-all">To: {recipient.trim() || "Adresse à saisir"}</p><p>Exact amount: {sats.toLocaleString("en-US")} sats ({amount} FB)</p><p>Network: Fractal Bitcoin mainnet · fees: {Math.ceil(feeEstimate.feeRate)} sat/vB ({describeFeeSources(feeEstimate.strategy, feeEstimate.sources)})</p><p>Total fees are calculated and displayed by UniSat before signing.</p></div>}
       <label className="mt-3 flex cursor-pointer items-start gap-2 font-mono text-[10px] leading-5 text-[#d9d3c6]"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} className="mt-1 accent-[#d99a54]" /><span>I verify the address and amount above. I understand that a confirmed on-chain transfer cannot be reversed.</span></label>
       {isMobileUniSatDevice() && confirmed && sats && feeEstimate && recipient.trim() && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={provider} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
-      {mobileReady && <p className="mt-2 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#70c7a0]" role="status">Pre-check complete after ownership proof. Tap again to open UniSat transaction approval.</p>}
+      {mobileReady && <p className="mt-2 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#70c7a0]" role="status">Pre-check complete after the wallet ownership check. Tap again to open UniSat transaction approval.</p>}
       {outcomeUnclear && <div className="mt-3 border border-[#a45e54]/70 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#e08b7d]" role="alert"><p className="uppercase tracking-[0.1em]">Previous send outcome unknown</p><p>Do not resend the funds. Check UniSat activity and Fractal Mempool for a possible transaction.</p><label className="mt-2 flex cursor-pointer items-start gap-2 text-[#d9d3c6]"><input type="checkbox" checked={outcomeChecked} onChange={event => setOutcomeChecked(event.target.checked)} className="mt-1 accent-[#d99a54]" /><span>I checked UniSat and Mempool; no previous send is pending or confirmed.</span></label><button type="button" disabled={!outcomeChecked} onClick={() => { try { sessionStorage.removeItem(`${storageKey(address)}:unclear`); } catch { /* clear the in-memory lock after explicit verification */ } setOutcomeUnclear(false); setOutcomeChecked(false); }} className="mt-2 border border-[#a45e54] px-3 py-2 uppercase tracking-[0.08em] text-[#f3efe5] disabled:opacity-40">Unlock after verification</button></div>}
       <button type="button" onClick={() => void send()} disabled={sending || walletBusy || outcomeUnclear || !confirmed || !sats || !recipient.trim() || !feeEstimate || Boolean(feeError) || (isMobileUniSatDevice() && ownershipProofKey !== ownershipContextKey)} className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40">{sending ? <><Loader2 size={14} className="animate-spin" /> Pre-checking…</> : <><Send size={14} /> {mobileReady ? "Open UniSat · approve transaction" : isMobileUniSatDevice() ? "Pre-check before UniSat" : "Continue in UniSat"}</>}</button>
       {error && <p className="mt-3 border border-[#a45e54]/60 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#e08b7d]" role="alert">{error}</p>}
