@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, Loader2, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { describeFeeSources, getRecommendedFeeEstimate, trackMempoolTransaction, validateMempoolAddress, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
 import { normalizeUniSatTxid, parseFbAmountToSats } from "@/lib/native-fb-send";
-import { getMobileUtxoErrorGuidance } from "@/lib/native-unisat-actions";
+import { getMobileUtxoErrorGuidance, sendNativeUniSatBitcoinPayment } from "@/lib/native-unisat-actions";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
@@ -12,7 +12,7 @@ const NETWORK = "FRACTAL_BITCOIN_MAINNET";
 const STORAGE_PREFIX = "fractal-mobile-fb-send:v1:";
 type Chain = { enum?: string; name?: string };
 type Provider = {
-  sendBitcoin?: (address: string, satoshis: number, options?: { feeRate?: number }) => Promise<unknown>;
+  sendBitcoin?: (address: string, satoshis: number, options?: { feeRate?: number }) => Promise<string | { txid?: string }>;
   getAccounts?: () => Promise<string[]>;
   getChain?: () => Promise<Chain>;
   switchChain?: (chain: "FRACTAL_BITCOIN_MAINNET") => Promise<Chain>;
@@ -127,7 +127,7 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
     let paymentPromise: Promise<unknown>;
     try {
       // Open the UniSat transaction prompt synchronously from this explicit tap.
-      paymentPromise = provider.sendBitcoin(to, sats, { feeRate });
+      paymentPromise = sendNativeUniSatBitcoinPayment(provider, to, sats, feeRate);
     } catch (cause) {
       setSending(false);
       setError(getMobileUtxoErrorGuidance(cause, "fb-transfer")?.message ?? (cause instanceof Error ? cause.message : String(cause)));

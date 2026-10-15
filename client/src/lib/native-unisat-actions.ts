@@ -113,32 +113,34 @@ export async function ensureNativeInscriptionFeeBalance(
     );
   }
 }
-/** Ask UniSat itself to construct, review, sign, and broadcast an inscription transfer. */
-export async function sendNativeUniSatInscription(
+/** Ask UniSat itself to construct, review, sign, and broadcast an inscription transfer.
+ * Keep the bridge call synchronous for UniSat Mobile's user-gesture requirement.
+ */
+export function sendNativeUniSatInscription(
   provider: NativeUniSatProvider,
   recipient: string,
   inscriptionId: string,
   feeRate: number,
 ) {
-  if (!provider.sendInscription) throw new Error("This UniSat context does not expose native sendInscription; no transfer was sent.");
+  if (!provider.sendInscription) return Promise.reject(new Error("This UniSat context does not expose native sendInscription; no transfer was sent."));
   if (!recipient || !/^[a-f0-9]{64}i\d+$/i.test(inscriptionId) || !Number.isFinite(feeRate) || feeRate <= 0) {
-    throw new Error("Invalid native UniSat inscription transfer parameters; no transfer was sent.");
+    return Promise.reject(new Error("Invalid native UniSat inscription transfer parameters; no transfer was sent."));
   }
-  const result = await provider.sendInscription(recipient, inscriptionId, { feeRate });
-  return requireTxid(result, "inscription transfer");
+  return provider.sendInscription(recipient, inscriptionId, { feeRate }).then(result => requireTxid(result, "inscription transfer"));
 }
 
-/** Ask UniSat itself to construct, review, sign, and broadcast the inscription-order payment. */
-export async function sendNativeUniSatBitcoinPayment(
+/** Ask UniSat itself to construct, review, sign, and broadcast the inscription-order payment.
+ * Keep the bridge call synchronous for UniSat Mobile's user-gesture requirement.
+ */
+export function sendNativeUniSatBitcoinPayment(
   provider: NativeUniSatProvider,
   recipient: string,
   satoshis: number,
   feeRate: number,
 ) {
-  if (!provider.sendBitcoin) throw new Error("This UniSat context does not expose native sendBitcoin; no payment was sent.");
+  if (!provider.sendBitcoin) return Promise.reject(new Error("This UniSat context does not expose native sendBitcoin; no payment was sent."));
   if (!recipient || !Number.isSafeInteger(satoshis) || satoshis <= 0 || !Number.isFinite(feeRate) || feeRate <= 0) {
-    throw new Error("Invalid native UniSat payment parameters; no payment was sent.");
+    return Promise.reject(new Error("Invalid native UniSat payment parameters; no payment was sent."));
   }
-  const result = await provider.sendBitcoin(recipient, satoshis, { feeRate });
-  return requireTxid(result, "Bitcoin payment");
+  return provider.sendBitcoin(recipient, satoshis, { feeRate }).then(result => requireTxid(result, "Bitcoin payment"));
 }
