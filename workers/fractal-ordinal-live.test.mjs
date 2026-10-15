@@ -35,7 +35,7 @@ test('returns the higher live Mempool/UniSat half-hour fee without exposing the 
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
-    const response = await worker.fetch(makeRequest('/api/fees/recommended?chain=FRACTAL_BITCOIN_MAINNET', { ip: '192.0.2.80' }), { UNISAT_API_KEY: 'test-only' });
+    const response = await worker.fetch(makeRequest('/api/fees/recommended?chain=FRACTAL_BITCOIN_MAINNET', { ip: '192.0.2.80' }), { UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only' });
     const data = await response.json();
     assert.equal(response.status, 200);
     assert.equal(data.feeRate, 7);
@@ -43,8 +43,9 @@ test('returns the higher live Mempool/UniSat half-hour fee without exposing the 
     assert.equal(data.sources.mempool.feeRate, 7);
     assert.equal(data.sources.unisat.feeRate, 4);
     assert.equal(data.network, 'FRACTAL_BITCOIN_MAINNET');
-    assert.equal(unisatAuth, 'Bearer test-only');
-    assert.equal(JSON.stringify(data).includes('test-only'), false);
+    assert.equal(unisatAuth, 'Bearer fractal-test-only');
+    assert.equal(JSON.stringify(data).includes('fractal-test-only'), false);
+    assert.equal(JSON.stringify(data).includes('bitcoin-test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
 });
 
@@ -57,13 +58,41 @@ test('uses the remaining live estimator if one fee source is unavailable', async
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
-    const response = await worker.fetch(makeRequest('/api/fees/recommended?chain=BITCOIN_MAINNET', { ip: '192.0.2.81' }), { UNISAT_API_KEY: 'test-only' });
+    const response = await worker.fetch(makeRequest('/api/fees/recommended?chain=BITCOIN_MAINNET', { ip: '192.0.2.81' }), { UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only' });
     const data = await response.json();
     assert.equal(response.status, 200);
     assert.equal(data.feeRate, 3);
     assert.equal(data.strategy, 'single-provider-fallback');
     assert.equal(data.sources.unisat.available, false);
     assert.equal(data.sources.mempool.available, true);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('uses the separate Bitcoin UniSat secret for Bitcoin fees without exposing either key', async () => {
+  const previousFetch = globalThis.fetch;
+  let bitcoinAuth = '';
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url === 'https://open-api.unisat.io/v1/indexer/fees/recommended') {
+      bitcoinAuth = new Headers(init.headers).get('Authorization') || '';
+      return Response.json({ code: 0, data: { halfHourFee: 8 } });
+    }
+    if (url === 'https://mempool.space/api/v1/fees/recommended') return Response.json({ halfHourFee: 5 });
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest('/api/fees/recommended?chain=BITCOIN_MAINNET', { ip: '192.0.2.82' }), {
+      UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only',
+    });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.network, 'BITCOIN_MAINNET');
+    assert.equal(data.feeRate, 8);
+    assert.equal(data.sources.unisat.available, true);
+    assert.equal(data.sources.mempool.available, true);
+    assert.equal(bitcoinAuth, 'Bearer bitcoin-test-only');
+    assert.equal(JSON.stringify(data).includes('bitcoin-test-only'), false);
+    assert.equal(JSON.stringify(data).includes('fractal-test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
 });
 
@@ -77,14 +106,15 @@ test('returns a live Fractal balance without exposing the UniSat API key', async
   };
   try {
     const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
-    const response = await worker.fetch(makeRequest(`/api/fractal/balance?address=${address}`, { ip: '192.0.2.79' }), { UNISAT_API_KEY: 'test-only' });
+    const response = await worker.fetch(makeRequest(`/api/fractal/balance?address=${address}`, { ip: '192.0.2.79' }), { UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only' });
     const data = await response.json();
     assert.equal(response.status, 200);
     assert.equal(data.network, 'FRACTAL_BITCOIN_MAINNET');
     assert.equal(data.address, address);
     assert.deepEqual(data.balance, { amount: 12345 });
-    assert.equal(unisatAuth, 'Bearer test-only');
-    assert.equal(JSON.stringify(data).includes('test-only'), false);
+    assert.equal(unisatAuth, 'Bearer fractal-test-only');
+    assert.equal(JSON.stringify(data).includes('fractal-test-only'), false);
+    assert.equal(JSON.stringify(data).includes('bitcoin-test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
 });
 
@@ -217,9 +247,11 @@ test('returns a fresh network-specific live receipt when optional UniSat market 
   const inscriptionId = `${'a'.repeat(64)}i0`;
   const genesisTxid = 'a'.repeat(64);
   const calledUrls = [];
-  globalThis.fetch = async (input) => {
+  const upstreamAuthorization = [];
+  globalThis.fetch = async (input, init = {}) => {
     const url = String(input);
     calledUrls.push(url);
+    upstreamAuthorization.push(new Headers(init.headers).get('Authorization'));
     if (url === `https://open-api.unisat.io/v1/indexer/inscription/info/${inscriptionId}`) {
       return Response.json({ code: 0, data: { address: 'bc1qowner' } });
     }
@@ -232,7 +264,7 @@ test('returns a fresh network-specific live receipt when optional UniSat market 
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
-    const response = await worker.fetch(makeRequest(`/api/live-inscription?inscriptionId=${inscriptionId}&chain=BITCOIN_MAINNET&refresh=1`, { ip: '192.0.2.240' }), { UNISAT_API_KEY: 'test-only' });
+    const response = await worker.fetch(makeRequest(`/api/live-inscription?inscriptionId=${inscriptionId}&chain=BITCOIN_MAINNET&refresh=1`, { ip: '192.0.2.240' }), { UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only' });
     const data = await response.json();
     assert.equal(response.status, 200);
     assert.equal(data.owner, 'bc1qowner');
@@ -242,6 +274,9 @@ test('returns a fresh network-specific live receipt when optional UniSat market 
     assert.equal(response.headers.get('x-edge-cache'), 'BYPASS');
     assert.equal(calledUrls.length, 3);
     assert.ok(calledUrls.every(url => url.startsWith('https://open-api.unisat.io/')));
+    assert.deepEqual(upstreamAuthorization, Array(3).fill('Bearer bitcoin-test-only'));
+    assert.equal(JSON.stringify(data).includes('bitcoin-test-only'), false);
+    assert.equal(JSON.stringify(data).includes('fractal-test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
 });
 
@@ -304,6 +339,52 @@ test('creates a V5 order without a human token and supports file batches', async
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('creates Bitcoin V5 orders with the Bitcoin UniSat key and Bitcoin Mempool fees', async () => {
+  const previousFetch = globalThis.fetch;
+  const upstreamAuth = [];
+  let createUrl = '';
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url === 'https://open-api.unisat.io/v1/indexer/fees/recommended') {
+      upstreamAuth.push(new Headers(init.headers).get('Authorization'));
+      return Response.json({ code: 0, data: { halfHourFee: 7 } });
+    }
+    if (url === 'https://mempool.space/api/v1/fees/recommended') return Response.json({ halfHourFee: 5 });
+    if (url === 'https://open-api.unisat.io/v5/inscribe/order/create') {
+      createUrl = url;
+      upstreamAuth.push(new Headers(init.headers).get('Authorization'));
+      return Response.json({ code: 0, data: { orderId: 'btc-order-789', status: 'pending', payAddress: 'bc1qpaymentaddress0000000000000000000000', amount: 23456 } });
+    }
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const body = JSON.stringify({
+      receiver: 'bc1qtestaddress0000000000000000000000000',
+      refundAddress: 'bc1qtestaddress0000000000000000000000000',
+      userAddress: 'bc1qtestaddress0000000000000000000000000',
+      userPubkey: '02' + 'a'.repeat(64),
+      feeRate: 5,
+      outputValue: 546,
+      chain: 'BITCOIN_MAINNET',
+      files: [{ filename: 'bitcoin.txt', dataURL: 'data:text/plain;base64,QQ==' }],
+    });
+    const response = await worker.fetch(makeRequest('/api/inscribe/order', { method: 'POST', ip: '192.0.2.244', body }), {
+      UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only',
+    });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.network, 'BITCOIN_MAINNET');
+    assert.equal(data.orderId, 'btc-order-789');
+    assert.equal(data.feeRate, 7);
+    assert.equal(data.feeSources.mempool.feeRate, 5);
+    assert.equal(data.feeSources.unisat.feeRate, 7);
+    assert.equal(createUrl, 'https://open-api.unisat.io/v5/inscribe/order/create');
+    assert.deepEqual(upstreamAuth, ['Bearer bitcoin-test-only', 'Bearer bitcoin-test-only']);
+    assert.equal(JSON.stringify(data).includes('bitcoin-test-only'), false);
+    assert.equal(JSON.stringify(data).includes('fractal-test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('rejects Inscribe requests from origins outside the allowlist', async () => {
   const previousFetch = globalThis.fetch;
   let upstreamCalls = 0;
@@ -333,14 +414,17 @@ test('allows the configured Manus site origin to reach normal Inscribe payload v
 test('routes Bitcoin order status to the Bitcoin API rather than Fractal', async () => {
   const previousFetch = globalThis.fetch;
   let statusUrl = '';
-  globalThis.fetch = async (input) => {
+  let statusAuth = '';
+  globalThis.fetch = async (input, init = {}) => {
     statusUrl = String(input);
+    statusAuth = new Headers(init.headers).get('Authorization') || '';
     return Response.json({ code: 0, data: { orderId: 'order-test-456', status: 'pending', files: [] } });
   };
   try {
-    const response = await worker.fetch(makeRequest('/api/inscribe/order?orderId=order-test-456&chain=BITCOIN_MAINNET', { ip: '192.0.2.223' }), { UNISAT_API_KEY: 'test-only' });
+    const response = await worker.fetch(makeRequest('/api/inscribe/order?orderId=order-test-456&chain=BITCOIN_MAINNET', { ip: '192.0.2.223' }), { UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only' });
     assert.equal(response.status, 200);
     assert.match(statusUrl, /^https:\/\/open-api\.unisat\.io\/v5\/inscribe\/order\/order-test-456$/);
+    assert.equal(statusAuth, 'Bearer bitcoin-test-only');
   } finally { globalThis.fetch = previousFetch; }
 });
 
@@ -512,7 +596,7 @@ test('fails closed when a protocol balance response is missing or malformed', as
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('never sends the Fractal UniSat secret to the Bitcoin API', async () => {
+test('uses the Bitcoin UniSat secret for Bitcoin UTXOs without sending the Fractal key', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
   const upstreamAuthorization = [];
@@ -522,13 +606,29 @@ test('never sends the Fractal UniSat secret to the Bitcoin API', async () => {
     return new Response('upstream unavailable', { status: 429 });
   };
   try {
-    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=bitcoin&address=${address}&cursor=0&size=25`, { ip: '192.0.2.235' }), { UNISAT_API_KEY: 'test-only' });
+    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=bitcoin&address=${address}&cursor=0&size=25`, { ip: '192.0.2.235' }), { UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only' });
     const data = await response.json();
     assert.equal(response.status, 503);
     assert.equal(data.code, 'UTXO_LIST_UNISAT_HTTP_429');
     assert.equal(JSON.stringify(data).includes(address), false);
-    assert.equal(JSON.stringify(data).includes('test-only'), false);
-    assert.deepEqual(upstreamAuthorization, [null]);
+    assert.equal(JSON.stringify(data).includes('fractal-test-only'), false);
+    assert.equal(JSON.stringify(data).includes('bitcoin-test-only'), false);
+    assert.deepEqual(upstreamAuthorization, ['Bearer bitcoin-test-only']);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('fails closed before Bitcoin UniSat access when the Bitcoin secret is missing', async () => {
+  const previousFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => { upstreamCalls += 1; throw new Error('Unexpected upstream call'); };
+  try {
+    const address = 'bc1qtestaddress0000000000000000000000000';
+    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=bitcoin&address=${address}&cursor=0&size=25`, { ip: '192.0.2.243' }), { UNISAT_API_KEY: 'fractal-test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(data.code, 'UTXO_LIST_UNISAT_BITCOIN_API_KEY_MISSING');
+    assert.equal(JSON.stringify(data).includes('fractal-test-only'), false);
+    assert.equal(upstreamCalls, 0);
   } finally { globalThis.fetch = previousFetch; }
 });
 

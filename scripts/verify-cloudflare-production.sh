@@ -11,8 +11,13 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 curl -fsS --max-time 20 -H "${AUTH_HEADER}" "${SCRIPT_API}/secrets" \
-  | jq -e '.success == true and any(.result[]?; .name == "UNISAT_API_KEY" and .type == "secret_text")' >/dev/null
-echo "Cloudflare secret binding name/type verified; its value was not read."
+  | jq -e '.success == true and any(.result[]?; .name == "UNISAT_API_KEY" and .type == "secret_text") and any(.result[]?; .name == "UNISAT_BITCOIN_API" and .type == "secret_text")' >/dev/null
+echo "Cloudflare UniSat Bitcoin and Fractal secret names/types verified; values were not read."
+
+bitcoin_fees="$(curl -fsS --retry 2 --max-time 20 "${BASE_URL}/api/fees/recommended?chain=BITCOIN_MAINNET" \
+  -H 'Origin: https://demro-labs.github.io')"
+printf '%s' "${bitcoin_fees}" | jq -e '.network == "BITCOIN_MAINNET" and .sources.unisat.available == true and (.sources.unisat.feeRate | type == "number" and . >= 1)' >/dev/null
+echo "Bitcoin UniSat-authenticated fee source verified; the secret value was not returned."
 
 curl -fsS --max-time 20 -H "${AUTH_HEADER}" "${SCRIPT_API}/settings" \
   | jq -e '.success == true and any(.result.bindings[]?; .name == "AUTH_STORAGE" and .type == "durable_object_namespace" and .class_name == "AuthStorage")' >/dev/null
