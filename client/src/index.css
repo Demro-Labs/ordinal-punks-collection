@@ -80,8 +80,8 @@ input:focus-visible, select:focus-visible { outline: none; }
   .ledger-sheet::after { right: 10px; transform: rotate(90deg); }
   .card-image { transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 220ms cubic-bezier(0.23, 1, 0.32, 1), filter 220ms ease; }
   .group:hover .card-image { transform: translateY(-3px); box-shadow: 7px 7px 0 rgba(217, 154, 84, 0.24); filter: saturate(1.06); }
-  .mobile-transaction-nav { scrollbar-width: none; }
-  .mobile-transaction-nav::-webkit-scrollbar { display: none; }
+  .transaction-shortcut-nav { scrollbar-width: none; }
+  .transaction-shortcut-nav::-webkit-scrollbar { display: none; }
   .unisat-wallet-panel :is(button, input, select), [data-transaction-dialog] :is(button, input, select) { touch-action: manipulation; }
 }
 
