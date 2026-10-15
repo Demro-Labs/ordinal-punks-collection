@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CheckCircle2, ExternalLink, FilePlus2, Files, ShieldCheck, Upload, X } from "lucide-react";
 import { describeFeeSources, getRecommendedFeeEstimate, trackMempoolTransaction, validateMempoolAddress, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
-import { getMobileUtxoErrorGuidance, sendNativeUniSatBitcoinPayment } from "@/lib/native-unisat-actions";
+import { ensureNativePaymentBalance, getMobileUtxoErrorGuidance, sendNativeUniSatBitcoinPayment } from "@/lib/native-unisat-actions";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 
 const API_BASE = "https://fractal-ordinal-live.servostar23.workers.dev";
@@ -364,6 +364,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       if (!response.ok || !created.orderId || !created.payAddress || !Number.isSafeInteger(created.amount) || !Number.isSafeInteger(created.feeRate) || Number(created.feeRate) < 1) throw new Error(created.error || "UniSat did not create the order with a verifiable fee rate.");
       const feeSourceLabel = describeFeeSources(created.feeStrategy ?? feeEstimate.strategy, created.feeSources ?? feeEstimate.sources);
       createdReceipt = { orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: files.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })), feeRate: Number(created.feeRate), paymentFeeRate: liveFeeRate, feeSourceLabel, chain: activeChainEnum, walletAddress: activeAddress, createdAt: new Date().toISOString() };
+      if (mobileUniSat) await ensureNativePaymentBalance(activeChainEnum, activeAddress, createdReceipt.amount, liveFeeRate, "inscribe-payment");
       setReceipt(createdReceipt);
       if (mobileUniSat) saveActiveMobileOrder(createdReceipt);
       setStage("awaiting-approval");

@@ -113,20 +113,47 @@ export async function ensureNativeInscriptionFeeBalance(
     );
   }
 }
+
+/** Mobile-only preflight for native BTC/FB payments before the final UniSat tap. */
+export async function ensureNativePaymentBalance(
+  networkEnum: string,
+  address: string,
+  amountSats: number,
+  feeRate: number,
+  operation: Exclude<MobileUtxoOperation, "ordinal-transfer">,
+) {
+  const networkLabel = networkEnum === "BITCOIN_MAINNET" ? "Bitcoin" : networkEnum === "FRACTAL_BITCOIN_MAINNET" ? "Fractal Bitcoin" : "selected network";
+  const feeAsset = networkEnum === "BITCOIN_MAINNET" ? "BTC" : "FB";
+  if (!Number.isSafeInteger(amountSats) || amountSats <= 0 || !Number.isFinite(feeRate) || feeRate <= 0) {
+    throw new Error(`Invalid ${operation} amount or fee rate; no transaction was signed or broadcast.`);
+  }
+  const minimumSats = amountSats + Math.ceil(feeRate * 250) + 600;
+  let verifiedUtxos: Awaited<ReturnType<typeof getSpendableUtxos>>;
+  try {
+    verifiedUtxos = await getSpendableUtxos(networkEnum, address, minimumSats);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`Could not verify safe ${feeAsset} UTXOs for this ${operation} on ${networkLabel}. Add confirmed ${feeAsset} sats in uninscribed UTXOs, then check again. No transaction was signed or broadcast. Verification detail: ${detail}`);
+  }
+  const safeSats = verifiedUtxos.reduce((total, utxo) => total + utxo.satoshi, 0);
+  if (safeSats < minimumSats) {
+    throw new Error(`Insufficient safe ${feeAsset} UTXOs for this ${operation} on ${networkLabel}. Required: ${minimumSats.toLocaleString()} sats; verified: ${safeSats.toLocaleString()} sats. No transaction was signed or broadcast.`);
+  }
+}
 /** Ask UniSat itself to construct, review, sign, and broadcast an inscription transfer.
  * Keep the bridge call synchronous for UniSat Mobile's user-gesture requirement.
  */
 export function sendNativeUniSatInscription(
   provider: NativeUniSatProvider,
-  recipient: string,
+  toAddress: string,
   inscriptionId: string,
   feeRate: number,
 ) {
   if (!provider.sendInscription) return Promise.reject(new Error("This UniSat context does not expose native sendInscription; no transfer was sent."));
-  if (!recipient || !/^[a-f0-9]{64}i\d+$/i.test(inscriptionId) || !Number.isFinite(feeRate) || feeRate <= 0) {
+  if (!toAddress || !/^[a-f0-9]{64}i\d+$/i.test(inscriptionId) || !Number.isFinite(feeRate) || feeRate <= 0) {
     return Promise.reject(new Error("Invalid native UniSat inscription transfer parameters; no transfer was sent."));
   }
-  return provider.sendInscription(recipient, inscriptionId, { feeRate }).then(result => requireTxid(result, "inscription transfer"));
+  return provider.sendInscription(toAddress, inscriptionId, { feeRate }).then(result => requireTxid(result, "inscription transfer"));
 }
 
 /** Ask UniSat itself to construct, review, sign, and broadcast the inscription-order payment.
@@ -134,13 +161,13 @@ export function sendNativeUniSatInscription(
  */
 export function sendNativeUniSatBitcoinPayment(
   provider: NativeUniSatProvider,
-  recipient: string,
+  toAddress: string,
   satoshis: number,
   feeRate: number,
 ) {
   if (!provider.sendBitcoin) return Promise.reject(new Error("This UniSat context does not expose native sendBitcoin; no payment was sent."));
-  if (!recipient || !Number.isSafeInteger(satoshis) || satoshis <= 0 || !Number.isFinite(feeRate) || feeRate <= 0) {
+  if (!toAddress || !Number.isSafeInteger(satoshis) || satoshis <= 0 || !Number.isFinite(feeRate) || feeRate <= 0) {
     return Promise.reject(new Error("Invalid native UniSat payment parameters; no payment was sent."));
   }
-  return provider.sendBitcoin(recipient, satoshis, { feeRate }).then(result => requireTxid(result, "Bitcoin payment"));
+  return provider.sendBitcoin(toAddress, satoshis, { feeRate }).then(result => requireTxid(result, "Bitcoin payment"));
 }
