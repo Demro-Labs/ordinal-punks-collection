@@ -353,6 +353,36 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('mobile UTXO mode accepts UniSat available outputs that omit optional fee flags', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qmobiletestaddress000000000000000000000';
+  const record = {
+    address, txid: '1'.repeat(64), vout: 0, satoshi: 120000,
+    scriptPk: '0014' + '66'.repeat(20), height: 100, inscriptions: [],
+  };
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      assert.equal(url.searchParams.get('withLowFee'), 'true');
+      return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
+    }
+    if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false } });
+    if (url.pathname.endsWith(`/runes/utxo/${record.txid}/0/balance`)) return Response.json({ code: 0, data: [] });
+    if (url.pathname.endsWith(`/alkanes/utxo/${record.txid}/0/balance`)) return Response.json({ code: 0, data: [] });
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25&mobile=1`, { ip: '192.0.2.241' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.utxo.length, 1);
+    assert.equal(data.utxo[0].satoshi, 120000);
+    assert.equal(data.utxo[0].isLowFee, false);
+    assert.equal(data.utxo[0].isOpInRBF, false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('Worker attests that the exact Fractal PSBT inputs cover payment plus fees', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
