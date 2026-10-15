@@ -127,7 +127,7 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
     let paymentPromise: Promise<unknown>;
     try {
       // Open the UniSat transaction prompt synchronously from this explicit tap.
-      paymentPromise = sendNativeUniSatBitcoinPayment(provider, to, sats, feeRate);
+      paymentPromise = sendNativeUniSatBitcoinPayment(provider, to, sats, feeRate, { mobile: true });
     } catch (cause) {
       setSending(false);
       setError(getMobileUtxoErrorGuidance(cause, "fb-transfer")?.message ?? (cause instanceof Error ? cause.message : String(cause)));
