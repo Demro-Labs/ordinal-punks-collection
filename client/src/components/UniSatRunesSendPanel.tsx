@@ -11,6 +11,7 @@ import {
   describeFeeSources,
   getRecommendedFeeEstimate,
   getSpendableUtxos,
+  InsufficientSafeUtxosError,
   trackMempoolTransaction,
   validateMempoolAddress,
   type MempoolReceipt,
@@ -406,11 +407,15 @@ export function UniSatRunesSendPanel({
         expiresAt: Date.now() + 120_000,
       });
     } catch (cause) {
-      setError(
+      const message =
         cause instanceof Error
           ? cause.message
-          : "Rune transfer preflight failed. No transfer was requested."
-      );
+          : "Rune transfer preflight failed. No transfer was requested.";
+      const mobileFundingGuidance =
+        isMobileUniSatDevice() && cause instanceof InsufficientSafeUtxosError
+          ? " Sur mobile, ajoutez un UTXO FB confirmé distinct couvrant le minimum indiqué et la marge de frais, sans Ordinal, Rune ni Alkane, puis relancez la vérification. Le solde Rune ne paie pas les frais réseau. Cette vérification n’a ouvert aucune approbation UniSat et n’a lancé aucune transaction."
+          : "";
+      setError(`${message}${mobileFundingGuidance}`);
     } finally {
       setPreparing(false);
     }
