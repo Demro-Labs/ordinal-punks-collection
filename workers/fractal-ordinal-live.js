@@ -12,6 +12,8 @@ const ALLOWED_COLLECTION_IDS = new Set(['opunk', 'pokedex']);
 const SATS = 100000000;
 const MAX_MARKET_OFFSET = 10000;
 const MAX_PAGE_SIZE = 20;
+const MAX_RUNES_OFFSET = 10000;
+const MAX_RUNES_PAGE_SIZE = 25;
 const RATE_WINDOW_MS = 60000;
 const RATE_MAX_REQUESTS = 180;
 const rateBuckets = new Map();
@@ -170,6 +172,30 @@ async function recommendedFeeEstimate(chain, env) {
 
 function validWalletAddress(value) {
   return typeof value === 'string' && value.length >= 14 && value.length <= 100 && /^[A-Za-z0-9]+$/.test(value);
+}
+
+function validRuneId(value) {
+  return typeof value === 'string' && value.length <= 42 && /^\d{1,20}:\d{1,20}$/.test(value);
+}
+
+function normalizeRuneBalance(value) {
+  const amount = typeof value?.amount === 'string' ? value.amount : '';
+  const rune = typeof value?.rune === 'string' ? value.rune : '';
+  const spacedRune = typeof value?.spacedRune === 'string' ? value.spacedRune : '';
+  const divisibility = Number(value?.divisibility);
+  if (
+    !/^\d{1,80}$/.test(amount) || !validRuneId(value?.runeid) ||
+    !rune || rune.length > 128 || !spacedRune || spacedRune.length > 160 ||
+    !Number.isSafeInteger(divisibility) || divisibility < 0 || divisibility > 38
+  ) return null;
+  return {
+    amount,
+    runeid: value.runeid,
+    rune,
+    spacedRune,
+    symbol: typeof value.symbol === 'string' && value.symbol.length <= 16 ? value.symbol : '',
+    divisibility,
+  };
 }
 
 class SpendableUtxoError extends Error {
@@ -586,6 +612,48 @@ export default {
         return Response.json(estimate, { headers: noStore });
       } catch {
         return Response.json({ error: 'Les estimateurs Mempool et UniSat sont temporairement indisponibles. Aucun taux périmé ne sera utilisé.' }, { status: 503, headers: noStore });
+      }
+    }
+    if (request.method === 'GET' && url.pathname === '/api/runes/balance-list') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const address = url.searchParams.get('address') || '';
+      const start = parseBoundedInteger(url.searchParams.get('start'), 0, MAX_RUNES_OFFSET);
+      const limit = parseBoundedInteger(url.searchParams.get('limit'), 20, MAX_RUNES_PAGE_SIZE);
+      if (!validWalletAddress(address) || start === null || limit === null || limit < 1) {
+        return Response.json({ error: 'Adresse ou pagination Runes Fractal invalide.' }, { status: 400, headers: noStore });
+      }
+      try {
+        const source = await uniNetwork(API_BASE, `/v1/indexer/address/${encodeURIComponent(address)}/runes/balance-list?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
+        const sourceStart = Number(source?.start);
+        const total = Number(source?.total);
+        if (!Number.isSafeInteger(sourceStart) || sourceStart !== start || !Number.isSafeInteger(total) || total < 0 || !Array.isArray(source?.detail) || source.detail.length > limit) {
+          throw new Error('Invalid UniSat Rune balance list response');
+        }
+        const detail = source.detail.map(normalizeRuneBalance);
+        if (detail.some(item => item === null)) throw new Error('Invalid UniSat Rune balance item');
+        return Response.json({ network: 'FRACTAL_BITCOIN_MAINNET', address, start, total, detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
+      } catch {
+        console.warn('Fractal Rune balance list lookup failed');
+        return Response.json({ error: 'Les soldes Runes Fractal sont temporairement indisponibles.' }, { status: 503, headers: noStore });
+      }
+    }
+    if (request.method === 'GET' && url.pathname === '/api/runes/balance') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const address = url.searchParams.get('address') || '';
+      const runeid = url.searchParams.get('runeid') || '';
+      if (!validWalletAddress(address) || !validRuneId(runeid)) {
+        return Response.json({ error: 'Adresse ou identifiant Rune Fractal invalide.' }, { status: 400, headers: noStore });
+      }
+      try {
+        const source = await uniNetwork(API_BASE, `/v1/indexer/address/${encodeURIComponent(address)}/runes/${encodeURIComponent(runeid)}/balance`, env, { signal: AbortSignal.timeout(8000) });
+        const balance = normalizeRuneBalance(source);
+        if (!balance || balance.runeid !== runeid) throw new Error('Invalid UniSat Rune balance response');
+        return Response.json({ network: 'FRACTAL_BITCOIN_MAINNET', address, balance, refreshedAt: new Date().toISOString() }, { headers: noStore });
+      } catch {
+        console.warn('Fractal Rune balance lookup failed');
+        return Response.json({ error: 'Le solde Rune Fractal est temporairement indisponible.' }, { status: 503, headers: noStore });
       }
     }
     if (request.method === 'GET' && url.pathname === '/api/spendable-utxos') {

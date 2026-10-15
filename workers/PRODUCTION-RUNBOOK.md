@@ -7,7 +7,7 @@ Ce runbook couvre le Worker Cloudflare `fractal-ordinal-live`, utilisé par les 
 1. Distinguer une panne de page GitHub Pages d’une panne de l’API Worker. Les pages sont indépendantes du Worker :
    - `https://demro-labs.github.io/ordinal-punks-collection/`
    - `https://demro-labs.github.io/fractal-pokedex-ordinal-ledger/`
-2. Vérifier les routes lecture seule des deux collections et des deux sessions anonymes. Ne pas inclure de cookie ni de signature dans le diagnostic :
+2. Vérifier les routes lecture seule des deux collections et des deux sessions anonymes. Pour les nouvelles routes Runes, utiliser uniquement une adresse de test contrôlée et éviter de l’inclure dans les journaux :
 
    ```bash
    base=https://fractal-ordinal-live.servostar23.workers.dev
@@ -15,7 +15,10 @@ Ce runbook couvre le Worker Cloudflare `fractal-ordinal-live`, utilisé par les 
    curl -sS -w '\nHTTP %{http_code}\n' "$base/api/market?collectionId=pokedex&start=0&limit=1" -H 'Origin: https://demro-labs.github.io'
    curl -sS -w '\nHTTP %{http_code}\n' "$base/api/auth/session?site=punks" -H 'Origin: https://demro-labs.github.io'
    curl -sS -w '\nHTTP %{http_code}\n' "$base/api/auth/session?site=pokedex" -H 'Origin: https://demro-labs.github.io'
+   curl -sS -w '\nHTTP %{http_code}\n' "$base/api/runes/balance-list?address=$TEST_FRACTAL_ADDRESS&start=0&limit=1" -H 'Origin: https://demro-labs.github.io'
    ```
+
+   La vérification des Runes doit être une lecture seule (`GET`), limitée à une page. Les routes `/api/runes/balance-list` et `/api/runes/balance` restent fixées à UniSat Fractal; elles ne doivent pas devenir un proxy générique et ne diffusent aucune transaction.
 
 3. Repérer si l’incident suit immédiatement un déploiement ou touche aussi les services amont. Une réponse `503` du Worker n’est pas, à elle seule, une raison de republier du code.
 
