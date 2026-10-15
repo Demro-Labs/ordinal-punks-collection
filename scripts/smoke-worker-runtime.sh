@@ -25,7 +25,7 @@ fail() {
   exit 1
 }
 
-pnpm dlx wrangler@4.150.0 dev --local --ip "${HOST}" --port "${PORT}" --log-level error >"${LOG_FILE}" 2>&1 &
+pnpm dlx wrangler@4.151.0 dev --local --ip "${HOST}" --port "${PORT}" --log-level error >"${LOG_FILE}" 2>&1 &
 WORKER_PID=$!
 
 status="000"

@@ -43,7 +43,7 @@ jobs:
         run: node --test workers/fractal-ordinal-live.test.mjs
 
       - name: Validate Wrangler configuration and bundle
-        run: pnpm dlx wrangler@4.150.0 deploy --dry-run --outdir=/tmp/fractal-worker-dry-run
+        run: pnpm dlx wrangler@4.151.0 deploy --dry-run --outdir=/tmp/fractal-worker-dry-run
 
       - name: Smoke-test Worker in local workerd runtime
         run: bash scripts/smoke-worker-runtime.sh
