@@ -838,19 +838,12 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       setTransferError("Select an inscription loaded from your connected UniSat wallet.");
       return;
     }
-    const useNativeInscription = Boolean(provider.sendInscription);
+    const useNativeInscription = Boolean(provider.sendInscription) && !(isMobileUniSatDevice() && chain?.enum === FRACTAL_MAINNET);
     const useVerifiedPsbt =
-      !isMobileUniSatDevice() &&
       isSupportedMainnet(chain?.enum) &&
       !useNativeInscription;
     if (!isSupportedMainnet(chain?.enum)) {
       setTransferError("This UniSat version exposes neither sendInscription nor all verified PSBT methods required for this network. Update UniSat; no transfer was signed or broadcast.");
-      return;
-    }
-    if (isMobileUniSatDevice() && !useNativeInscription) {
-      setTransferError(
-        "Mobile Ordinal transfers require UniSat native sendInscription. Open this site in the UniSat app and update the wallet; no custom PSBT fallback was used and no transfer was sent."
-      );
       return;
     }
     if (useVerifiedPsbt && (!provider.getBitcoinUtxos || !provider.getPublicKey || !provider.getAccounts || !provider.signPsbt)) {
@@ -1051,13 +1044,13 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
 
   const connectedToFractal = Boolean(address && isSupportedMainnet(chain?.enum));
   const currentNetwork = getMempoolConfig(chain?.enum);
-  const nativeInscriptionTransfer = Boolean(window.unisat?.sendInscription);
+  const nativeInscriptionTransfer = Boolean(window.unisat?.sendInscription) && !(isMobileUniSatDevice() && chain?.enum === FRACTAL_MAINNET);
   const verifiedOrdinalTransfer =
-    !isMobileUniSatDevice() &&
     isSupportedMainnet(chain?.enum) &&
     !nativeInscriptionTransfer;
-  const mobileNativeTransferUnavailable =
-    isMobileUniSatDevice() && connectedToFractal && !nativeInscriptionTransfer;
+  const mobilePsbtTransferUnavailable =
+    isMobileUniSatDevice() && connectedToFractal && !nativeInscriptionTransfer &&
+    (!window.unisat?.getBitcoinUtxos || !window.unisat?.getPublicKey || !window.unisat?.getAccounts || !window.unisat?.signPsbt);
   const walletPageSize = 10;
   const normalizedInscriptionSearch = inscriptionSearch.trim().toLowerCase();
   const filteredInscriptions = normalizedInscriptionSearch
@@ -1090,7 +1083,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     resetMempoolTracking();
     setTransferError("Enter a receiving address to generate the live pre-confirmation receipt.");
     window.setTimeout(() => {
-      document.getElementById("ordinal-punks-transfer-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById("wallet-transfer-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
       destinationInputRef.current?.focus();
     }, 80);
   };
@@ -1109,7 +1102,14 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   const formatSats = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? "Unavailable" : `${Math.round(value).toLocaleString()} sats`;
 
   return (
-    <div className="flex flex-col gap-4 border border-[#2c323a] bg-[#14191f] p-4">
+    <div id="unisat-wallet-panel" className="unisat-wallet-panel flex flex-col gap-4 border border-[#2c323a] bg-[#14191f] p-4">
+      <nav className="mobile-transaction-nav sticky top-0 z-30 -mx-4 -mt-4 mb-1 flex gap-2 overflow-x-auto border-b border-[#2c323a] bg-[#14191f]/95 px-3 py-2 backdrop-blur sm:hidden" aria-label="UniSat transaction shortcuts">
+        <a href="#unisat-wallet-panel" className="inline-flex min-h-11 shrink-0 items-center justify-center border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6]">Wallet</a>
+        {connectedToFractal && <a href={inscriptions.length > 0 ? "#wallet-transfer-form" : "#unisat-wallet-panel"} className="inline-flex min-h-11 shrink-0 items-center justify-center border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6]">Ordinals</a>}
+        {connectedToFractal && <a href="#fb-send-title" className="inline-flex min-h-11 shrink-0 items-center justify-center border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6]">Send FB</a>}
+        {connectedToFractal && <a href="#runes-send-title" className="inline-flex min-h-11 shrink-0 items-center justify-center border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6]">Runes</a>}
+        <a href="#inscribe-start" className="inline-flex min-h-11 shrink-0 items-center justify-center border border-[#d99a54] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#f2bd63]">Inscribe</a>
+      </nav>
       {psbtReview && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4">
           <div role="dialog" aria-modal="true" aria-labelledby="fractal-psbt-review-title" className="max-h-[90vh] w-full max-w-xl overflow-y-auto border border-[#d99a54] bg-[#14191f] p-5 shadow-2xl">
@@ -1262,7 +1262,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         </section>
       )}
       {connectedToFractal && inscriptions.length > 0 && (
-        <section id="ordinal-punks-transfer-form" className="border-t border-[#2c323a] pt-4" aria-labelledby="ordinal-transfer-title">
+        <section id="wallet-transfer-form" className="scroll-mt-20 border-t border-[#2c323a] pt-4" aria-labelledby="ordinal-transfer-title">
           <h3 id="ordinal-transfer-title" className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#d9d3c6]">
             On-chain Ordinal transfer · peer to peer
           </h3>
@@ -1347,7 +1347,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                 onClick={() => mobileNativeReadyForContext ? openMobileNativeTransfer() : void sendSelectedInscription()}
                 disabled={
                   transferOutcomeUnclear ||
-                  mobileNativeTransferUnavailable ||
+                  mobilePsbtTransferUnavailable ||
                   (isMobileBrowser() &&
                     (!isUniSatMobileContext() || !providerAvailable)) ||
                   !confirmed ||
@@ -1361,14 +1361,12 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
               >
                 {transferOutcomeUnclear ? "Transfer status unknown — verify first" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? verifiedOrdinalTransfer ? "Preparing verified transfer…" : "Preparing transfer…" : mobileNativeReadyForContext ? "Approve in UniSat" : verifiedOrdinalTransfer ? "Prepare verified transfer" : isMobileUniSatDevice() ? "Prepare transfer" : "Review transfer in UniSat"}
               </button>
-              {mobileNativeTransferUnavailable ? (
+              {mobilePsbtTransferUnavailable ? (
                 <p
                   className="mt-2 font-mono text-[10px] leading-5 text-[#e0b45f]"
                   role="note"
                 >
-                  Mobile requires UniSat native sendInscription. Update UniSat or
-                  open this page inside the UniSat app; no PSBT fallback or
-                  transfer will be attempted.
+                  This UniSat mobile version lacks the verified PSBT methods required for an Ordinal transfer. Update UniSat; signing remains disabled until `getBitcoinUtxos`, `getPublicKey`, `getAccounts`, and `signPsbt` are available.
                 </p>
               ) : (
                 connectedToFractal && (
@@ -1394,7 +1392,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
               Load more inscriptions ({inscriptionCursor} of {inscriptionTotal})
             </button>
           )}
-          <UniSatMobileOpenDappLink site={site} walletMethodAvailable={typeof window.unisat?.sendInscription === "function"} methodLabel="sendInscription" />{transferError && <p className="mt-3 font-mono text-[10px] text-[#e08b7d]" role="alert">{transferError}</p>}
+          <UniSatMobileOpenDappLink site={site} walletMethodAvailable={nativeInscriptionTransfer ? typeof window.unisat?.sendInscription === "function" : Boolean(window.unisat?.getBitcoinUtxos && window.unisat?.getPublicKey && window.unisat?.getAccounts && window.unisat?.signPsbt)} methodLabel={nativeInscriptionTransfer ? "sendInscription" : "verified PSBT signing"} />{transferError && <p className="mt-3 font-mono text-[10px] text-[#e08b7d]" role="alert">{transferError}</p>}
           {txid && (
             <>
               <p className="mt-3 break-all font-mono text-[10px] text-[#70c7a0]" role="status">
