@@ -14,6 +14,15 @@ export type NativeUniSatProvider = {
   getBitcoinUtxos?: (cursor: number, size: number) => Promise<unknown>;
 };
 
+export type NativeUniSatRuneProvider = {
+  sendRunes?: (
+    recipient: string,
+    runeid: string,
+    amount: string,
+    options?: { feeRate?: number }
+  ) => Promise<unknown>;
+};
+
 export type MobileNativePaymentFallbackGate = {
   isMobileUniSat: boolean;
   hasReceipt: boolean;
@@ -65,14 +74,14 @@ export function getMobileUtxoErrorGuidance(error: unknown, operation: MobileUtxo
   return { message: `${action} ${outcome}`, definitelyNotBroadcast };
 }
 
-/** UniSat Mobile's native Fractal inscription transfer is not used; preserve desktop and Bitcoin behavior. */
-export function requiresVerifiedPsbtForMobileFractalTransfer(isMobileUniSat: boolean, networkEnum?: string) {
-  return isMobileUniSat && networkEnum === "FRACTAL_BITCOIN_MAINNET";
-}
-
-function requireTxid(result: UniSatTxResult, action: string) {
-  const txid = typeof result === "string" ? result : result?.txid;
-  if (!txid || !TXID_PATTERN.test(txid)) {
+function requireTxid(result: unknown, action: string) {
+  const txid =
+    typeof result === "string"
+      ? result
+      : result && typeof result === "object"
+        ? (result as { txid?: unknown }).txid
+        : null;
+  if (typeof txid !== "string" || !TXID_PATTERN.test(txid)) {
     throw new Error(`UniSat did not return a valid transaction ID after the native ${action}. Check UniSat activity and Mempool before retrying.`);
   }
   return txid.toLowerCase();
@@ -155,6 +164,28 @@ export function sendNativeUniSatInscription(
     return Promise.reject(new Error("Invalid native UniSat inscription transfer parameters; no transfer was sent."));
   }
   return provider.sendInscription(toAddress, inscriptionId, { feeRate }).then(result => requireTxid(result, "inscription transfer"));
+}
+
+/** Ask UniSat itself to construct, review, sign, and broadcast a Rune transfer. */
+export function sendNativeUniSatRunes(
+  provider: NativeUniSatRuneProvider,
+  toAddress: string,
+  runeid: string,
+  amount: string,
+  feeRate: number,
+) {
+  if (!provider.sendRunes) {
+    return Promise.reject(
+      new Error("This UniSat context does not expose native sendRunes; no transfer was sent.")
+    );
+  }
+  if (!toAddress || !runeid || !amount.trim() || !Number.isFinite(feeRate) || feeRate <= 0) {
+    return Promise.reject(new Error("Invalid native UniSat Rune transfer parameters; no transfer was sent."));
+  }
+  // Invoke synchronously inside the caller's explicit tap for UniSat Mobile.
+  return provider
+    .sendRunes(toAddress, runeid, amount, { feeRate })
+    .then(result => requireTxid(result, "Rune transfer"));
 }
 
 /** Ask UniSat itself to construct, review, sign, and broadcast the inscription-order payment.

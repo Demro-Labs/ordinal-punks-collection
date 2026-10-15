@@ -11,11 +11,13 @@ import {
   describeFeeSources,
   getRecommendedFeeEstimate,
   getSpendableUtxos,
+  InsufficientSafeUtxosError,
   trackMempoolTransaction,
   validateMempoolAddress,
   type MempoolReceipt,
 } from "@/lib/mempool";
 import { normalizeUniSatTxid } from "@/lib/native-fb-send";
+import { sendNativeUniSatRunes } from "@/lib/native-unisat-actions";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
 import {
   fetchFractalRuneBalance,
@@ -25,6 +27,7 @@ import {
   type FractalRuneBalance,
 } from "@/lib/runes";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
+import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 
 const NETWORK = "FRACTAL_BITCOIN_MAINNET";
 const PAGE_SIZE = 20;
@@ -40,6 +43,7 @@ type Provider = {
   ) => Promise<unknown>;
   getAccounts?: () => Promise<string[]>;
   getChain?: () => Promise<Chain>;
+  signMessage?: (message: string, type: "bip322-simple") => Promise<string>;
 };
 type PreparedTransfer = {
   contextKey: string;
@@ -126,6 +130,10 @@ export function UniSatRunesSendPanel({
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [confirmedContextKey, setConfirmedContextKey] = useState("");
+  const [ownershipProofKey, setOwnershipProofKey] = useState<string | null>(
+    null
+  );
+  const [ownershipProofVersion, setOwnershipProofVersion] = useState(0);
   const [prepared, setPrepared] = useState<PreparedTransfer | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [sending, setSending] = useState(false);
@@ -221,6 +229,8 @@ export function UniSatRunesSendPanel({
     setRecipient("");
     setAmount("");
     setConfirmedContextKey("");
+    setOwnershipProofKey(null);
+    setOwnershipProofVersion(version => version + 1);
     setPrepared(null);
     setError("");
     setReceipt(address ? readReceipt(address) : null);
@@ -338,6 +348,12 @@ export function UniSatRunesSendPanel({
       );
       return;
     }
+    if (isMobileUniSatDevice() && ownershipProofKey !== transferContextKey) {
+      setError(
+        "Sign the BIP-322 ownership proof for this exact Rune transfer before preflight."
+      );
+      return;
+    }
     const to = recipient.trim();
     if (!to || to.length > 100) {
       setError("Enter a valid Fractal recipient address.");
@@ -406,11 +422,15 @@ export function UniSatRunesSendPanel({
         expiresAt: Date.now() + 120_000,
       });
     } catch (cause) {
-      setError(
+      const message =
         cause instanceof Error
           ? cause.message
-          : "Rune transfer preflight failed. No transfer was requested."
-      );
+          : "Rune transfer preflight failed. No transfer was requested.";
+      const mobileFundingGuidance =
+        isMobileUniSatDevice() && cause instanceof InsufficientSafeUtxosError
+          ? " Sur mobile, ajoutez un UTXO FB confirmé distinct couvrant le minimum indiqué et la marge de frais, sans Ordinal, Rune ni Alkane, puis relancez la vérification. Le solde Rune ne paie pas les frais réseau. Cette vérification n’a ouvert aucune approbation UniSat et n’a lancé aucune transaction."
+          : "";
+      setError(`${message}${mobileFundingGuidance}`);
     } finally {
       setPreparing(false);
     }
@@ -447,6 +467,13 @@ export function UniSatRunesSendPanel({
       );
       return;
     }
+    if (isMobileUniSatDevice() && ownershipProofKey !== transferContextKey) {
+      setPrepared(null);
+      setError(
+        "The mobile BIP-322 proof is missing or expired. Sign a new proof before opening UniSat."
+      );
+      return;
+    }
     const to = recipient.trim();
     const runeId = selectedRune.runeid;
     const displayAmount = amount.trim();
@@ -454,12 +481,20 @@ export function UniSatRunesSendPanel({
     const feeSource = prepared.feeSource;
     setSending(true);
     setPrepared(null);
+    if (isMobileUniSatDevice()) {
+      setOwnershipProofKey(null);
+      setOwnershipProofVersion(version => version + 1);
+    }
     let sendPromise: Promise<unknown>;
     try {
       // Call UniSat synchronously in this explicit tap so mobile wallet prompts retain the user gesture.
-      sendPromise = activeProvider.sendRunes(to, runeId, displayAmount, {
-        feeRate,
-      });
+      sendPromise = sendNativeUniSatRunes(
+        activeProvider,
+        to,
+        runeId,
+        displayAmount,
+        feeRate
+      );
     } catch (cause) {
       setSending(false);
       setError(
@@ -803,6 +838,17 @@ export function UniSatRunesSendPanel({
                   final dans UniSat.
                 </span>
               </label>
+              {isMobileUniSatDevice() && confirmed && transferContextKey && (
+                <UniSatOwnershipProof
+                  key={`${transferContextKey}:${ownershipProofVersion}`}
+                  site={site}
+                  address={address}
+                  network={chain?.enum ?? ""}
+                  provider={provider}
+                  contextKey={transferContextKey}
+                  onVerified={setOwnershipProofKey}
+                />
+              )}
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -811,6 +857,8 @@ export function UniSatRunesSendPanel({
                     preparing ||
                     sending ||
                     !confirmed ||
+                    (isMobileUniSatDevice() &&
+                      ownershipProofKey !== transferContextKey) ||
                     !provider?.sendRunes ||
                     outcomeUnclear
                   }
@@ -829,7 +877,12 @@ export function UniSatRunesSendPanel({
                   <button
                     type="button"
                     onClick={openWalletApproval}
-                    disabled={sending || !confirmed}
+                    disabled={
+                      sending ||
+                      !confirmed ||
+                      (isMobileUniSatDevice() &&
+                        ownershipProofKey !== transferContextKey)
+                    }
                     className="inline-flex min-h-11 items-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[9px] uppercase tracking-[0.08em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {sending ? (
