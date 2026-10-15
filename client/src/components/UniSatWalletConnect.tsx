@@ -8,6 +8,7 @@ import { getUniSatInscriptionUrl, isTransferOutcomeUnclear } from "@/lib/transfe
 import { shouldShowDustRelayGuidance } from "@/lib/wallet-error";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
 import { UniSatFbSendPanel } from "@/components/UniSatFbSendPanel";
+import { UniSatRunesSendPanel } from "@/components/UniSatRunesSendPanel";
 import { UniSatWalletAuth } from "@/components/UniSatWalletAuth";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
@@ -1235,6 +1236,9 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       )}
       {connectedToFractal && (
         <UniSatFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} site={site} />
+      )}
+      {connectedToFractal && (
+        <UniSatRunesSendPanel site={site} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} />
       )}
       {connectedToFractal && inscriptions.length > 0 && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-gallery-title">

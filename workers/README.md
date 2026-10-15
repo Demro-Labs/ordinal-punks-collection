@@ -41,6 +41,8 @@ Le workflow de contrôles sur pull request exécute le même dry-run Wrangler sa
 
 Après activation, vérifier sur les deux origines autorisées : `OPTIONS`, `POST /api/auth/challenge`, `POST /api/auth/verify`, `GET /api/auth/session` et `POST /api/auth/logout`, pour les sites `punks` et `pokedex`. Utiliser un wallet de test contrôlé ou un vecteur public de test, puis révoquer toute session de test. Vérifier également le type du binding `UNISAT_API_KEY`, les routes Inscribe existantes et `MAX_INSCRIBE_FILES = 1_000`.
 
+Les routes read-only `/api/runes/balance-list` et `/api/runes/balance` interrogent uniquement l’API UniSat Fractal mainnet pour afficher et revalider les soldes. Elles réutilisent l’origine CORS allowlistée, la limite de requêtes et le secret `UNISAT_API_KEY`; elles répondent `no-store`, ne forment pas un proxy générique et ne signent ni ne diffusent de transaction. Le client Punks et le Pokédex appellent `sendRunes` directement seulement si le provider UniSat connecté expose cette méthode; la validation de l’adresse, du réseau, du solde et des UTXO de frais précède l’ouverture de l’approbation native du wallet.
+
 Les cookies d’authentification ne sont pas stockés dans `localStorage`. Les routes d’auth sont en `no-store`; le Worker ne conserve pas la signature BIP-322 ni le jeton de session en clair.
 
 ## Stratégie de production

@@ -88,6 +88,55 @@ test('returns a live Fractal balance without exposing the UniSat API key', async
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('returns a validated paginated Fractal Rune balance list without exposing the UniSat API key', async () => {
+  const previousFetch = globalThis.fetch;
+  let unisatAuth = '';
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  globalThis.fetch = async (input, init = {}) => {
+    assert.equal(String(input), `https://open-api-fractal.unisat.io/v1/indexer/address/${address}/runes/balance-list?start=0&limit=2`);
+    unisatAuth = new Headers(init.headers).get('Authorization') || '';
+    return Response.json({ code: 0, data: { start: 0, total: 1, detail: [{ amount: '123450', runeid: '840000:3', rune: 'EXAMPLE', spacedRune: 'EXAMPLE', symbol: 'E', divisibility: 2 }] } });
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/runes/balance-list?address=${address}&start=0&limit=2`, { ip: '192.0.2.78' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(data.network, 'FRACTAL_BITCOIN_MAINNET');
+    assert.equal(data.address, address);
+    assert.equal(data.total, 1);
+    assert.equal(data.detail[0].amount, '123450');
+    assert.equal(data.detail[0].divisibility, 2);
+    assert.equal(unisatAuth, 'Bearer test-only');
+    assert.equal(JSON.stringify(data).includes('test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('returns one current Fractal Rune balance and rejects invalid Rune queries before upstream access', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  let upstreamCalls = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    upstreamCalls += 1;
+    assert.equal(String(input), `https://open-api-fractal.unisat.io/v1/indexer/address/${address}/runes/840000%3A3/balance`);
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    return Response.json({ code: 0, data: { amount: '123450', runeid: '840000:3', rune: 'EXAMPLE', spacedRune: 'EXAMPLE', symbol: 'E', divisibility: 2 } });
+  };
+  try {
+    const invalid = await worker.fetch(makeRequest(`/api/runes/balance?address=${address}&runeid=bad`, { ip: '192.0.2.77' }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(invalid.status, 400);
+    assert.equal(upstreamCalls, 0);
+    const response = await worker.fetch(makeRequest(`/api/runes/balance?address=${address}&runeid=840000%3A3`, { ip: '192.0.2.76' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(data.balance.runeid, '840000:3');
+    assert.equal(data.balance.amount, '123450');
+    assert.equal(JSON.stringify(data).includes('test-only'), false);
+    assert.equal(upstreamCalls, 1);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('caches successful public market responses at the edge', async () => {
   const previousCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
   const previousFetch = globalThis.fetch;
