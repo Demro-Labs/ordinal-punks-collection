@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, Loader2, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { describeFeeSources, getRecommendedFeeEstimate, trackMempoolTransaction, validateMempoolAddress, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
 import { normalizeUniSatTxid, parseFbAmountToSats } from "@/lib/native-fb-send";
-import { getMobileUtxoErrorGuidance, sendNativeUniSatBitcoinPayment } from "@/lib/native-unisat-actions";
+import { ensureNativePaymentBalance, getMobileUtxoErrorGuidance, sendNativeUniSatBitcoinPayment } from "@/lib/native-unisat-actions";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
@@ -188,6 +188,7 @@ export function UniSatFbSendPanel({ provider, address, chain, onWalletRefresh, o
       setFeeError("");
       const feeRate = Math.ceil(estimate.feeRate);
       if (isMobileUniSatDevice()) {
+        await ensureNativePaymentBalance(NETWORK, address, sats, feeRate, "fb-transfer");
         setMobileReadyContextKey(ownershipContextKey);
         setError("Pre-check complete. Tap again to open transaction approval in UniSat.");
         return;
