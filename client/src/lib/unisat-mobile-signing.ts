@@ -11,7 +11,7 @@ export class UniSatSignTimeoutError extends Error {
   }
 }
 
-export function signMobileUniSatMessage(
+export function signUniSatBip322Message(
   provider: UniSatMobileSignProvider,
   message: string,
   timeoutMs = UNISAT_MOBILE_SIGN_TIMEOUT_MS,
@@ -26,3 +26,6 @@ export function signMobileUniSatMessage(
   });
   return Promise.race([signPromise, timeoutPromise]).finally(() => clearTimeout(timer));
 }
+
+/** Backward-compatible name used by the mobile wallet authentication flow. */
+export const signMobileUniSatMessage = signUniSatBip322Message;

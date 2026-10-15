@@ -124,13 +124,14 @@ export async function ensureNativeInscriptionFeeBalance(
   }
 }
 
-/** Mobile-only preflight for native BTC/FB payments before the final UniSat tap. */
+/** Verify confirmed, asset-free funds before native BTC/FB payments. */
 export async function ensureNativePaymentBalance(
   networkEnum: string,
   address: string,
   amountSats: number,
   feeRate: number,
   operation: Exclude<MobileUtxoOperation, "ordinal-transfer">,
+  options: { mobile?: boolean } = {},
 ) {
   const networkLabel = networkEnum === "BITCOIN_MAINNET" ? "Bitcoin" : networkEnum === "FRACTAL_BITCOIN_MAINNET" ? "Fractal Bitcoin" : "selected network";
   const feeAsset = networkEnum === "BITCOIN_MAINNET" ? "BTC" : "FB";
@@ -140,7 +141,7 @@ export async function ensureNativePaymentBalance(
   const minimumSats = amountSats + Math.ceil(feeRate * 250) + 600;
   let verifiedUtxos: Awaited<ReturnType<typeof getSpendableUtxos>>;
   try {
-    verifiedUtxos = await getSpendableUtxos(networkEnum, address, minimumSats, { mobile: true });
+    verifiedUtxos = await getSpendableUtxos(networkEnum, address, minimumSats, { mobile: options.mobile === true });
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(`Could not verify safe ${feeAsset} UTXOs for this ${operation} on ${networkLabel}. Add confirmed ${feeAsset} sats in uninscribed UTXOs, then check again. No transaction was signed or broadcast. Verification detail: ${detail}`);

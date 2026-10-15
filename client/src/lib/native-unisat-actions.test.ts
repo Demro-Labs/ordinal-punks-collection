@@ -4,6 +4,7 @@ vi.mock("@/lib/mempool", () => ({ getSpendableUtxos: mocks.getSpendableUtxos }))
 import {
   canUseMobileNativePaymentFallback,
   ensureNativeInscriptionFeeBalance,
+  ensureNativePaymentBalance,
   getMobileUtxoErrorGuidance,
   sendNativeUniSatBitcoinPayment,
   sendNativeUniSatInscription,
@@ -67,6 +68,17 @@ describe("native UniSat wallet actions", () => {
   });
 
   beforeEach(() => mocks.getSpendableUtxos.mockReset());
+  it.each([
+    ["desktop", false],
+    ["mobile", true],
+  ] as const)("preflights confirmed safe payment UTXOs for %s", async (_platform, mobile) => {
+    mocks.getSpendableUtxos.mockResolvedValue([{ address: "bc1qwallet", txid: "e".repeat(64), vout: 0, satoshi: 5_000 }]);
+    await expect(ensureNativePaymentBalance(
+      "FRACTAL_BITCOIN_MAINNET", "bc1qwallet", 1_000, 2, "fb-transfer", { mobile },
+    )).resolves.toBeUndefined();
+    expect(mocks.getSpendableUtxos).toHaveBeenCalledWith("FRACTAL_BITCOIN_MAINNET", "bc1qwallet", 2_100, { mobile });
+  });
+
   it("accepts a Worker-verified, confirmed, uninscribed fee UTXO large enough for the transfer", async () => {
     mocks.getSpendableUtxos.mockResolvedValue([{ address: "bc1qwallet", txid: "d".repeat(64), vout: 1, satoshi: 2_000 }]);
     await expect(ensureNativeInscriptionFeeBalance(

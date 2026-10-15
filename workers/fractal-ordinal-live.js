@@ -229,7 +229,6 @@ async function spendableUtxos(request, env, corsHeaders) {
   const url = new URL(request.url);
   const chain = url.searchParams.get('chain') || '';
   const address = url.searchParams.get('address') || '';
-  const mobile = url.searchParams.get('mobile') === '1';
   const cursor = parseBoundedInteger(url.searchParams.get('cursor'), 0, 1000000);
   const requestedSize = parseBoundedInteger(url.searchParams.get('size'), 25, 25);
   if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new SpendableUtxoError('INVALID_QUERY', 400);
@@ -254,7 +253,7 @@ async function spendableUtxos(request, env, corsHeaders) {
       !Number.isSafeInteger(satoshi) || satoshi < 600 ||
       !/^(?:[a-f0-9]{2})+$/.test(scriptPk) ||
       !Number.isSafeInteger(height) || height <= 0 ||
-      (!mobile && typeof item?.isLowFee !== 'boolean') || typeof isLowFee !== 'boolean' ||
+      typeof isLowFee !== 'boolean' ||
       typeof isOpInRBF !== 'boolean' ||
       !Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0
     ) continue;
@@ -276,11 +275,10 @@ async function spendableUtxos(request, env, corsHeaders) {
       try {
         alkanes = await uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env);
       } catch (error) {
-        // UniSat's documented available-utxo-data already excludes Alkanes, but
-        // the per-outpoint Alkanes endpoint is not exposed on some Fractal API
-        // deployments. Only the explicitly mobile path may use that filtered
-        // list as its fallback; desktop remains fail-closed on a 404.
-        if (!(mobile && error instanceof Error && error.message === 'UniSat upstream returned 404')) {
+        // UniSat's documented available-utxo-data already excludes Alkanes,
+        // but the per-outpoint endpoint is not exposed on some Fractal API
+        // deployments. Both clients may rely on that filtered list on a 404.
+        if (!(error instanceof Error && error.message === 'UniSat upstream returned 404')) {
           throw new SpendableUtxoError(`ALKANES_BALANCE_${safeUniSatFailureCode(error)}`);
         }
         alkanes = [];

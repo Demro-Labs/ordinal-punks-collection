@@ -780,7 +780,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     const signPsbt = psbtReviewSignPsbtRef.current;
     if (!review || !signPsbt || !psbtReviewResolverRef.current) return;
     if (isMobileUniSatDevice() && (!ownershipContextKey || ownershipProofKey !== ownershipContextKey)) {
-      const cause = new Error("The BIP-322 ownership proof is missing or no longer matches the transfer. No PSBT was signed.");
+      const cause = new Error("The wallet ownership check is missing or no longer matches the transfer. No PSBT was signed.");
       setTransferError(cause.message);
       rejectPsbtReview(cause);
       return;
@@ -866,7 +866,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       return;
     }
     if (isMobileUniSatDevice() && (!ownershipContextKey || ownershipProofKey !== ownershipContextKey)) {
-      setTransferError("Sign the BIP-322 ownership proof shown below the receipt first. No transaction was opened.");
+      setTransferError("Complete the wallet ownership check shown below the receipt first. No transaction was opened.");
       return;
     }
 
@@ -1001,7 +1001,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       return;
     }
     if (ownershipProofKey !== ready.contextKey || ready.contextKey !== ownershipContextKey) {
-      setTransferError("The BIP-322 proof no longer matches this transfer. Prepare a new proof before continuing.");
+      setTransferError("The wallet ownership check no longer matches this transfer. Complete a new check before continuing.");
       setMobileNativeTransferReady(null);
       return;
     }
@@ -1332,7 +1332,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                 <span>I checked this inscription and destination. I understand the on-chain transfer cannot be reversed.</span>
               </label>
               {isMobileUniSatDevice() && confirmed && selectedInscription && destination.trim() && address && isSupportedMainnet(chain?.enum) && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={window.unisat} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
-              {mobileNativeReadyForContext && <p className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#70c7a0]" role="status">Pre-check complete. Ownership proof is valid. Tap again to open UniSat transaction confirmation.</p>}
+              {mobileNativeReadyForContext && <p className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#70c7a0]" role="status">Pre-check complete. Wallet ownership check is valid. Tap again to open UniSat transaction confirmation.</p>}
               {isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) && (
                 <button
                   type="button"
