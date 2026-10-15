@@ -627,17 +627,17 @@ export default function Home() {
             text: "On mobile UniSat, a fresh BIP-322 signature proves control of the address before an Ordinal or FB transfer. Inscribe File uses a separate flow: review the receipt, then tap Approve payment in UniSat to open the native payment approval.",
             bullets: [
               "The BIP-322 proof does not create a login session or authorize a transaction.",
-              "Private keys stay in UniSat; the desktop flow is unchanged.",
+              "Private keys stay in UniSat; desktop and mobile keep explicit wallet approval.",
             ],
           },
           {
-            title: "Latest update — mobile flow",
-            text: "The latest update strengthens UniSat operations on phones without changing the desktop version: ownership proof must come before transaction approval, and wallet data is refreshed after a successful operation.",
+            title: "Latest update — desktop + mobile actions",
+            text: "Wallet and transaction shortcuts now share a clear, framed layout on desktop and mobile. Device- and network-specific signing rules stay intact: mobile ownership proof precedes approval, and wallet data refreshes after a successful operation.",
             bullets: [
-              "Ordinal transfer or FB send: sign BIP-322 before transaction signing opens.",
+              "Wallet, Ordinals, Send FB, Runes and Inscribe shortcuts are available across screen sizes.",
+              "Ordinal transfer or FB send on mobile: sign BIP-322 before transaction signing opens.",
               "Inscribe: prepare the receipt → tap Approve payment in UniSat → review and approve the native wallet transaction.",
               "After a successful operation, refresh the balance from live UniSat wallet data; mobile file selection keeps the native picker and receipt review.",
-              "The working desktop flow remains unchanged.",
             ],
           },
         ]}
