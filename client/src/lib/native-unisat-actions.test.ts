@@ -1,25 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ getSpendableUtxos: vi.fn() }));
 vi.mock("@/lib/mempool", () => ({ getSpendableUtxos: mocks.getSpendableUtxos }));
-import { canUseMobileNativePaymentFallback, ensureNativeInscriptionFeeBalance, getMobileUtxoErrorGuidance, requiresVerifiedPsbtForMobileFractalTransfer, sendNativeUniSatBitcoinPayment, sendNativeUniSatInscription } from "./native-unisat-actions";
+import {
+  canUseMobileNativePaymentFallback,
+  ensureNativeInscriptionFeeBalance,
+  getMobileUtxoErrorGuidance,
+  sendNativeUniSatBitcoinPayment,
+  sendNativeUniSatInscription,
+  sendNativeUniSatRunes,
+} from "./native-unisat-actions";
 
 const TXID = "a".repeat(64);
 const INSCRIPTION_ID = `${"b".repeat(64)}i0`;
 const INSCRIPTION_LOCATION = `${"c".repeat(64)}:0:0`;
 
 describe("native UniSat wallet actions", () => {
-  it("requires a verified PSBT only for UniSat Mobile on Fractal mainnet", () => {
-    expect(requiresVerifiedPsbtForMobileFractalTransfer(true, "FRACTAL_BITCOIN_MAINNET")).toBe(true);
-    expect(requiresVerifiedPsbtForMobileFractalTransfer(false, "FRACTAL_BITCOIN_MAINNET")).toBe(false);
-    expect(requiresVerifiedPsbtForMobileFractalTransfer(true, "BITCOIN_MAINNET")).toBe(false);
-    expect(requiresVerifiedPsbtForMobileFractalTransfer(true, undefined)).toBe(false);
-  });
-
   it("uses UniSat native sendInscription and returns its transaction ID", async () => {
     const sendInscription = vi.fn().mockResolvedValue({ txid: TXID });
     await expect(sendNativeUniSatInscription({ sendInscription }, "bc1qrecipient", INSCRIPTION_ID, 3))
       .resolves.toBe(TXID);
     expect(sendInscription).toHaveBeenCalledWith("bc1qrecipient", INSCRIPTION_ID, { feeRate: 3 });
+  });
+
+  it("uses UniSat native sendRunes with the documented positional request", async () => {
+    const sendRunes = vi.fn().mockResolvedValue({ txid: TXID });
+    await expect(
+      sendNativeUniSatRunes({ sendRunes }, "bc1qrecipient", "abc:1", "1.25", 4)
+    ).resolves.toBe(TXID);
+    expect(sendRunes).toHaveBeenCalledWith("bc1qrecipient", "abc:1", "1.25", {
+      feeRate: 4,
+    });
   });
 
   it("accepts UniSat's string transaction-ID response", async () => {
