@@ -254,7 +254,7 @@ async function spendableUtxos(request, env, corsHeaders) {
       !Number.isSafeInteger(satoshi) || satoshi < 600 ||
       !/^(?:[a-f0-9]{2})+$/.test(scriptPk) ||
       !Number.isSafeInteger(height) || height <= 0 ||
-      (!mobile && typeof item?.isLowFee !== 'boolean') || typeof isLowFee !== 'boolean' ||
+      typeof isLowFee !== 'boolean' ||
       typeof isOpInRBF !== 'boolean' ||
       !Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0
     ) continue;
