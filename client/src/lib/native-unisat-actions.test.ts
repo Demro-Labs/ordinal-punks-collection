@@ -35,6 +35,13 @@ describe("native UniSat wallet actions", () => {
     expect(sendBitcoin).toHaveBeenCalledWith("bc1qpayment", 12_345, { feeRate: 4 });
   });
 
+  it("uses UniSat Mobile's object request with toAddress", async () => {
+    const sendBitcoin = vi.fn().mockResolvedValue({ txid: TXID });
+    await expect(sendNativeUniSatBitcoinPayment({ sendBitcoin }, "fb1qpayment", 12_345, 4, { mobile: true }))
+      .resolves.toBe(TXID);
+    expect(sendBitcoin).toHaveBeenCalledWith({ toAddress: "fb1qpayment", satoshis: 12_345, feeRate: 4 });
+  });
+
   it("allows sendBitcoin only after an unpaid mobile plan has Worker-confirmed sufficient UTXOs", async () => {
     const eligible = { isMobileUniSat: true, hasReceipt: true, hasPaymentPlan: true, hasWorkerAttestation: true, hasPaymentTxid: false };
     expect(canUseMobileNativePaymentFallback(eligible)).toBe(true);
