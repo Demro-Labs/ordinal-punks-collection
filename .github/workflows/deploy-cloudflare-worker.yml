@@ -54,10 +54,13 @@ jobs:
       - name: Smoke-test Worker in local workerd runtime
         run: bash scripts/smoke-worker-runtime.sh
 
-      # The initial declarative Wrangler reconciliation has succeeded; require
-      # strict config validation for every subsequent production deployment.
+      # Cloudflare adds the existing Durable Object namespace_id remotely,
+      # while Wrangler's declarative config intentionally carries only the
+      # class binding. Strict mode therefore rejects valid deployments as a
+      # false-positive configuration conflict. Keep the remote namespace and
+      # secret bindings; the production verification step below checks them.
       - name: Deploy to Cloudflare Workers
-        run: pnpm dlx wrangler@4.151.0 deploy --strict
+        run: pnpm dlx wrangler@4.151.0 deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
