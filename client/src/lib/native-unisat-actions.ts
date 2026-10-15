@@ -7,8 +7,7 @@ type UniSatBalanceV2 = { available?: number; unavailable?: number; total?: numbe
 
 export type NativeUniSatProvider = {
   sendInscription?: (recipient: string, inscriptionId: string, options?: { feeRate?: number }) => Promise<UniSatTxResult>;
-  sendBitcoin?: ((recipient: string, satoshis: number, options?: { feeRate?: number }) => Promise<UniSatTxResult>)
-    | ((request: { toAddress: string; satoshis: number; feeRate?: number }) => Promise<UniSatTxResult>);
+  sendBitcoin?: (recipient: string, satoshis: number, options?: { feeRate?: number }) => Promise<UniSatTxResult>;
   getBalance?: () => Promise<UniSatBalance>;
   getBalanceV2?: () => Promise<UniSatBalanceV2>;
   getBitcoinUtxos?: (cursor: number, size: number) => Promise<unknown>;
@@ -197,17 +196,12 @@ export function sendNativeUniSatBitcoinPayment(
   toAddress: string,
   satoshis: number,
   feeRate: number,
-  options: { mobile?: boolean } = {},
 ) {
   if (!provider.sendBitcoin) return Promise.reject(new Error("This UniSat context does not expose native sendBitcoin; no payment was sent."));
   if (!toAddress || !Number.isSafeInteger(satoshis) || satoshis <= 0 || !Number.isFinite(feeRate) || feeRate <= 0) {
     return Promise.reject(new Error("Invalid native UniSat payment parameters; no payment was sent."));
   }
-  const sendBitcoin = provider.sendBitcoin;
-  // UniSat desktop documents positional arguments. Current UniSat Mobile
-  // builds expose the same method as an object request instead.
-  const result = options.mobile
-    ? (sendBitcoin as (request: { toAddress: string; satoshis: number; feeRate?: number }) => Promise<UniSatTxResult>)({ toAddress, satoshis, feeRate })
-    : (sendBitcoin as (recipient: string, amount: number, request?: { feeRate?: number }) => Promise<UniSatTxResult>)(toAddress, satoshis, { feeRate });
-  return result.then(tx => requireTxid(tx, "Bitcoin payment"));
+  // UniSat documents the same positional API in its extension and mobile
+  // in-app dApp contexts: sendBitcoin(toAddress, satoshis, options).
+  return provider.sendBitcoin(toAddress, satoshis, { feeRate }).then(tx => requireTxid(tx, "Bitcoin payment"));
 }
