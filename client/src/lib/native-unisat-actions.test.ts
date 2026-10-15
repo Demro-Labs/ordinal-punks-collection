@@ -55,7 +55,7 @@ describe("native UniSat wallet actions", () => {
     await expect(ensureNativeInscriptionFeeBalance(
       "BITCOIN_MAINNET", "bc1qwallet", { location: INSCRIPTION_LOCATION }, 3,
     )).resolves.toBeUndefined();
-    expect(mocks.getSpendableUtxos).toHaveBeenCalledWith("BITCOIN_MAINNET", "bc1qwallet", 1_650);
+    expect(mocks.getSpendableUtxos).toHaveBeenCalledWith("BITCOIN_MAINNET", "bc1qwallet", 1_650, { mobile: true });
   });
   it("rejects the Ordinal outpoint itself even if the safe service erroneously returns it", async () => {
     mocks.getSpendableUtxos.mockResolvedValue([{ address: "bc1qwallet", txid: "c".repeat(64), vout: 0, satoshi: 20_000 }]);

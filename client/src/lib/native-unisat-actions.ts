@@ -95,7 +95,7 @@ export async function ensureNativeInscriptionFeeBalance(
   let verifiedUtxos: Awaited<ReturnType<typeof getSpendableUtxos>>;
   try {
     // The Worker verifies confirmation, no inscriptions, no Runes/Alkanes, and current spendability.
-    verifiedUtxos = await getSpendableUtxos(networkEnum, address, minimumFeeBalance);
+    verifiedUtxos = await getSpendableUtxos(networkEnum, address, minimumFeeBalance, { mobile: true });
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(
@@ -130,7 +130,7 @@ export async function ensureNativePaymentBalance(
   const minimumSats = amountSats + Math.ceil(feeRate * 250) + 600;
   let verifiedUtxos: Awaited<ReturnType<typeof getSpendableUtxos>>;
   try {
-    verifiedUtxos = await getSpendableUtxos(networkEnum, address, minimumSats);
+    verifiedUtxos = await getSpendableUtxos(networkEnum, address, minimumSats, { mobile: true });
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(`Could not verify safe ${feeAsset} UTXOs for this ${operation} on ${networkLabel}. Add confirmed ${feeAsset} sats in uninscribed UTXOs, then check again. No transaction was signed or broadcast. Verification detail: ${detail}`);
