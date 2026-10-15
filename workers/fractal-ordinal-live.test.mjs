@@ -369,7 +369,7 @@ test('mobile UTXO mode accepts UniSat available outputs that omit optional fee f
     }
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false } });
     if (url.pathname.endsWith(`/runes/utxo/${record.txid}/0/balance`)) return Response.json({ code: 0, data: [] });
-    if (url.pathname.endsWith(`/alkanes/utxo/${record.txid}/0/balance`)) return Response.json({ code: 0, data: [] });
+    if (url.pathname.endsWith(`/alkanes/utxo/${record.txid}/0/balance`)) return new Response('not found', { status: 404 });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {

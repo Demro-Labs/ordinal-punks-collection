@@ -246,7 +246,19 @@ async function spendableUtxos(request, env, corsHeaders) {
     if (!Array.isArray(runes)) throw new SpendableUtxoError('RUNES_INVALID_RESPONSE');
     if (runes.length !== 0) continue;
     if (chain === 'fractal') {
-      const alkanes = await spendableUtxoStage('ALKANES_BALANCE', () => uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env));
+      let alkanes;
+      try {
+        alkanes = await uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env);
+      } catch (error) {
+        // UniSat's documented available-utxo-data already excludes Alkanes, but
+        // the per-outpoint Alkanes endpoint is not exposed on some Fractal API
+        // deployments. Only the explicitly mobile path may use that filtered
+        // list as its fallback; desktop remains fail-closed on a 404.
+        if (!(mobile && error instanceof Error && error.message === 'UniSat upstream returned 404')) {
+          throw new SpendableUtxoError(`ALKANES_BALANCE_${safeUniSatFailureCode(error)}`);
+        }
+        alkanes = [];
+      }
       if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
       if (alkanes.length !== 0) continue;
     }
