@@ -22,7 +22,7 @@ Le bundler Wrangler regroupe le point d’entrée et ses imports. Le dry-run com
 
 L’API de réglages du Worker actif ne renvoie aucune date de compatibilité explicite. Cloudflare documente que l’absence de date à l’upload API prend la valeur effective `2021-11-02`; la configuration Wrangler la fige pour éviter un changement runtime implicite au premier déploiement. Réévaluer cette date séparément, avec des tests dédiés, avant de la faire avancer.
 
-La production utilise le binding Cloudflare secret `UNISAT_API_KEY`. Ne jamais mettre sa valeur dans le code, `wrangler.jsonc`, `.dev.vars` commité, les logs ou les réponses API. Les déploiements Wrangler ne suppriment pas les secrets Cloudflare existants; une suppression exige la commande explicite `wrangler secret delete`. Pour le développement local, un fichier `.dev.vars` non commité peut être utilisé; il est ignoré par Git.
+La production utilise deux bindings Cloudflare secrets : `UNISAT_API_KEY` pour Fractal Bitcoin et `UNISAT_BITCOIN_API` pour Bitcoin mainnet. Les deux doivent être configurés avec des clés UniSat valides (`wrangler secret put UNISAT_API_KEY` et `wrangler secret put UNISAT_BITCOIN_API`). Ne jamais mettre leurs valeurs dans le code, `wrangler.jsonc`, `.dev.vars` commité, les logs ou les réponses API. Les déploiements Wrangler ne suppriment pas les secrets Cloudflare existants; une suppression exige la commande explicite `wrangler secret delete`. Pour le développement local, un fichier `.dev.vars` non commité peut être utilisé; il est ignoré par Git.
 
 ## CI/CD Cloudflare
 
