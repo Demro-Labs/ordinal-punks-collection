@@ -65,6 +65,16 @@ for site in punks pokedex; do
   done
 done
 
+for site in punks pokedex; do
+  body_file="${TMP_DIR}/${site}-bitcoin-signin.json"
+  status="$(curl -sS -o "${body_file}" -w '%{http_code}' --max-time 5 -X POST \
+    -H "Origin: ${origin}" -H 'Content-Type: application/json' \
+    --data "{\"site\":\"${site}\",\"address\":\"${address}\",\"network\":\"BITCOIN_MAINNET\"}" \
+    "${BASE}/api/auth/challenge" || true)"
+  [[ "${status}" == "200" ]] || fail "Bitcoin sign-in challenge for ${site} returned HTTP ${status}"
+  node -e 'const v=JSON.parse(require("fs").readFileSync(0,"utf8")); if (v.site !== process.argv[1] || v.network !== "BITCOIN_MAINNET" || !v.message.includes("Network: BITCOIN_MAINNET") || !v.message.includes("No payment, transfer, or spending approval is authorized.")) process.exit(1);' "${site}" <"${body_file}" || fail "Bitcoin sign-in challenge payload is invalid for ${site}"
+done
+
 for origin in "https://demro-labs.github.io" "https://punksgallery-mlwdpcwl.manus.space"; do
   headers_file="${TMP_DIR}/preflight.headers"
   status="$(curl -sS -D "${headers_file}" -o /dev/null -w '%{http_code}' --max-time 5 -X OPTIONS \
@@ -76,4 +86,4 @@ for origin in "https://demro-labs.github.io" "https://punksgallery-mlwdpcwl.manu
   grep -Fqi "access-control-allow-origin: ${origin}" "${headers_file}" || fail "CORS preflight did not allow ${origin}"
 done
 
-echo "Worker runtime smoke passed: workerd starts; anonymous sessions and Bitcoin/Fractal ownership challenges work for both sites; both allowed origins pass CORS."
+echo "Worker runtime smoke passed: workerd starts; anonymous sessions, Bitcoin/Fractal ownership challenges, and Bitcoin sign-in challenges work for both sites; both allowed origins pass CORS."

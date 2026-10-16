@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
+import { Signer } from '@exodus/bip322-js';
 import worker from './fractal-ordinal-live.js';
 
 const base = 'https://fractal-ordinal-live.servostar23.workers.dev';
@@ -1028,6 +1029,75 @@ test('BIP-322 challenge is origin-bound, short-lived, uncached, and stores only 
   assert.equal(state.challenge.idHash.length, 64);
   assert.equal(state.challenge.idHash === result.challengeId, false);
   assert.equal(JSON.stringify(state.challenge).includes(result.challengeId), false);
+});
+
+test('sign-in challenges support Bitcoin and Fractal for both sites and stay bound to the requested network', async () => {
+  const address = 'bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l';
+  for (const site of ['punks', 'pokedex']) {
+    for (const network of ['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET']) {
+      const { binding, state } = createAuthStorageMock();
+      const response = await worker.fetch(makeRequest('/api/auth/challenge', {
+        method: 'POST',
+        ip: `192.0.2.${site === 'punks' ? '230' : '231'}`,
+        body: JSON.stringify({ site, address, network }),
+      }), { AUTH_STORAGE: binding });
+      const result = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(result.site, site);
+      assert.equal(result.network, network);
+      assert.match(result.message, new RegExp(`Network: ${network}`));
+      assert.match(result.message, new RegExp(`URI: https://demro-labs\\.github\\.io/${site === 'punks' ? 'ordinal-punks-collection' : 'fractal-pokedex-ordinal-ledger'}/`));
+      assert.match(result.message, /No payment, transfer, or spending approval is authorized\./);
+      assert.equal(state.challenge.network, network);
+      assert.equal(state.session, null);
+    }
+  }
+});
+
+test('valid BIP-322 sign-in creates a session for the signed network on both sites', async () => {
+  const address = 'bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l';
+  const testOnlyPrivateKey = 'L3VFeEujGtevx9w18HD1fhRbCH67Az2dpCymeRE1SoPK6XQtaN2k';
+  let ip = 240;
+  for (const site of ['punks', 'pokedex']) {
+    for (const network of ['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET']) {
+      const { binding, state } = createAuthStorageMock();
+      const challengeResponse = await worker.fetch(makeRequest('/api/auth/challenge', {
+        method: 'POST', ip: `192.0.2.${ip++}`,
+        body: JSON.stringify({ site, address, network }),
+      }), { AUTH_STORAGE: binding });
+      const challenge = await challengeResponse.json();
+      const signature = await Signer.signAsync(testOnlyPrivateKey, address, challenge.message);
+      const verifyResponse = await worker.fetch(makeRequest('/api/auth/verify', {
+        method: 'POST', ip: `192.0.2.${ip++}`,
+        body: JSON.stringify({ site, address, network, challengeId: challenge.challengeId, signature }),
+      }), { AUTH_STORAGE: binding });
+      const result = await verifyResponse.json();
+      assert.equal(verifyResponse.status, 200);
+      assert.equal(result.session.site, site);
+      assert.equal(result.session.network, network);
+      assert.equal(state.session.network, network);
+      assert.match(verifyResponse.headers.get('set-cookie') || '', new RegExp(site === 'punks' ? '__Host-demro-punks-auth' : '__Host-demro-pokedex-auth'));
+    }
+  }
+});
+
+test('sign-in verification rejects a challenge submitted under a different Bitcoin network', async () => {
+  const { binding, state } = createAuthStorageMock();
+  const address = 'bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l';
+  const challengeResponse = await worker.fetch(makeRequest('/api/auth/challenge', {
+    method: 'POST', ip: '192.0.2.232',
+    body: JSON.stringify({ site: 'punks', address, network: 'BITCOIN_MAINNET' }),
+  }), { AUTH_STORAGE: binding });
+  const challenge = await challengeResponse.json();
+  const response = await worker.fetch(makeRequest('/api/auth/verify', {
+    method: 'POST', ip: '192.0.2.233',
+    body: JSON.stringify({ site: 'punks', challengeId: challenge.challengeId, address, network: 'FRACTAL_BITCOIN_MAINNET', signature: 'ZmFrZV9zaWduYXR1cmU=' }),
+  }), { AUTH_STORAGE: binding });
+  const result = await response.json();
+  assert.equal(response.status, 401);
+  assert.equal(result.code, 'AUTH_INVALID_CHALLENGE');
+  assert.equal(state.challenge.usedAt, null);
+  assert.equal(state.session, null);
 });
 
 test('BIP-322 verify rejects a malformed signature and does not create a session', async () => {

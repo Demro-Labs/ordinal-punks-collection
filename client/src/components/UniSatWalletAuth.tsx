@@ -4,7 +4,7 @@ import { isMobileUniSatDevice } from "@/lib/mobile-context";
 import { signMobileUniSatMessage, UniSatSignTimeoutError } from "@/lib/unisat-mobile-signing";
 
 const AUTH_API = "https://fractal-ordinal-live.servostar23.workers.dev";
-const FRACTAL_MAINNET = "FRACTAL_BITCOIN_MAINNET";
+const LOGIN_NETWORKS = new Set(["BITCOIN_MAINNET", "FRACTAL_BITCOIN_MAINNET"]);
 
 type UniSatAuthProvider = {
   getAccounts?: () => Promise<string[]>;
@@ -13,7 +13,7 @@ type UniSatAuthProvider = {
 };
 
 type AuthSite = "punks" | "pokedex";
-type AuthChallenge = { challengeId: string; message: string; expiresAt: string };
+type AuthChallenge = { challengeId: string; message: string; expiresAt: string; network: string };
 type AuthSession = { site: string; address: string; network: string; createdAt: string; expiresAt: string };
 
 export function UniSatWalletAuth({ site, address, network, provider }: {
@@ -71,7 +71,7 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
   const sessionMatchesWallet = Boolean(
     session && session.address.toLowerCase() === address.toLowerCase() && session.network === network,
   );
-  const networkReady = network === FRACTAL_MAINNET;
+  const networkReady = LOGIN_NETWORKS.has(network);
 
   const requestChallenge = async () => {
     setBusy(true);
@@ -79,24 +79,24 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
     setChallenge(null);
     setMobileSignTimedOut(false);
     try {
-      if (!networkReady) throw new Error("Switch UniSat to Fractal Bitcoin mainnet first.");
+      if (!networkReady) throw new Error("Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat first.");
       if (!provider) throw new Error("UniSat is not available in this browser.");
       const [accounts, currentChain] = await Promise.all([
         provider.getAccounts ? provider.getAccounts() : Promise.resolve([address]),
         provider.getChain ? provider.getChain() : Promise.resolve(null),
       ]);
       if (!accounts[0] || accounts[0].toLowerCase() !== address.toLowerCase()) throw new Error("The connected UniSat address changed. Refresh the wallet dashboard and try again.");
-      if (currentChain?.enum && currentChain.enum !== FRACTAL_MAINNET) throw new Error("Switch UniSat to Fractal Bitcoin mainnet first.");
+      if (currentChain?.enum && currentChain.enum !== network) throw new Error("The active UniSat network changed. Refresh the wallet dashboard and try again.");
       const response = await fetch(`${AUTH_API}/api/auth/challenge`, {
         method: "POST",
         credentials: "include",
         cache: "no-store",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({ site, address, network: FRACTAL_MAINNET }),
+        body: JSON.stringify({ site, address, network }),
       });
       const data = await response.json() as AuthChallenge & { error?: string };
-      if (!response.ok) throw new Error(data.error || "Unable to create the sign-in challenge.");
-      setChallenge({ challengeId: data.challengeId, message: data.message, expiresAt: data.expiresAt });
+      if (!response.ok || data.network !== network || typeof data.challengeId !== "string" || typeof data.message !== "string" || typeof data.expiresAt !== "string") throw new Error(data.error || "Unable to create a network-bound sign-in challenge.");
+      setChallenge({ challengeId: data.challengeId, message: data.message, expiresAt: data.expiresAt, network: data.network });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to create the sign-in challenge.");
     } finally {
@@ -123,14 +123,14 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
           provider.getChain ? provider.getChain() : Promise.resolve(null),
         ]);
         if (!accounts[0] || accounts[0].toLowerCase() !== address.toLowerCase()) throw new Error("The connected UniSat address changed. Create a new challenge for the active wallet.");
-        if (currentChain?.enum && currentChain.enum !== FRACTAL_MAINNET) throw new Error("Switch UniSat to Fractal Bitcoin mainnet before signing.");
+        if (currentChain?.enum && currentChain.enum !== challenge.network) throw new Error("The active UniSat network changed. Create a new challenge for the current network.");
       } else {
         const [accounts, currentChain] = await Promise.all([
           provider.getAccounts ? provider.getAccounts() : Promise.resolve([address]),
           provider.getChain ? provider.getChain() : Promise.resolve(null),
         ]);
         if (!accounts[0] || accounts[0].toLowerCase() !== address.toLowerCase()) throw new Error("The connected UniSat address changed. Create a new challenge for the active wallet.");
-        if (currentChain?.enum && currentChain.enum !== FRACTAL_MAINNET) throw new Error("Switch UniSat to Fractal Bitcoin mainnet before signing.");
+        if (currentChain?.enum && currentChain.enum !== challenge.network) throw new Error("The active UniSat network changed. Create a new challenge for the current network.");
         signature = await provider.signMessage(challenge.message, "bip322-simple");
       }
       if (typeof signature !== "string" || !signature) throw new Error("UniSat did not return a BIP-322 signature.");
@@ -139,7 +139,7 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
         credentials: "include",
         cache: "no-store",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({ site, address, network: FRACTAL_MAINNET, challengeId: challenge.challengeId, signature }),
+        body: JSON.stringify({ site, address, network: challenge.network, challengeId: challenge.challengeId, signature }),
       });
       const verifyData = await verifyResponse.json() as { session?: AuthSession; error?: string };
       if (!verifyResponse.ok) throw new Error(verifyData.error || "The server rejected the signature.");
@@ -150,7 +150,7 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
         headers: { Accept: "application/json" },
       });
       const sessionData = await sessionResponse.json() as { session?: AuthSession | null };
-      if (!sessionResponse.ok || !sessionData.session || sessionData.session.address.toLowerCase() !== address.toLowerCase()) {
+      if (!sessionResponse.ok || !sessionData.session || sessionData.session.address.toLowerCase() !== address.toLowerCase() || sessionData.session.network !== challenge.network) {
         setSession(null);
         setStatus("anonymous");
         setChallenge(null);
@@ -218,7 +218,7 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
           {session && !sessionMatchesWallet && <button type="button" onClick={() => void logout()} disabled={busy} className="inline-flex min-h-10 items-center gap-2 border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] hover:border-[#d99a54] disabled:opacity-50"><LogOut size={12} /> Sign out other session</button>}
         </div>
       </div>
-      {!networkReady && <p className="mt-3 border border-[#a45e54]/60 bg-[#a45e54]/10 p-2 font-mono text-[10px] text-[#e08b7d]">Switch UniSat to Fractal Bitcoin mainnet to sign in.</p>}
+      {!networkReady && <p className="mt-3 border border-[#a45e54]/60 bg-[#a45e54]/10 p-2 font-mono text-[10px] text-[#e08b7d]">Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat to sign in.</p>}
       {sessionMatchesWallet && <p className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-2 font-mono text-[10px] text-[#70c7a0]" role="status">Verified for {address}. Session expires {new Date(session!.expiresAt).toLocaleString()}.</p>}
       {session && !sessionMatchesWallet && <p className="mt-3 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-2 font-mono text-[10px] text-[#e0b45f]">A session for a different wallet exists in this browser. Sign in with the active wallet to replace it, or sign out of that session.</p>}
       {status === "unavailable" && <p className="mt-3 font-mono text-[10px] text-[#e0b45f]" role="status">The secure sign-in service or its browser session cookie is unavailable.</p>}

@@ -63,7 +63,8 @@ Après tout rollback, relancer les quatre requêtes de la section 1, puis vérif
 
 - L’étape de vérification post-déploiement utilise un POST Inscribe `text/plain` qui doit être rejeté `415` avant tout accès fournisseur ou création de commande. **Ne jamais tester en créant une vraie commande ou en diffusant une transaction.**
 
-## 5. Preuve de propriété mobile (BIP-322)
+## 5. Connexion et preuve de propriété BIP-322
+- Le sign-in du dashboard accepte `BITCOIN_MAINNET` et `FRACTAL_BITCOIN_MAINNET` pour Punks et Pokédex. Le challenge, le message signé et la session portent le réseau exact; une signature de login ne donne aucun droit de dépense.
 
 - Les clients mobiles Punks et Pokédex appellent `/api/auth/ownership/challenge`, puis `/api/auth/ownership/verify`, après revue du reçu et avant toute approbation UniSat de transaction. La preuve est liée au site, à l’adresse, au réseau et au contexte de l’opération; elle expire rapidement et n’ouvre aucune session.
 - Ces routes valident le contrôle de la clé, mais ne signent, ne diffusent et n’autorisent jamais un paiement ou transfert. L’approbation transactionnelle UniSat reste séparée et obligatoire. Les transferts BRC-20 classique et BRC20-Prog exigent aussi une preuve BIP-322 fraîche sur desktop et mobile; les autres parcours desktop existants ne sont pas modifiés par cette intégration.
