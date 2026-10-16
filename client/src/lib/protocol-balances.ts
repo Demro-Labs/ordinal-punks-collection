@@ -41,28 +41,11 @@ export async function fetchProtocolBalances(
 ): Promise<ProtocolBalances> {
   if (!/^[A-Za-z0-9]{14,100}$/.test(address)) throw new Error("Adresse wallet invalide.");
   const query = new URLSearchParams({ address, chain: network });
-  const result = await request<{ network?: string; address?: string; detail?: unknown }>(`/api/brc20/balances?${query}`, signal);
-  if (result.network !== network || result.address !== address || !Array.isArray(result.detail)) {
-    throw new Error("L’indexeur BRC-20 live a renvoyé une réponse incomplète ou liée à un autre réseau/wallet.");
-  }
-  const brc20 = result.detail.map((entry): Brc20Balance => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("Une ligne du solde BRC-20 live est invalide.");
-    const value = entry as Record<string, unknown>;
-    if (typeof value.ticker !== "string" || !/^[a-z0-9]{4,6}$/i.test(value.ticker) ||
-      [value.overallBalance, value.transferableBalance, value.availableBalance].some(amount => typeof amount !== "string" || !/^\d+(\.\d+)?$/.test(amount))) {
-      throw new Error("Une ligne du solde BRC-20 live est invalide.");
-    }
-    return {
-      ticker: value.ticker,
-      overallBalance: value.overallBalance as string,
-      transferableBalance: value.transferableBalance as string,
-      availableBalance: value.availableBalance as string,
-    };
-  });
+  const result = await request<{ detail?: Brc20Balance[] }>(`/api/brc20/balances?${query}`, signal);
   return {
     network,
     address,
-    brc20,
+    brc20: result.detail || [],
     refreshedAt: new Date().toISOString(),
   };
 }

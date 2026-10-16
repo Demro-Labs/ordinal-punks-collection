@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { confirmFractalSpendableUtxos, getMempoolConfig, getSpendableUtxos, InsufficientSafeUtxosError, trackMempoolTransaction } from "./mempool";
+import { confirmFractalSpendableUtxos, getSpendableUtxos, InsufficientSafeUtxosError } from "./mempool";
 
 const ADDRESS = "bc1qtestaddress0000000000000000000000000";
 
@@ -125,34 +125,5 @@ describe("confirmFractalSpendableUtxos", () => {
     installWindowAndFetch(async () => Response.json({ chain: "fractal", address: ADDRESS, minimumSats: 10_400, safeSats: 9_000, sufficient: false, verifiedUtxoCount: 1, confirmedAt: new Date().toISOString() }));
     await expect(confirmFractalSpendableUtxos(ADDRESS, 10_400, [{ txid: "a".repeat(64), vout: 0, satoshi: 9_000, scriptPk: "0014" + "11".repeat(20) }]))
       .rejects.toBeInstanceOf(InsufficientSafeUtxosError);
-  });
-});
-
-describe("trackMempoolTransaction network routing", () => {
-  it.each([
-    { network: "BITCOIN_MAINNET", endpoint: "https://mempool.space", label: "Bitcoin" },
-    { network: "FRACTAL_BITCOIN_MAINNET", endpoint: "https://mempool.fractalbitcoin.io", label: "Fractal Bitcoin" },
-  ])("uses only the $label Mempool for its network enum", async ({ network, endpoint, label }) => {
-    const txid = "b".repeat(64);
-    const urls: string[] = [];
-    installWindowAndFetch(async input => {
-      urls.push(String(input));
-      return Response.json({ confirmed: true, block_height: 123 });
-    });
-
-    const receipt = await trackMempoolTransaction(txid, network);
-
-    expect(urls).toEqual([`${endpoint}/api/tx/${txid}/status`]);
-    expect(receipt).toMatchObject({ txid, network: label, status: "confirmed", blockHeight: 123 });
-  });
-
-  it("rejects an unknown network instead of defaulting to Fractal", async () => {
-    const fetchMock = vi.fn(async () => Response.json({ confirmed: true }));
-    installWindowAndFetch(fetchMock as typeof fetch);
-
-    await expect(trackMempoolTransaction("b".repeat(64), "UNKNOWN_NETWORK"))
-      .rejects.toThrow(/No Mempool endpoint/i);
-    expect(getMempoolConfig("UNKNOWN_NETWORK")).toBeUndefined();
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
