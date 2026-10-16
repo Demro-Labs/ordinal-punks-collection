@@ -175,8 +175,8 @@ export function Brc20TransferFlow({
 
   const prepareTransfer = async () => {
     const provider = wallet();
-    if (kind === "prog" && (network !== "BITCOIN_MAINNET" || !/^[a-z0-9-]{6}$/i.test(ticker))) {
-      setMessage("BRC20-Prog exige un ticker de 6 caractères et Bitcoin mainnet."); return;
+    if (kind === "prog" && !/^[a-z0-9-]{6}$/i.test(ticker)) {
+      setMessage("BRC20-Prog exige un ticker de 6 caractères sur Bitcoin ou Fractal Bitcoin."); return;
     }
     if (!provider?.getPublicKey || !provider.getAccounts || !provider.getChain) {
       setMessage("UniSat doit exposer getAccounts, getChain et getPublicKey. Mettez UniSat à jour."); return;
