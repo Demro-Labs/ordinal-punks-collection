@@ -1108,8 +1108,8 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         <p className="hidden w-full font-mono text-[9px] uppercase tracking-[0.18em] text-[#718092] sm:block">Wallet &amp; transaction shortcuts</p>
         <a href="#unisat-wallet-panel" className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Wallet</a>
         {connectedToFractal && <a href={inscriptions.length > 0 ? "#wallet-transfer-form" : "#unisat-wallet-panel"} className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Ordinals</a>}
-        {connectedToFractal && <a href="#fb-send-title" className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Send FB</a>}
-        {connectedToFractal && <a href="#runes-send-title" className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Runes</a>}
+        {connectedToFractal && <a href="#fb-send-title" className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">{chain?.enum === BITCOIN_MAINNET ? "Send BTC" : "Send FB"}</a>}
+        {connectedToFractal && chain?.enum === FRACTAL_MAINNET && <a href="#runes-send-title" className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Runes</a>}
         <a href="#inscribe-start" className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#d99a54] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#f2bd63] transition-colors hover:bg-[#d99a54]/10 sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Inscribe</a>
       </nav>
       {psbtReview && (
@@ -1251,9 +1251,9 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         <UniSatWalletAuth key={`${address ?? ""}:${chain?.enum ?? ""}`} site="punks" address={address ?? ""} network={chain?.enum ?? ""} provider={window.unisat} />
       )}
       {connectedToFractal && (
-        <UniSatFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} site={site} />
+        <UniSatFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} network={chain?.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET" | undefined} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} site={site} />
       )}
-      {connectedToFractal && (
+      {connectedToFractal && chain?.enum === FRACTAL_MAINNET && (
         <UniSatRunesSendPanel site={site} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} />
       )}
       {address && isSupportedMainnet(chain?.enum) && (

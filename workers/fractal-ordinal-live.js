@@ -640,6 +640,23 @@ export default {
         return Response.json({ error: 'Les estimateurs Mempool et UniSat sont temporairement indisponibles. Aucun taux périmé ne sera utilisé.' }, { status: 503, headers: noStore });
       }
     }
+    if (request.method === 'GET' && url.pathname === '/api/brc20/transferable') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const address = url.searchParams.get('address') || '';
+      const ticker = url.searchParams.get('ticker') || '';
+      const chain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
+      if (!validWalletAddress(address) || !/^[a-z0-9]{1,32}$/i.test(ticker) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse, ticker ou réseau invalide.' }, { status: 400, headers: noStore });
+      const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
+      try {
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/brc20/${encodeURIComponent(ticker)}/info`, env, { signal: AbortSignal.timeout(8000) });
+        const detail = Array.isArray(source?.transferableInscriptions) ? source.transferableInscriptions : [];
+        const normalized = detail.filter(item => typeof item?.inscriptionId === 'string' && /^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId)).map(item => ({ inscriptionId: item.inscriptionId, inscriptionNumber: item.inscriptionNumber ?? null, amount: item.data?.amt ?? '', confirmations: Number(item.confirmations) || 0 }));
+        return Response.json({ network: chain, address, ticker, detail: normalized, refreshedAt: new Date().toISOString() }, { headers: noStore });
+      } catch {
+        return Response.json({ error: 'Les inscriptions BRC-20 transférables sont temporairement indisponibles.' }, { status: 503, headers: noStore });
+      }
+    }
     if (request.method === 'GET' && (url.pathname === '/api/brc20/balances' || url.pathname === '/api/alkanes/balances')) {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
