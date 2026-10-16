@@ -27,7 +27,10 @@ const MAX_UTXO_CONFIRM_BODY_BYTES = 20_000;
 const MAX_UTXO_CONFIRM_INPUTS = 20;
 const MAX_BRC20_PROG_ACTIVATION_BODY_BYTES = 100_000;
 const MAX_BRC20_PROG_ACTIVATION_INPUTS = 20;
+const MAX_BRC20_PROG_BALANCE_BODY_BYTES = 2_048;
 const BRC20_PROG_ACTIVATION_SCRIPT_HEX = '6a09425243323050524f47';
+const BRC20_PROG_CONTROLLER_ADDRESS = '0xc54dd4581af2dbf18e4d90840226756e9d2b3cdb';
+const BRC20_PROG_BALANCE_OF_SELECTOR = 'fc124ebd';
 const brc20ProgActivationBuckets = new Map();
 
 const SECURITY_HEADERS = {
@@ -76,6 +79,16 @@ function isRateLimited(request) {
   if (bucket.count >= RATE_MAX_REQUESTS) return true;
   bucket.count += 1;
   return false;
+}
+
+function abiWord(value) {
+  return BigInt(value).toString(16).padStart(64, '0');
+}
+
+function encodeBrc20ProgBalanceOf(ticker, evmAddress) {
+  const tickerHex = Array.from(new TextEncoder().encode(ticker), byte => byte.toString(16).padStart(2, '0')).join('');
+  const paddedTickerHex = tickerHex.padEnd(Math.ceil(tickerHex.length / 64) * 64, '0');
+  return `0x${BRC20_PROG_BALANCE_OF_SELECTOR}${abiWord(64)}${evmAddress.slice(2).toLowerCase().padStart(64, '0')}${abiWord(ticker.length)}${paddedTickerHex}`;
 }
 
 function isInscribeRateLimited(request) {
@@ -850,6 +863,44 @@ export default {
         return Response.json({ network: 'BITCOIN_MAINNET', configured: true, blockNumber: payload.result, refreshedAt: new Date().toISOString() }, { headers: noStore });
       } catch {
         return Response.json({ error: 'Le RPC BRC2.0 Bitcoin est indisponible ou a retourné une réponse invalide.' }, { status: 503, headers: noStore });
+      }
+    }
+    if (request.method === 'POST' && url.pathname === '/api/brc20-prog/module/balance') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (!ALLOWED_ORIGINS.has(origin)) return Response.json({ error: 'Origine non autorisée pour consulter le solde BRC2.0.' }, { status: 403, headers: noStore });
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      if (!env.BRC20_PROG_RPC_URL) return Response.json({ error: 'Indexeur BRC2.0 non configuré. Renseignez BRC20_PROG_RPC_URL côté Worker.' }, { status: 503, headers: noStore });
+      try {
+        const length = Number(request.headers.get('Content-Length') || '0');
+        if (length > MAX_BRC20_PROG_BALANCE_BODY_BYTES) return Response.json({ error: 'Requête de solde BRC2.0 trop volumineuse.' }, { status: 413, headers: noStore });
+        const rawBody = await request.text();
+        if (new TextEncoder().encode(rawBody).length > MAX_BRC20_PROG_BALANCE_BODY_BYTES) return Response.json({ error: 'Requête de solde BRC2.0 trop volumineuse.' }, { status: 413, headers: noStore });
+        const body = JSON.parse(rawBody);
+        const ticker = body?.ticker;
+        const evmAddress = body?.evmAddress;
+        if (typeof ticker !== 'string' || !/^[a-z0-9-]{6}$/i.test(ticker) || typeof evmAddress !== 'string' || !/^0x[a-f0-9]{40}$/i.test(evmAddress)) {
+          return Response.json({ error: 'Ticker BRC20-Prog ou identité EVM invalide.' }, { status: 400, headers: noStore });
+        }
+        const rpcUrl = new URL(env.BRC20_PROG_RPC_URL);
+        if (rpcUrl.protocol !== 'https:' || rpcUrl.username || rpcUrl.password) throw new Error('Invalid BRC2.0 RPC URL');
+        const rpcHeaders = new Headers({ 'Accept': 'application/json', 'Content-Type': 'application/json' });
+        if (env.BRC20_PROG_RPC_USER || env.BRC20_PROG_RPC_PASSWORD) {
+          if (!env.BRC20_PROG_RPC_USER || !env.BRC20_PROG_RPC_PASSWORD) throw new Error('Incomplete BRC2.0 RPC credentials');
+          rpcHeaders.set('Authorization', 'Basic ' + btoa(`${env.BRC20_PROG_RPC_USER}:${env.BRC20_PROG_RPC_PASSWORD}`));
+        }
+        const upstream = await fetch(rpcUrl.toString(), {
+          method: 'POST', headers: rpcHeaders, signal: AbortSignal.timeout(8000),
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: 'brc20-prog-balance', method: 'eth_call',
+            params: [{ to: BRC20_PROG_CONTROLLER_ADDRESS, data: encodeBrc20ProgBalanceOf(ticker, evmAddress) }, 'latest'],
+          }),
+        });
+        if (!upstream.ok) throw new Error('BRC2.0 RPC unavailable');
+        const payload = await upstream.json();
+        if (payload?.error || typeof payload?.result !== 'string' || !/^0x[0-9a-f]{64}$/i.test(payload.result)) throw new Error('Invalid BRC2.0 balance response');
+        return Response.json({ ticker, evmAddress, balance: BigInt(payload.result).toString(10), decimals: 18, refreshedAt: new Date().toISOString() }, { headers: noStore });
+      } catch {
+        return Response.json({ error: 'Le solde du module BRC2.0 est indisponible ou la réponse RPC est invalide.' }, { status: 503, headers: noStore });
       }
     }
     if (request.method === 'POST' && url.pathname === '/api/brc20-prog/activation/broadcast') {
