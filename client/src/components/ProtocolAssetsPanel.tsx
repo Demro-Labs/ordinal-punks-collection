@@ -49,10 +49,6 @@ export function ProtocolAssetsPanel({ address, network, site = "pokedex" }: { ad
         {assetRows(data?.brc20Prog ?? [], setProgTicker, "BRC20‑Prog")}
         {data?.brc20ProgError && <p className="mt-2 font-mono text-[9px] text-[#e08b7d]" role="status">Indexeur BRC20‑Prog indisponible : {data.brc20ProgError}</p>}
       </div>
-      <div className="border border-[#3b434d] bg-[#10151a] p-3"><div className="flex items-center justify-between"><p className="font-mono text-[10px] uppercase text-[#f2bd63]">Alkanes / collections</p><span className="font-mono text-[10px] text-[#718092]">{data?.alkanes.length ?? 0}</span></div>
-        {data?.alkanes.length ? <div className="mt-3 space-y-2">{data.alkanes.map(item => <div key={`${item.alkaneid}-${item.type}`} className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2c323a] pb-2 font-mono text-[10px]"><span className="text-[#d9d3c6]">{item.symbol || item.name || item.alkaneid}<span className="ml-2 text-[#718092]">{item.type}</span></span><span className="text-[#70c7a0]">{item.amount}</span></div>)}</div> : <p className="mt-3 font-mono text-[10px] text-[#718092]">Aucun Alkane indexé.</p>}
-        <a href="https://unisat.io/utxo" target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-9 items-center gap-1 font-mono text-[9px] uppercase text-[#f2bd63]">Gérer les transferts Alkanes dans UniSat <ExternalLink size={11} /></a>
-      </div>
       <div className="md:col-span-2"><div className="mb-2 border border-[#3b434d] bg-[#10151a] px-3 py-2 font-mono text-[9px] text-[#9ea7b3]" role="status">{moduleStatus || "Vérification de l’indexeur BRC2.0…"}</div><Brc20ProgModulePanel address={address} network={network} site={site} /></div>
     </div>
     {selectedClassic && <Brc20TransferFlow key={`classic-${selectedClassic.ticker}`} address={address} network={network} ticker={selectedClassic.ticker} amount={selectedClassic.availableBalance} site={site} onDone={load} kind="classic" />}
