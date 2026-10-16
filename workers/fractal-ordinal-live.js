@@ -389,7 +389,7 @@ function normalizeRuneBalance(value) {
 }
 
 function normalizeBrc20Balance(value) {
-  if (!value || typeof value.ticker !== 'string' || !/^[a-z0-9]{4,5}$/i.test(value.ticker)) return null;
+  if (!value || typeof value.ticker !== 'string' || !/^[a-z0-9]{4,6}$/i.test(value.ticker)) return null;
   const amounts = ['overallBalance', 'transferableBalance', 'availableBalance'];
   if (amounts.some(key => typeof value[key] !== 'string' || !/^\d+(\.\d+)?$/.test(value[key]))) return null;
   return { ticker: value.ticker, overallBalance: value.overallBalance, transferableBalance: value.transferableBalance, availableBalance: value.availableBalance };
@@ -935,8 +935,8 @@ export default {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       const address = url.searchParams.get('address') || '';
       const ticker = url.searchParams.get('ticker') || '';
-      const chain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
-      if (!validWalletAddress(address) || !/^[a-z0-9]{4,5}$/i.test(ticker) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse, ticker BRC-20 classique ou réseau invalide.' }, { status: 400, headers: noStore });
+      const chain = url.searchParams.get('chain') || '';
+      if (!validWalletAddress(address) || !/^[a-z0-9]{4,6}$/i.test(ticker) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse, ticker BRC-20 classique ou réseau invalide.' }, { status: 400, headers: noStore });
       const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
       try {
         const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/brc20/${encodeURIComponent(ticker)}/info`, env, { signal: AbortSignal.timeout(8000) });
@@ -951,17 +951,19 @@ export default {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       const address = url.searchParams.get('address') || '';
-      const chain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
+      const isBrc20 = url.pathname === '/api/brc20/balances';
+      const chain = url.searchParams.get('chain') || (isBrc20 ? '' : 'FRACTAL_BITCOIN_MAINNET');
       if (!validWalletAddress(address) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse ou réseau invalide.' }, { status: 400, headers: noStore });
       const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
-      const isBrc20 = url.pathname === '/api/brc20/balances';
       try {
         const path = isBrc20
-          ? `/v1/indexer/address/${encodeURIComponent(address)}/brc20/summary?start=0&limit=100`
+          ? `/v1/indexer/address/${encodeURIComponent(address)}/brc20/summary?start=0&limit=100&tick_filter=56&exclude_zero=true`
           : `/v1/indexer/address/${encodeURIComponent(address)}/alkanes/token-list?start=0&limit=100`;
         const source = await uniNetwork(base, path, env, { signal: AbortSignal.timeout(8000) });
+        if (isBrc20 && !Array.isArray(source?.detail)) throw new Error('Invalid BRC-20 summary response');
         const detail = Array.isArray(source?.detail) ? source.detail : [];
         const normalized = detail.map(isBrc20 ? normalizeBrc20Balance : normalizeAlkaneBalance).filter(Boolean);
+        if (isBrc20 && normalized.length !== detail.length) throw new Error('Invalid BRC-20 balance row');
         return Response.json({ network: chain, address, detail: normalized, refreshedAt: new Date().toISOString() }, { headers: noStore });
       } catch {
         console.warn(`${isBrc20 ? 'BRC20' : 'Alkanes'} balance lookup failed`, { chain });
