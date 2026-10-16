@@ -7,64 +7,45 @@ export type Brc20Balance = {
   availableBalance: string;
 };
 
-export type AlkaneBalance = {
-  alkaneid: string;
-  amount: string;
-  type: "token" | "collection" | "nft" | "contract" | string;
-  name: string;
-  symbol: string;
-  divisibility: number | null;
-};
-
 export type ProtocolBalances = {
   network: ProtocolNetwork;
   address: string;
   brc20: Brc20Balance[];
-  brc20Prog: Brc20Balance[];
-  brc20ProgError?: string;
-  alkanes: AlkaneBalance[];
   refreshedAt: string;
 };
 
-export type Brc20ProgModuleStatus = {
-  network: ProtocolNetwork;
-  configured: boolean;
-  blockNumber: string | null;
-  refreshedAt: string;
-};
-
-const LIVE_API_BASE = (import.meta.env.VITE_LIVE_DATA_URL || "https://fractal-ordinal-live.servostar23.workers.dev/api/live-inscription").replace(/\/api\/live-inscription\/?$/, "");
+const LIVE_API_BASE = (
+  import.meta.env.VITE_LIVE_DATA_URL ||
+  "https://fractal-ordinal-live.servostar23.workers.dev/api/live-inscription"
+).replace(/\/api\/live-inscription\/?$/, "");
 
 async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`${LIVE_API_BASE}${path}`, { signal, cache: "no-store", headers: { Accept: "application/json" } });
+  const response = await fetch(`${LIVE_API_BASE}${path}`, {
+    signal,
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof payload?.error === "string" ? payload.error : `Protocol API HTTP ${response.status}`);
+  if (!response.ok) {
+    throw new Error(
+      typeof payload?.error === "string" ? payload.error : `Protocol API HTTP ${response.status}`,
+    );
+  }
   return payload as T;
 }
 
-export async function fetchProtocolBalances(address: string, network: ProtocolNetwork, signal?: AbortSignal): Promise<ProtocolBalances> {
+export async function fetchProtocolBalances(
+  address: string,
+  network: ProtocolNetwork,
+  signal?: AbortSignal,
+): Promise<ProtocolBalances> {
   if (!/^[A-Za-z0-9]{14,100}$/.test(address)) throw new Error("Adresse wallet invalide.");
   const query = new URLSearchParams({ address, chain: network });
-  const [brc20Result, alkanesResult] = await Promise.allSettled([
-    request<{ detail?: Brc20Balance[] }>(`/api/brc20/balances?${query}`, signal),
-    network === "BITCOIN_MAINNET"
-      ? request<{ detail?: AlkaneBalance[] }>(`/api/alkanes/balances?${query}`, signal)
-      : Promise.resolve<{ detail?: AlkaneBalance[] }>({ detail: [] }),
-  ]);
-  if (brc20Result.status === "rejected") throw brc20Result.reason;
-  const brc20 = brc20Result.value;
-  const alkanes = alkanesResult.status === "fulfilled" ? alkanesResult.value : { detail: [] };
-  let prog: { detail?: Brc20Balance[] } | null = null;
-  let brc20ProgError: string | undefined;
-  try {
-      prog = await request<{ detail?: Brc20Balance[] }>(`/api/brc20-prog/balances?${new URLSearchParams({ address, chain: network })}`, signal);
-  } catch (cause) {
-      if (signal?.aborted) throw cause;
-      brc20ProgError = cause instanceof Error ? cause.message : "Indexeur BRC20-Prog indisponible.";
-  }
-  return { network, address, brc20: brc20.detail || [], brc20Prog: prog?.detail || [], brc20ProgError, alkanes: alkanes.detail || [], refreshedAt: new Date().toISOString() };
-}
-
-export async function fetchBrc20ProgModuleStatus(network: ProtocolNetwork, signal?: AbortSignal): Promise<Brc20ProgModuleStatus> {
-  return request<Brc20ProgModuleStatus>(`/api/brc20-prog/module/status?${new URLSearchParams({ chain: network })}`, signal);
+  const result = await request<{ detail?: Brc20Balance[] }>(`/api/brc20/balances?${query}`, signal);
+  return {
+    network,
+    address,
+    brc20: result.detail || [],
+    refreshedAt: new Date().toISOString(),
+  };
 }
