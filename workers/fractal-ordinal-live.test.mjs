@@ -13,6 +13,62 @@ function makeRequest(path, { method = 'GET', origin = allowedOrigin, ip = '192.0
   return new Request(base + path, { method, headers, ...(body === undefined ? {} : { body }) });
 }
 
+test('reads and strictly normalizes Bitcoin-only BRC20-Prog six-character balances', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  let upstreamUrl = '';
+  let auth = '';
+  globalThis.fetch = async (input, init = {}) => {
+    upstreamUrl = String(input);
+    auth = new Headers(init.headers).get('Authorization') || '';
+    return Response.json({ code: 0, data: { detail: [{ ticker: 'ABC-12', overallBalance: '15', transferableBalance: '2', availableBalance: '13' }] } });
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/brc20-prog/balances?address=${address}`, { ip: '192.0.2.250' }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.network, 'BITCOIN_MAINNET');
+    assert.equal(data.detail[0].ticker, 'ABC-12');
+    assert.equal(upstreamUrl, `https://open-api.unisat.io/v1/indexer/address/${address}/brc20-prog/summary?start=0&limit=100`);
+    assert.equal(auth, 'Bearer bitcoin-test-only');
+    assert.equal(JSON.stringify(data).includes('bitcoin-test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('probes only eth_blockNumber for the configured BRC2.0 RPC and keeps credentials server-side', async () => {
+  const previousFetch = globalThis.fetch;
+  let forwarded = null;
+  globalThis.fetch = async (input, init = {}) => {
+    assert.equal(String(input), 'https://brc20-prog.example/rpc');
+    forwarded = { auth: new Headers(init.headers).get('Authorization'), body: JSON.parse(init.body) };
+    return Response.json({ jsonrpc: '2.0', id: 'brc20-prog-health', result: '0x123abc' });
+  };
+  try {
+    const response = await worker.fetch(makeRequest('/api/brc20-prog/module/status', { ip: '192.0.2.249' }), {
+      BRC20_PROG_RPC_URL: 'https://brc20-prog.example/rpc', BRC20_PROG_RPC_USER: 'worker-user', BRC20_PROG_RPC_PASSWORD: 'worker-secret',
+    });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.blockNumber, '0x123abc');
+    assert.equal(forwarded.body.method, 'eth_blockNumber');
+    assert.deepEqual(forwarded.body.params, []);
+    assert.match(forwarded.auth, /^Basic /);
+    assert.equal(JSON.stringify(data).includes('worker-secret'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('reports BRC2.0 RPC as unconfigured without attempting an upstream request', async () => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('must not call upstream'); };
+  try {
+    const response = await worker.fetch(makeRequest('/api/brc20-prog/module/status', { ip: '192.0.2.248' }), {});
+    assert.equal(response.status, 503);
+    assert.equal(calls, 0);
+    assert.match((await response.json()).error, /BRC2.0/);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('responses contain API security headers and allow the site origin', async () => {
   const response = await worker.fetch(makeRequest('/api/market?collectionId=invalid'), {});
   assert.equal(response.status, 400);

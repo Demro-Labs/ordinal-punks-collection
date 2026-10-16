@@ -29,6 +29,7 @@ type OrderStatus = {
   files?: Array<{ inscriptionId?: string }>;
 };
 type SiteName = "punks" | "pokedex";
+type Brc20Kind = "classic" | "prog";
 const API_BASE = (
   import.meta.env.VITE_LIVE_DATA_URL ||
   "https://fractal-ordinal-live.servostar23.workers.dev/api/live-inscription"
@@ -60,6 +61,7 @@ export function Brc20TransferFlow({
   amount,
   onDone,
   site = "pokedex",
+  kind = "classic",
 }: {
   address: string;
   network: ProtocolNetwork;
@@ -67,6 +69,7 @@ export function Brc20TransferFlow({
   amount: string;
   onDone: () => void;
   site?: SiteName;
+  kind?: Brc20Kind;
 }) {
   const [recipient, setRecipient] = useState("");
   const [amountToTransfer, setAmountToTransfer] = useState(amount);
@@ -89,6 +92,7 @@ export function Brc20TransferFlow({
     recipient.trim() && validDecimal(amountToTransfer)
       ? JSON.stringify([
           "brc20-transfer",
+          kind,
           site,
           address,
           network,
@@ -140,6 +144,8 @@ export function Brc20TransferFlow({
   };
   const start = async () => {
     const provider = wallet();
+    if (kind === "prog" && (network !== "BITCOIN_MAINNET" || !/^[a-z0-9-]{6}$/i.test(ticker)))
+      return setMessage("BRC20-Prog exige un ticker de 6 caractères et Bitcoin mainnet.");
     if (
       !provider?.getPublicKey ||
       !provider.getAccounts ||
@@ -279,7 +285,7 @@ export function Brc20TransferFlow({
   return (
     <div className="mt-3 border border-[#d99a54]/50 bg-[#10151a] p-3">
       <p className="font-mono text-[10px] uppercase text-[#f2bd63]">
-        Inscrire puis transférer · BRC-20 {ticker}
+        Inscrire puis transférer · {kind === "prog" ? "BRC20-Prog" : "BRC-20 classique"} {ticker}
       </p>
       <p className="mt-1 font-mono text-[9px] leading-5 text-[#718092]">
         Réseau : {chainLabel} · quantité détectée :{" "}
@@ -299,7 +305,7 @@ export function Brc20TransferFlow({
           className="min-h-11 border border-[#3b434d] bg-[#0b0d10] px-3 font-mono text-[10px] text-[#d9d3c6]"
         />
         <label className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#9ea7b3]">
-          Quantité BRC-20
+          Quantité {kind === "prog" ? "BRC20-Prog" : "BRC-20"}
           <input
             value={amountToTransfer}
             onChange={event => {

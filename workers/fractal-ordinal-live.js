@@ -203,7 +203,14 @@ function normalizeRuneBalance(value) {
 }
 
 function normalizeBrc20Balance(value) {
-  if (!value || typeof value.ticker !== 'string' || !/^[a-z0-9]{1,32}$/i.test(value.ticker)) return null;
+  if (!value || typeof value.ticker !== 'string' || !/^[a-z0-9]{4,5}$/i.test(value.ticker)) return null;
+  const amounts = ['overallBalance', 'transferableBalance', 'availableBalance'];
+  if (amounts.some(key => typeof value[key] !== 'string' || !/^\d+(\.\d+)?$/.test(value[key]))) return null;
+  return { ticker: value.ticker, overallBalance: value.overallBalance, transferableBalance: value.transferableBalance, availableBalance: value.availableBalance };
+}
+
+function normalizeBrc20ProgBalance(value) {
+  if (!value || typeof value.ticker !== 'string' || !/^[a-z0-9-]{6}$/i.test(value.ticker)) return null;
   const amounts = ['overallBalance', 'transferableBalance', 'availableBalance'];
   if (amounts.some(key => typeof value[key] !== 'string' || !/^\d+(\.\d+)?$/.test(value[key]))) return null;
   return { ticker: value.ticker, overallBalance: value.overallBalance, transferableBalance: value.transferableBalance, availableBalance: value.availableBalance };
@@ -660,13 +667,52 @@ export default {
         return Response.json({ error: 'Les estimateurs Mempool et UniSat sont temporairement indisponibles. Aucun taux périmé ne sera utilisé.' }, { status: 503, headers: noStore });
       }
     }
+    if (request.method === 'GET' && url.pathname === '/api/brc20-prog/balances') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const address = url.searchParams.get('address') || '';
+      if (!validWalletAddress(address)) return Response.json({ error: 'Adresse Bitcoin invalide.' }, { status: 400, headers: noStore });
+      try {
+        const source = await uniNetwork(BITCOIN_API_BASE, `/v1/indexer/address/${encodeURIComponent(address)}/brc20-prog/summary?start=0&limit=100`, env, { signal: AbortSignal.timeout(8000) });
+        const raw = Array.isArray(source?.detail) ? source.detail : [];
+        const detail = raw.map(normalizeBrc20ProgBalance).filter(Boolean);
+        if (detail.length !== raw.length) throw new Error('Invalid BRC20-Prog balance response');
+        return Response.json({ network: 'BITCOIN_MAINNET', address, detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
+      } catch {
+        return Response.json({ error: 'Les soldes BRC20-Prog Bitcoin sont temporairement indisponibles.' }, { status: 503, headers: noStore });
+      }
+    }
+    if (request.method === 'GET' && url.pathname === '/api/brc20-prog/module/status') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      if (!env.BRC20_PROG_RPC_URL) return Response.json({ error: 'Indexeur BRC2.0 non configuré. Renseignez BRC20_PROG_RPC_URL côté Worker.' }, { status: 503, headers: noStore });
+      try {
+        const rpcUrl = new URL(env.BRC20_PROG_RPC_URL);
+        if (rpcUrl.protocol !== 'https:' || rpcUrl.username || rpcUrl.password) throw new Error('Invalid BRC2.0 RPC URL');
+        const rpcHeaders = new Headers({ 'Accept': 'application/json', 'Content-Type': 'application/json' });
+        if (env.BRC20_PROG_RPC_USER || env.BRC20_PROG_RPC_PASSWORD) {
+          if (!env.BRC20_PROG_RPC_USER || !env.BRC20_PROG_RPC_PASSWORD) throw new Error('Incomplete BRC2.0 RPC credentials');
+          rpcHeaders.set('Authorization', 'Basic ' + btoa(`${env.BRC20_PROG_RPC_USER}:${env.BRC20_PROG_RPC_PASSWORD}`));
+        }
+        const upstream = await fetch(rpcUrl.toString(), {
+          method: 'POST', headers: rpcHeaders, signal: AbortSignal.timeout(8000),
+          body: JSON.stringify({ jsonrpc: '2.0', id: 'brc20-prog-health', method: 'eth_blockNumber', params: [] }),
+        });
+        if (!upstream.ok) throw new Error('BRC2.0 RPC unavailable');
+        const payload = await upstream.json();
+        if (payload?.error || typeof payload?.result !== 'string' || !/^0x[0-9a-f]+$/i.test(payload.result)) throw new Error('Invalid BRC2.0 RPC response');
+        return Response.json({ network: 'BITCOIN_MAINNET', configured: true, blockNumber: payload.result, refreshedAt: new Date().toISOString() }, { headers: noStore });
+      } catch {
+        return Response.json({ error: 'Le RPC BRC2.0 Bitcoin est indisponible ou a retourné une réponse invalide.' }, { status: 503, headers: noStore });
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/api/brc20/transferable') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       const address = url.searchParams.get('address') || '';
       const ticker = url.searchParams.get('ticker') || '';
       const chain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
-      if (!validWalletAddress(address) || !/^[a-z0-9]{1,32}$/i.test(ticker) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse, ticker ou réseau invalide.' }, { status: 400, headers: noStore });
+      if (!validWalletAddress(address) || !/^[a-z0-9]{4,5}$/i.test(ticker) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse, ticker BRC-20 classique ou réseau invalide.' }, { status: 400, headers: noStore });
       const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
       try {
         const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/brc20/${encodeURIComponent(ticker)}/info`, env, { signal: AbortSignal.timeout(8000) });

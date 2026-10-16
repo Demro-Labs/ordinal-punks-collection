@@ -66,7 +66,7 @@ Après tout rollback, relancer les quatre requêtes de la section 1, puis vérif
 ## 5. Preuve de propriété mobile (BIP-322)
 
 - Les clients mobiles Punks et Pokédex appellent `/api/auth/ownership/challenge`, puis `/api/auth/ownership/verify`, après revue du reçu et avant toute approbation UniSat de transaction. La preuve est liée au site, à l’adresse, au réseau et au contexte de l’opération; elle expire rapidement et n’ouvre aucune session.
-- Ces routes valident le contrôle de la clé, mais ne signent, ne diffusent et n’autorisent jamais un paiement ou transfert. L’approbation transactionnelle UniSat reste séparée et obligatoire. Le parcours desktop n’utilise pas ces gardes.
+- Ces routes valident le contrôle de la clé, mais ne signent, ne diffusent et n’autorisent jamais un paiement ou transfert. L’approbation transactionnelle UniSat reste séparée et obligatoire. Les transferts BRC-20 classique et BRC20-Prog exigent aussi une preuve BIP-322 fraîche sur desktop et mobile; les autres parcours desktop existants ne sont pas modifiés par cette intégration.
 - Après tout changement du Worker, exécuter `node --test workers/fractal-ordinal-live.test.mjs` et `bash scripts/smoke-worker-runtime.sh`. Le smoke vérifie les challenges Bitcoin et Fractal pour les deux sites, sans demander de signature ni créer de transaction.
 - La vérification Production appelle les mêmes challenges sans signature, puis contrôle leur préflight CORS. Ne pas utiliser un vrai wallet ou une vraie opération pour vérifier ces routes.
 
@@ -76,6 +76,8 @@ Après tout rollback, relancer les quatre requêtes de la section 1, puis vérif
 - Le même Worker sert les deux sites; ne pas créer un Worker `production` séparé ni une deuxième base `AuthStorage` depuis le dépôt Pokedex.
 - Ne pas activer une règle WAF de zone supposée couvrir `workers.dev`; cette API est sur le domaine `workers.dev` et n’expose pas de route générique `/api/fractal/broadcast`. Les inscriptions utilisent `/api/inscribe/order`; les envois on-chain ne sont pas relayés par une route broadcast générique.
 - Ne pas configurer un fallback frontend direct ou un endpoint RPC d’exemple non validé. Une panne doit afficher un état dégradé explicite, préserver les garde-fous de signature/CORS et renvoyer une erreur sûre.
+- Le health-check facultatif BRC2.0 requiert un endpoint de confiance configuré uniquement côté Worker : `wrangler secret put BRC20_PROG_RPC_URL`, et si nécessaire `BRC20_PROG_RPC_USER` / `BRC20_PROG_RPC_PASSWORD`. L’URL doit être HTTPS; les identifiants ne doivent jamais être encodés dans l’URL ou placés dans Git. Il appelle uniquement `eth_blockNumber` et **ne valide pas l’identité de l’indexeur, n’indexe pas les soldes, ne crée aucune inscription et n’active pas les appels BRC2.0**. Sans endpoint, la route renvoie `503` de façon attendue.
+- Le panneau BRC2.0 actuel prépare uniquement un JSON deploy/call. Ne pas le présenter comme une exécution complète : la seconde transaction vers `OP_RETURN "BRC20PROG"` n’est pas encore construite par UniSat `sendInscription` (qui attend une adresse ordinaire). Ne jamais contourner cette limite par un destinataire improvisé.
 - Recommandation non activée dans ce changement : créer dans Cloudflare Notifications une alerte de taux d’erreurs 5xx et la relier au canal d’astreinte choisi par le propriétaire du compte. Ne pas inventer un destinataire ou un webhook sans son choix.
 
 ## Sources
