@@ -25,6 +25,10 @@ const MAX_INSCRIBE_FILE_BYTES = 365 * 1024;
 const MAX_INSCRIBE_BODY_BYTES = 95_000_000;
 const MAX_UTXO_CONFIRM_BODY_BYTES = 20_000;
 const MAX_UTXO_CONFIRM_INPUTS = 20;
+const MAX_BRC20_PROG_ACTIVATION_BODY_BYTES = 100_000;
+const MAX_BRC20_PROG_ACTIVATION_INPUTS = 20;
+const BRC20_PROG_ACTIVATION_SCRIPT_HEX = '6a09425243323050524f47';
+const brc20ProgActivationBuckets = new Map();
 
 const SECURITY_HEADERS = {
   'Content-Security-Policy': "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
@@ -96,6 +100,148 @@ function parseBoundedInteger(raw, fallback, maximum) {
   if (!/^\d+$/.test(raw)) return null;
   const value = Number(raw);
   return Number.isSafeInteger(value) && value <= maximum ? value : null;
+}
+
+function isBrc20ProgActivationRateLimited(request) {
+  const now = Date.now();
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  let bucket = brc20ProgActivationBuckets.get(ip);
+  if (!bucket || bucket.expiresAt <= now) {
+    if (brc20ProgActivationBuckets.size >= 10000) {
+      for (const [key, value] of brc20ProgActivationBuckets) if (value.expiresAt <= now) brc20ProgActivationBuckets.delete(key);
+      if (brc20ProgActivationBuckets.size >= 10000) return true;
+    }
+    bucket = { count: 0, expiresAt: now + INSCRIBE_RATE_WINDOW_MS };
+    brc20ProgActivationBuckets.set(ip, bucket);
+  }
+  if (bucket.count >= INSCRIBE_RATE_LIMIT) return true;
+  bucket.count += 1;
+  return false;
+}
+
+function activationVarInt(bytes, cursor) {
+  const prefix = bytes[cursor.offset++];
+  if (prefix === undefined) throw new Error('Truncated transaction');
+  if (prefix < 0xfd) return { value: prefix, raw: bytes.slice(cursor.offset - 1, cursor.offset) };
+  const width = prefix === 0xfd ? 2 : prefix === 0xfe ? 4 : 8;
+  if (cursor.offset + width > bytes.length) throw new Error('Truncated transaction');
+  let value = 0n;
+  for (let index = 0; index < width; index += 1) value |= BigInt(bytes[cursor.offset + index]) << BigInt(index * 8);
+  cursor.offset += width;
+  const minimum = width === 2 ? 0xfdn : width === 4 ? 0x10000n : 0x100000000n;
+  if (value < minimum || value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Non-canonical or oversized transaction varint');
+  return { value: Number(value), raw: bytes.slice(cursor.offset - width - 1, cursor.offset) };
+}
+
+async function verifyBrc20ProgActivationTransaction(txHex, inscriptionOutpoint) {
+  if (typeof txHex !== 'string' || txHex.length < 20 || txHex.length > MAX_BRC20_PROG_ACTIVATION_BODY_BYTES * 2 || !/^(?:[a-f0-9]{2})+$/i.test(txHex)) throw new Error('Invalid transaction hex');
+  const outpointMatch = typeof inscriptionOutpoint === 'string' ? inscriptionOutpoint.match(/^([a-f0-9]{64}):(\d+)$/i) : null;
+  if (!outpointMatch) throw new Error('Invalid inscription outpoint');
+  const expectedTxid = outpointMatch[1].toLowerCase();
+  const expectedVout = Number(outpointMatch[2]);
+  if (!Number.isSafeInteger(expectedVout) || expectedVout < 0 || expectedVout > 0xffffffff) throw new Error('Invalid inscription outpoint');
+
+  const bytes = Uint8Array.from({ length: txHex.length / 2 }, (_, index) => Number.parseInt(txHex.slice(index * 2, index * 2 + 2), 16));
+  const cursor = { offset: 0 };
+  const take = (length) => {
+    if (!Number.isSafeInteger(length) || length < 0 || cursor.offset + length > bytes.length) throw new Error('Truncated transaction');
+    const value = bytes.slice(cursor.offset, cursor.offset + length);
+    cursor.offset += length;
+    return value;
+  };
+  const readUint32 = () => {
+    const value = take(4);
+    return (value[0] | (value[1] << 8) | (value[2] << 16) | (value[3] << 24)) >>> 0;
+  };
+  const version = take(4);
+  const isSegwit = bytes[cursor.offset] === 0 && bytes[cursor.offset + 1] !== 0;
+  if (isSegwit && take(2)[1] !== 1) throw new Error('Unsupported transaction witness flag');
+  const inputCountStart = cursor.offset;
+  const inputCountResult = activationVarInt(bytes, cursor);
+  const inputCount = inputCountResult.value;
+  if (inputCount < 1 || inputCount > MAX_BRC20_PROG_ACTIVATION_INPUTS) throw new Error('Invalid activation input count');
+  const inputBytes = [];
+  let inscriptionInputCount = 0;
+  for (let index = 0; index < inputCount; index += 1) {
+    const start = cursor.offset;
+    const previousHash = take(32);
+    const previousTxid = Array.from(previousHash).reverse().map(byte => byte.toString(16).padStart(2, '0')).join('');
+    const previousVout = readUint32();
+    const scriptLength = activationVarInt(bytes, cursor).value;
+    take(scriptLength);
+    take(4);
+    if (previousTxid === expectedTxid && previousVout === expectedVout) inscriptionInputCount += 1;
+    inputBytes.push(bytes.slice(start, cursor.offset));
+  }
+  const inputCountBytes = bytes.slice(inputCountStart, inputCountStart + inputCountResult.raw.length);
+  const outputCountStart = cursor.offset;
+  const outputCount = activationVarInt(bytes, cursor);
+  if (outputCount.value < 1 || outputCount.value > 1000) throw new Error('Invalid activation output count');
+  const outputCountBytes = bytes.slice(outputCountStart, cursor.offset);
+  const outputBytes = [];
+  let activationMarkerCount = 0;
+  let activationMarkerOutputIndex = -1;
+  let changeOutputValue = 0n;
+  let changeScriptFirstByte = -1;
+  for (let index = 0; index < outputCount.value; index += 1) {
+    const start = cursor.offset;
+    const valueBytes = take(8);
+    let valueSats = 0n;
+    for (let byteIndex = 0; byteIndex < valueBytes.length; byteIndex += 1) valueSats |= BigInt(valueBytes[byteIndex]) << BigInt(byteIndex * 8);
+    if (valueSats > 2_100_000_000_000_000n) throw new Error('Invalid output value');
+    const scriptLength = activationVarInt(bytes, cursor).value;
+    const script = take(scriptLength);
+    if (Array.from(script, byte => byte.toString(16).padStart(2, '0')).join('') === BRC20_PROG_ACTIVATION_SCRIPT_HEX) {
+      activationMarkerCount += 1;
+      activationMarkerOutputIndex = index;
+      if (valueSats !== 0n) throw new Error('BRC2.0 activation output must have zero value');
+    }
+    if (index === 1) { changeOutputValue = valueSats; changeScriptFirstByte = script[0] ?? -1; }
+    outputBytes.push(bytes.slice(start, cursor.offset));
+  }
+  if (isSegwit) {
+    for (let index = 0; index < inputCount; index += 1) {
+      const witnessItems = activationVarInt(bytes, cursor).value;
+      if (witnessItems > 1000) throw new Error('Oversized transaction witness');
+      for (let item = 0; item < witnessItems; item += 1) take(activationVarInt(bytes, cursor).value);
+    }
+  }
+  const locktime = take(4);
+  if (cursor.offset !== bytes.length || inscriptionInputCount !== 1 || activationMarkerCount !== 1 || outputCount.value !== 2 || activationMarkerOutputIndex !== 0 || changeOutputValue < 600n || changeScriptFirstByte === 0x6a) throw new Error('Transaction is not a valid BRC2.0 activation');
+
+  const stripped = new Uint8Array(version.length + inputCountBytes.length + inputBytes.reduce((size, input) => size + input.length, 0) + outputCountBytes.length + outputBytes.reduce((size, output) => size + output.length, 0) + locktime.length);
+  let position = 0;
+  for (const part of [version, inputCountBytes, ...inputBytes, outputCountBytes, ...outputBytes, locktime]) { stripped.set(part, position); position += part.length; }
+  const firstHash = new Uint8Array(await crypto.subtle.digest('SHA-256', stripped));
+  const secondHash = new Uint8Array(await crypto.subtle.digest('SHA-256', firstHash));
+  const txid = Array.from(secondHash.reverse(), byte => byte.toString(16).padStart(2, '0')).join('');
+  return txid;
+}
+
+async function broadcastBrc20ProgActivation(request, corsHeaders) {
+  const noStore = { ...corsHeaders, 'Cache-Control': 'no-store' };
+  if (!(request.headers.get('Content-Type') || '').toLowerCase().includes('application/json')) return Response.json({ error: 'Content-Type JSON requis.' }, { status: 415, headers: noStore });
+  const contentLength = Number(request.headers.get('Content-Length') || 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_BRC20_PROG_ACTIVATION_BODY_BYTES) return Response.json({ error: 'La transaction d’activation dépasse la taille maximale autorisée.' }, { status: 413, headers: noStore });
+  let bodyText;
+  try { bodyText = await request.text(); } catch { return Response.json({ error: 'Corps JSON invalide.' }, { status: 400, headers: noStore }); }
+  if (new TextEncoder().encode(bodyText).byteLength > MAX_BRC20_PROG_ACTIVATION_BODY_BYTES) return Response.json({ error: 'La transaction d’activation dépasse la taille maximale autorisée.' }, { status: 413, headers: noStore });
+  let body;
+  try { body = JSON.parse(bodyText); } catch { return Response.json({ error: 'Corps JSON invalide.' }, { status: 400, headers: noStore }); }
+  let expectedTxid;
+  try { expectedTxid = await verifyBrc20ProgActivationTransaction(body?.txHex, body?.inscriptionOutpoint); }
+  catch { return Response.json({ error: 'La transaction ne correspond pas à une activation BRC2.0 valide.' }, { status: 400, headers: noStore }); }
+  try {
+    const upstream = await fetch('https://mempool.space/api/tx', {
+      method: 'POST', headers: { Accept: 'text/plain', 'Content-Type': 'text/plain' },
+      body: body.txHex.toLowerCase(), signal: AbortSignal.timeout(8000),
+    });
+    const returnedTxid = (await upstream.text()).trim().toLowerCase();
+    if (!upstream.ok || returnedTxid !== expectedTxid) throw new Error('Broadcast was not confirmed');
+    return Response.json({ network: 'BITCOIN_MAINNET', txid: expectedTxid, status: 'broadcast' }, { headers: noStore });
+  } catch {
+    return Response.json({ error: 'Mempool n’a pas confirmé la diffusion de l’activation. Vérifiez le TXID dans Mempool avant toute nouvelle tentative.' }, { status: 502, headers: noStore });
+  }
 }
 
 async function uni(path, env, init = {}) {
@@ -705,6 +851,12 @@ export default {
       } catch {
         return Response.json({ error: 'Le RPC BRC2.0 Bitcoin est indisponible ou a retourné une réponse invalide.' }, { status: 503, headers: noStore });
       }
+    }
+    if (request.method === 'POST' && url.pathname === '/api/brc20-prog/activation/broadcast') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (!ALLOWED_ORIGINS.has(origin)) return Response.json({ error: 'Origine non autorisée pour diffuser une activation BRC2.0.' }, { status: 403, headers: noStore });
+      if (isRateLimited(request) || isBrc20ProgActivationRateLimited(request)) return Response.json({ error: 'Trop de tentatives de diffusion. Réessayez dans une minute.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      return broadcastBrc20ProgActivation(request, headers);
     }
     if (request.method === 'GET' && url.pathname === '/api/brc20/transferable') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };

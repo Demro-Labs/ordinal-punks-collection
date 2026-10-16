@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import worker from './fractal-ordinal-live.js';
 
@@ -11,6 +12,26 @@ function makeRequest(path, { method = 'GET', origin = allowedOrigin, ip = '192.0
   if (ip) headers.set('CF-Connecting-IP', ip);
   if (body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   return new Request(base + path, { method, headers, ...(body === undefined ? {} : { body }) });
+}
+
+function activationTx({ segwit = false, previousTxid = '11'.repeat(32), previousVout = 3, marker = '6a09425243323050524f47' } = {}) {
+  const parts = [Buffer.from('02000000', 'hex')];
+  if (segwit) parts.push(Buffer.from('0001', 'hex'));
+  parts.push(
+    Buffer.from('01', 'hex'), Buffer.from(previousTxid, 'hex').reverse(),
+    Buffer.from(previousVout.toString(16).padStart(8, '0').match(/../g).reverse().join(''), 'hex'),
+    Buffer.from('00fdffffff', 'hex'), Buffer.from('02', 'hex'),
+    Buffer.from('0000000000000000', 'hex'), Buffer.from([Buffer.from(marker, 'hex').length]), Buffer.from(marker, 'hex'),
+    Buffer.from('1027000000000000', 'hex'), Buffer.from('16', 'hex'), Buffer.from(`0014${'22'.repeat(20)}`, 'hex'),
+  );
+  if (segwit) parts.push(Buffer.from('0101ab', 'hex'));
+  parts.push(Buffer.from('00000000', 'hex'));
+  return Buffer.concat(parts).toString('hex');
+}
+
+function txidOfNonWitness(rawHex) {
+  const firstHash = createHash('sha256').update(Buffer.from(rawHex, 'hex')).digest();
+  return createHash('sha256').update(firstHash).digest().reverse().toString('hex');
 }
 
 test('reads and strictly normalizes Bitcoin-only BRC20-Prog six-character balances', async () => {
@@ -66,6 +87,80 @@ test('reports BRC2.0 RPC as unconfigured without attempting an upstream request'
     assert.equal(response.status, 503);
     assert.equal(calls, 0);
     assert.match((await response.json()).error, /BRC2.0/);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('broadcasts only a structurally valid BRC2.0 activation and returns the matching Bitcoin TXID', async () => {
+  const previousFetch = globalThis.fetch;
+  const rawTx = activationTx({ segwit: true });
+  const expectedTxid = txidOfNonWitness(activationTx());
+  let forwarded = null;
+  globalThis.fetch = async (input, init = {}) => {
+    forwarded = { url: String(input), method: init.method, body: init.body };
+    return new Response(expectedTxid, { status: 200 });
+  };
+  try {
+    const response = await worker.fetch(makeRequest('/api/brc20-prog/activation/broadcast', {
+      method: 'POST', ip: '192.0.2.247', body: JSON.stringify({ txHex: rawTx, inscriptionOutpoint: `${'11'.repeat(32)}:3` }),
+    }), {});
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.deepEqual(data, { network: 'BITCOIN_MAINNET', txid: expectedTxid, status: 'broadcast' });
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(forwarded.url, 'https://mempool.space/api/tx');
+    assert.equal(forwarded.method, 'POST');
+    assert.equal(forwarded.body, rawTx);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('rejects a BRC2.0 broadcast whose declared inscription outpoint is not spent', async () => {
+  const previousFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => { upstreamCalls += 1; throw new Error('must not broadcast'); };
+  try {
+    const response = await worker.fetch(makeRequest('/api/brc20-prog/activation/broadcast', {
+      method: 'POST', ip: '192.0.2.246', body: JSON.stringify({ txHex: activationTx(), inscriptionOutpoint: `${'22'.repeat(32)}:3` }),
+    }), {});
+    assert.equal(response.status, 400);
+    assert.equal(upstreamCalls, 0);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('rejects transactions without the exact zero-value BRC20PROG output before broadcast', async () => {
+  const previousFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => { upstreamCalls += 1; throw new Error('must not broadcast'); };
+  try {
+    const response = await worker.fetch(makeRequest('/api/brc20-prog/activation/broadcast', {
+      method: 'POST', ip: '192.0.2.245', body: JSON.stringify({ txHex: activationTx({ marker: '6a03424144' }), inscriptionOutpoint: `${'11'.repeat(32)}:3` }),
+    }), {});
+    assert.equal(response.status, 400);
+    assert.equal(upstreamCalls, 0);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('does not report a successful BRC2.0 broadcast when Mempool returns a different TXID', async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('ff'.repeat(32), { status: 200 });
+  try {
+    const response = await worker.fetch(makeRequest('/api/brc20-prog/activation/broadcast', {
+      method: 'POST', ip: '192.0.2.243', body: JSON.stringify({ txHex: activationTx(), inscriptionOutpoint: `${'11'.repeat(32)}:3` }),
+    }), {});
+    assert.equal(response.status, 502);
+    assert.match((await response.json()).error, /TXID/);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('does not expose the BRC2.0 broadcast route to non-allowlisted origins', async () => {
+  const previousFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => { upstreamCalls += 1; throw new Error('must not broadcast'); };
+  try {
+    const response = await worker.fetch(makeRequest('/api/brc20-prog/activation/broadcast', {
+      method: 'POST', origin: 'https://attacker.example', ip: '192.0.2.244', body: '{}',
+    }), {});
+    assert.equal(response.status, 403);
+    assert.equal(upstreamCalls, 0);
   } finally { globalThis.fetch = previousFetch; }
 });
 
