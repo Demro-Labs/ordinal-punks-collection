@@ -53,6 +53,14 @@ for site in punks pokedex; do
   done
 done
 
+for site in punks pokedex; do
+  payload="$(jq -n --arg site "${site}" --arg address "${test_address}" '{site:$site,address:$address,network:"BITCOIN_MAINNET"}')"
+  response="$(curl -fsS --retry 2 --max-time 20 -X POST "${BASE_URL}/api/auth/challenge" \
+    -H 'Origin: https://demro-labs.github.io' -H 'Content-Type: application/json' --data-binary "${payload}")"
+  printf '%s' "${response}" | jq -e --arg site "${site}" '.site == $site and .network == "BITCOIN_MAINNET" and (.message | contains("Network: BITCOIN_MAINNET") and contains("No payment, transfer, or spending approval is authorized."))' >/dev/null
+  echo "Bitcoin sign-in challenge verified for ${site}; no signature, session, or payment was created."
+done
+
 for origin in "https://demro-labs.github.io" "https://punksgallery-mlwdpcwl.manus.space"; do
   headers_file="${TMP_DIR}/preflight.headers"
   status="$(curl -sS --max-time 15 -D "${headers_file}" -o /dev/null -w '%{http_code}' -X OPTIONS \

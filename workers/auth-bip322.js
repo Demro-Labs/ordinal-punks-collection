@@ -17,7 +17,7 @@ const AUTH_SITES = {
   },
 };
 
-const AUTH_NETWORK = 'FRACTAL_BITCOIN_MAINNET';
+const LOGIN_NETWORKS = new Set(['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET']);
 const OWNERSHIP_NETWORKS = new Set(['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET']);
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
@@ -147,12 +147,12 @@ function siteForRequest(siteName, request) {
   return site;
 }
 
-function buildChallengeMessage(siteName, address, challengeId, issuedAt, expiresAt) {
+function buildChallengeMessage(siteName, address, network, challengeId, issuedAt, expiresAt) {
   const site = AUTH_SITES[siteName];
   return [
     `${site.domain} requests a wallet sign-in`,
     `URI: ${site.uri}`,
-    `Network: ${AUTH_NETWORK}`,
+    `Network: ${network}`,
     `Address: ${address}`,
     'Action: Login; prove wallet control only',
     `Nonce: ${challengeId}`,
@@ -215,7 +215,7 @@ function errorResponse(error, headers) {
     AUTH_INVALID_JSON: 'The authentication request is invalid.',
     AUTH_ORIGIN_NOT_ALLOWED: 'This site origin is not allowed to authenticate.',
     AUTH_INVALID_SITE: 'The requested site is not supported.',
-    AUTH_INVALID_NETWORK: 'Select Fractal Bitcoin mainnet in UniSat to sign in.',
+    AUTH_INVALID_NETWORK: 'Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat to sign in.',
     AUTH_INVALID_OWNERSHIP_NETWORK: 'Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat to prove wallet ownership.',
     AUTH_INVALID_ADDRESS: 'Use a supported mainnet SegWit or Taproot address in UniSat.',
     AUTH_INVALID_CHALLENGE: 'The challenge is invalid, expired, or already used. Request a new challenge.',
@@ -258,7 +258,7 @@ async function createChallenge(request, env, headers) {
   const siteName = body.site;
   if (!AUTH_SITES[siteName]) throw new AuthError('AUTH_INVALID_SITE', 400);
   const site = siteForRequest(siteName, request);
-  if (body.network !== AUTH_NETWORK) throw new AuthError('AUTH_INVALID_NETWORK', 400);
+  if (!LOGIN_NETWORKS.has(body.network)) throw new AuthError('AUTH_INVALID_NETWORK', 400);
   if (!isValidAddress(body.address)) throw new AuthError('AUTH_INVALID_ADDRESS', 400);
   const expiresAt = now + CHALLENGE_TTL_MS;
   const challengeId = randomToken();
@@ -269,7 +269,7 @@ async function createChallenge(request, env, headers) {
     site: siteName,
     address: body.address,
     addressHash,
-    network: AUTH_NETWORK,
+    network: body.network,
     origin: site.origin,
     issuedAt: now,
     expiresAt,
@@ -280,9 +280,9 @@ async function createChallenge(request, env, headers) {
 
   return Response.json({
     challengeId,
-    message: buildChallengeMessage(siteName, body.address, challengeId, now, expiresAt),
+    message: buildChallengeMessage(siteName, body.address, body.network, challengeId, now, expiresAt),
     expiresAt: new Date(expiresAt).toISOString(),
-    network: AUTH_NETWORK,
+    network: body.network,
     site: siteName,
   }, { headers: responseHeaders(headers) });
 }
@@ -295,18 +295,18 @@ async function verifyChallenge(request, env, headers) {
   const siteName = body.site;
   if (!AUTH_SITES[siteName]) throw new AuthError('AUTH_INVALID_SITE', 400);
   const site = siteForRequest(siteName, request);
-  if (body.network !== AUTH_NETWORK) throw new AuthError('AUTH_INVALID_NETWORK', 400);
+  if (!LOGIN_NETWORKS.has(body.network)) throw new AuthError('AUTH_INVALID_NETWORK', 400);
   if (!isValidAddress(body.address)) throw new AuthError('AUTH_INVALID_ADDRESS', 400);
   if (!isValidChallengeId(body.challengeId)) throw new AuthError('AUTH_INVALID_CHALLENGE', 400);
   const witness = await decodeWitness(body.signature);
   if (!witness) throw new AuthError('AUTH_INVALID_SIGNATURE', 400);
   const idHash = await sha256Hex(body.challengeId);
   const challenge = await authStorage(env, 'challenge/get', { idHash });
-  if (!challenge || challenge.site !== siteName || challenge.address !== body.address || challenge.network !== AUTH_NETWORK || challenge.origin !== site.origin || challenge.usedAt || Number(challenge.expiresAt) <= now) {
+  if (!challenge || challenge.site !== siteName || challenge.address !== body.address || challenge.network !== body.network || challenge.origin !== site.origin || challenge.usedAt || Number(challenge.expiresAt) <= now) {
     throw new AuthError('AUTH_INVALID_CHALLENGE', 401);
   }
 
-  const message = buildChallengeMessage(siteName, body.address, body.challengeId, Number(challenge.issuedAt), Number(challenge.expiresAt));
+  const message = buildChallengeMessage(siteName, body.address, body.network, body.challengeId, Number(challenge.issuedAt), Number(challenge.expiresAt));
   let valid = false;
   try { valid = await Verifier.verifySignature(body.address, message, witness); } catch { valid = false; }
   if (!valid) throw new AuthError('AUTH_SIGNATURE_REJECTED', 401);
@@ -320,7 +320,7 @@ async function verifyChallenge(request, env, headers) {
     tokenHash,
     site: siteName,
     address: body.address,
-    network: AUTH_NETWORK,
+    network: body.network,
     now: createdAt,
     expiresAt,
   });
@@ -328,7 +328,7 @@ async function verifyChallenge(request, env, headers) {
 
   const cookie = `${site.cookie}=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`;
   return Response.json({
-    session: { site: siteName, address: body.address, network: AUTH_NETWORK, createdAt: new Date(createdAt).toISOString(), expiresAt: new Date(expiresAt).toISOString() },
+    session: { site: siteName, address: body.address, network: body.network, createdAt: new Date(createdAt).toISOString(), expiresAt: new Date(expiresAt).toISOString() },
   }, { headers: { ...responseHeaders(headers), 'Set-Cookie': cookie } });
 }
 

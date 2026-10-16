@@ -8,7 +8,7 @@ Cette authentification prouve uniquement le contrôle d’une adresse. Elle ne c
 
 ## Parcours
 
-1. Le client lit à nouveau l’adresse et le réseau UniSat avant de demander un challenge. Seul `FRACTAL_BITCOIN_MAINNET` est accepté.
+1. Le client lit à nouveau l’adresse et le réseau UniSat avant de demander un challenge. `BITCOIN_MAINNET` et `FRACTAL_BITCOIN_MAINNET` sont acceptés; le message signé et la session restent liés au réseau effectivement choisi.
 2. `POST /api/auth/challenge` crée un identifiant aléatoire de 256 bits, lié au site, à l’origine, à l’URI canonique, à l’adresse, au réseau et à une expiration de cinq minutes. La réponse fournit le message exact à examiner.
 3. Après l’action explicite « Sign this challenge in UniSat », le client appelle `unisat.signMessage(message, "bip322-simple")`.
 4. `POST /api/auth/verify` reçoit l’identifiant, l’adresse, le réseau et la signature. Le Worker reconstruit lui-même le message à partir de l’enregistrement serveur, vérifie BIP-322 avec `@exodus/bip322-js`, puis consomme le challenge et crée la session dans une transaction SQLite atomique du Durable Object.
@@ -32,7 +32,7 @@ Les réponses d’authentification sont `no-store`. CORS n’autorise que les or
 - Les compteurs IP stockent une empreinte de l’IP limitée à une fenêtre de 15 minutes, jamais l’IP brute. Limites durables : 8 créations de challenge/15 min et 20 vérifications/15 min par IP; en plus, 6 challenges/heure par empreinte d’adresse. Les throttles en mémoire par isolate constituent une protection rapide supplémentaire.
 - Chaque challenge expire après cinq minutes et n’est consommable qu’une seule fois. La consommation, la révocation des anciennes sessions du même site/adresse et la création du nouveau jeton sont atomiques.
 - Les sessions sont isolées entre Punks (`__Host-demro-punks-auth`) et Pokédex (`__Host-demro-pokedex-auth`). Les dépenses on-chain restent indépendantes de ces sessions.
-- L’authentification accepte uniquement les adresses mainnet `bc1q` P2WPKH et `bc1p` P2TR à clé unique, vérifiées par la bibliothèque BIP-322; le réseau applicatif requis reste Fractal Bitcoin mainnet.
+- La connexion et les preuves de propriété acceptent Bitcoin mainnet et Fractal Bitcoin mainnet, pour les adresses `bc1q` P2WPKH et `bc1p` P2TR à clé unique vérifiées par BIP-322. La session stocke le réseau utilisé; une preuve de propriété ne crée pas de session.
 - La limite actuelle de **1 000 fichiers par commande Inscribe** est conservée dans le Worker. Les autres limites de taille et de requête restent inchangées.
 - Le secret UniSat existant demeure un binding `secret_text` nommé `UNISAT_API_KEY`; le déploiement préserve les bindings secrets sans lire ni remplacer leur valeur.
 
