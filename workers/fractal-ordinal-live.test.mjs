@@ -35,7 +35,7 @@ function txidOfNonWitness(rawHex) {
   return createHash('sha256').update(firstHash).digest().reverse().toString('hex');
 }
 
-test('reads and strictly normalizes Bitcoin-only BRC20-Prog six-character balances', async () => {
+test('reads and strictly normalizes BRC20-Prog six-character balances', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
   let upstreamUrl = '';
@@ -57,6 +57,25 @@ test('reads and strictly normalizes Bitcoin-only BRC20-Prog six-character balanc
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('routes BRC20-Prog balance reads to the Fractal UniSat API when requested', async () => {
+  const previousFetch = globalThis.fetch;
+  let forwarded = null;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  globalThis.fetch = async (input, init = {}) => {
+    forwarded = { url: String(input), auth: new Headers(init.headers).get('Authorization') };
+    return Response.json({ code: 0, data: { detail: [{ ticker: 'ABC-12', overallBalance: '2', transferableBalance: '1', availableBalance: '1' }] } });
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/brc20-prog/balances?address=${address}&chain=FRACTAL_BITCOIN_MAINNET`, { ip: '192.0.2.251' }), { UNISAT_API_KEY: 'fractal-test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.network, 'FRACTAL_BITCOIN_MAINNET');
+    assert.equal(data.detail[0].ticker, 'ABC-12');
+    assert.equal(forwarded.url, `https://open-api-fractal.unisat.io/v1/indexer/address/${address}/brc20-prog/summary?start=0&limit=100`);
+    assert.equal(forwarded.auth, 'Bearer fractal-test-only');
+    assert.equal(JSON.stringify(data).includes('fractal-test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
 test('probes only eth_blockNumber for the configured BRC2.0 RPC and keeps credentials server-side', async () => {
   const previousFetch = globalThis.fetch;
   let forwarded = null;
