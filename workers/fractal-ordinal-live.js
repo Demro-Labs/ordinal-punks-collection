@@ -22,7 +22,7 @@ const INSCRIBE_RATE_LIMIT = 5;
 const inscribeBuckets = new Map();
 const MAX_INSCRIBE_FILES = 1000;
 const MAX_INSCRIBE_FILE_BYTES = 365 * 1024;
-const MAX_INSCRIBE_BODY_BYTES = 50_000_000;
+const MAX_INSCRIBE_BODY_BYTES = 95_000_000;
 const MAX_UTXO_CONFIRM_BODY_BYTES = 20_000;
 const MAX_UTXO_CONFIRM_INPUTS = 20;
 
@@ -538,6 +538,8 @@ async function inscribeOrder(request, env, corsHeaders) {
   if ((requestedFeeRate !== 0 && (!Number.isSafeInteger(requestedFeeRate) || requestedFeeRate < 1 || requestedFeeRate > 10000)) || outputValue !== 546) throw new InscribeRequestError('Fee rate ou valeur de sortie invalide.');
   if (!filesInput.length || filesInput.length > MAX_INSCRIBE_FILES) throw new InscribeRequestError(`La commande doit contenir de 1 à ${MAX_INSCRIBE_FILES} fichiers.`);
   const files = filesInput.map(validateInscribeFile);
+  const estimatedPayloadBytes = files.reduce((total, file) => total + file.dataURL.length + file.filename.length + 512, 4096);
+  if (estimatedPayloadBytes > MAX_INSCRIBE_BODY_BYTES) throw new InscribeRequestError('Le lot encodé dépasse 95 Mo. Réduisez la taille des fichiers ou créez plusieurs lots.', 413);
   const feeEstimate = await recommendedFeeEstimate(chain, env);
   const feeRate = feeEstimate.feeRate;
   const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
@@ -546,6 +548,24 @@ async function inscribeOrder(request, env, corsHeaders) {
   return Response.json({ orderId: upstream.orderId, status: upstream.status, payAddress: upstream.payAddress, amount: Number(upstream.amount), network: chain, feeRate, feeTarget: feeEstimate.target, feeSources: feeEstimate.sources, feeStrategy: feeEstimate.strategy }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
 
+async function cancelInscribeOrder(request, env, corsHeaders) {
+  let body;
+  try { body = await request.json(); } catch { return Response.json({ error: 'Corps JSON invalide.' }, { status: 400, headers: { ...corsHeaders, 'Cache-Control': 'no-store' } }); }
+  const orderId = typeof body?.orderId === 'string' ? body.orderId : '';
+  const chain = body?.chain || 'FRACTAL_BITCOIN_MAINNET';
+  const noStore = { ...corsHeaders, 'Cache-Control': 'no-store' };
+  if (!/^[A-Za-z0-9_-]{6,160}$/.test(orderId)) return Response.json({ error: 'Identifiant de commande invalide.' }, { status: 400, headers: noStore });
+  if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Réseau d’inscription non pris en charge.' }, { status: 400, headers: noStore });
+  const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
+  try {
+    // cancel2 is UniSat V5's order cancellation endpoint. /cancel is RBF acceleration and must not be used here.
+    await uniNetwork(base, '/v5/inscribe/cancel2', env, { method: 'POST', body: JSON.stringify({ orderId }) });
+    return Response.json({ cancelled: true, orderId, network: chain }, { headers: noStore });
+  } catch (error) {
+    console.warn('UniSat inscription order cancellation failed');
+    return Response.json({ error: 'UniSat n’a pas confirmé l’annulation. Le reçu doit rester conservé jusqu’à vérification du statut.' }, { status: 502, headers: noStore });
+  }
+}
 async function inscribeOrderStatus(request, env, corsHeaders) {
   const url = new URL(request.url);
   const orderId = url.searchParams.get('orderId') || '';
@@ -753,6 +773,13 @@ export default {
         console.warn('UniSat inscription order creation failed');
         return Response.json({ error: 'UniSat n’a pas pu créer la commande. Vérifiez le réseau, le fichier et le fee rate, puis réessayez.' }, { status: 502, headers: noStore });
       }
+    }
+    if (request.method === 'POST' && url.pathname === '/api/inscribe/order/cancel') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (!ALLOWED_ORIGINS.has(origin)) return Response.json({ error: 'Origine non autorisée pour annuler une commande.' }, { status: 403, headers: noStore });
+      if (isRateLimited(request) || isInscribeRateLimited(request)) return Response.json({ error: 'Trop de commandes. Réessayez dans une minute.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      if (!(request.headers.get('Content-Type') || '').toLowerCase().includes('application/json')) return Response.json({ error: 'Content-Type JSON requis.' }, { status: 415, headers: noStore });
+      return await cancelInscribeOrder(request, env, headers);
     }
     if (request.method === 'GET' && url.pathname === '/api/inscribe/order') {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });

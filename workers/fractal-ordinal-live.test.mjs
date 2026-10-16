@@ -677,6 +677,34 @@ test('rejects an oversized UniSat page instead of skipping uninspected outpoints
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('cancels an unpaid V5 order through cancel2 on the selected network', async () => {
+  const previousFetch = globalThis.fetch;
+  let cancelUrl = '';
+  let cancelAuth = '';
+  let cancelBody = null;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url.endsWith('/v5/inscribe/cancel2')) {
+      cancelUrl = url;
+      cancelAuth = new Headers(init.headers).get('Authorization') || '';
+      cancelBody = JSON.parse(init.body);
+      return Response.json({ code: 0, data: {} });
+    }
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest('/api/inscribe/order/cancel', {
+      method: 'POST',
+      ip: '192.0.2.250',
+      body: JSON.stringify({ orderId: 'order-cancel-123', chain: 'BITCOIN_MAINNET' }),
+    }), { UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { cancelled: true, orderId: 'order-cancel-123', network: 'BITCOIN_MAINNET' });
+    assert.equal(cancelUrl, 'https://open-api.unisat.io/v5/inscribe/cancel2');
+    assert.equal(cancelAuth, 'Bearer bitcoin-test-only');
+    assert.deepEqual(cancelBody, { orderId: 'order-cancel-123' });
+  } finally { globalThis.fetch = previousFetch; }
+});
 test('preserves the 1000-file Inscribe limit and rejects file 1001 before upstream access', async () => {
   const previousFetch = globalThis.fetch;
   let acceptedFileCount = 0;
