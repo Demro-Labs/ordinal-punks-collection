@@ -188,7 +188,7 @@ export function Brc20ProgModulePanel({ network, address, site = "pokedex" }: { n
         setMessage("Vérification du solde interne du module BRC2.0 avant de créer une inscription payante…");
         const balanceResponse = await fetch(`${API_BASE}/api/brc20-prog/module/balance`, {
           method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ ticker: transferTicker.trim(), evmAddress: bitcoinAddressToBrc20ProgAddress(address) }),
+          body: JSON.stringify({ ticker: transferTicker.trim(), evmAddress: bitcoinAddressToBrc20ProgAddress(address), chain: network }),
           cache: "no-store",
         });
         const balanceResult = await balanceResponse.json() as { balance?: string; error?: string };

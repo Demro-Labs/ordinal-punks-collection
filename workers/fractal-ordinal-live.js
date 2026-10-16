@@ -31,6 +31,10 @@ const MAX_BRC20_PROG_BALANCE_BODY_BYTES = 2_048;
 const BRC20_PROG_ACTIVATION_SCRIPT_HEX = '6a09425243323050524f47';
 const BRC20_PROG_CONTROLLER_ADDRESS = '0xc54dd4581af2dbf18e4d90840226756e9d2b3cdb';
 const BRC20_PROG_BALANCE_OF_SELECTOR = 'fc124ebd';
+const BRC20_PROG_RPC_ENV_BY_CHAIN = {
+  BITCOIN_MAINNET: 'BRC20_PROG_RPC_URL',
+  FRACTAL_BITCOIN_MAINNET: 'BRC20_PROG_FRACTAL_RPC_URL',
+};
 const brc20ProgActivationBuckets = new Map();
 
 const SECURITY_HEADERS = {
@@ -85,6 +89,29 @@ function abiWord(value) {
   return BigInt(value).toString(16).padStart(64, '0');
 }
 
+function brc20ProgRpcEnvName(chain) {
+  return BRC20_PROG_RPC_ENV_BY_CHAIN[chain] || null;
+}
+function brc20ProgRpcUrl(env, chain) {
+  const preferred = brc20ProgRpcEnvName(chain);
+  const value = preferred === 'BRC20_PROG_RPC_URL'
+    ? env.BRC20_PROG_RPC_URL
+    : env.BRC20_PROG_FRACTAL_RPC_URL || env.ETH_API || env.BRC20_PROG_RPC_URL;
+  if (!value) throw new Error('BRC2.0 RPC is not configured for this network');
+  const rpcUrl = new URL(value);
+  if (rpcUrl.protocol !== 'https:' || rpcUrl.username || rpcUrl.password) throw new Error('Invalid BRC2.0 RPC URL');
+  return rpcUrl;
+}
+function brc20ProgRpcHeaders(env, chain) {
+  const headers = new Headers({ 'Accept': 'application/json', 'Content-Type': 'application/json' });
+  const user = env.BRC20_PROG_RPC_USER;
+  const password = env.BRC20_PROG_RPC_PASSWORD;
+  if (user || password) {
+    if (!user || !password) throw new Error('Incomplete BRC2.0 RPC credentials');
+    headers.set('Authorization', 'Basic ' + btoa(`${user}:${password}`));
+  }
+  return headers;
+}
 function encodeBrc20ProgBalanceOf(ticker, evmAddress) {
   const tickerHex = Array.from(new TextEncoder().encode(ticker), byte => byte.toString(16).padStart(2, '0')).join('');
   const paddedTickerHex = tickerHex.padEnd(Math.ceil(tickerHex.length / 64) * 64, '0');
@@ -830,29 +857,27 @@ export default {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       const address = url.searchParams.get('address') || '';
-      if (!validWalletAddress(address)) return Response.json({ error: 'Adresse Bitcoin invalide.' }, { status: 400, headers: noStore });
+      const chain = url.searchParams.get('chain') || 'BITCOIN_MAINNET';
+      if (!validWalletAddress(address) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse ou réseau BRC20-Prog invalide.' }, { status: 400, headers: noStore });
+      const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
       try {
-        const source = await uniNetwork(BITCOIN_API_BASE, `/v1/indexer/address/${encodeURIComponent(address)}/brc20-prog/summary?start=0&limit=100`, env, { signal: AbortSignal.timeout(8000) });
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/brc20-prog/summary?start=0&limit=100`, env, { signal: AbortSignal.timeout(8000) });
         const raw = Array.isArray(source?.detail) ? source.detail : [];
         const detail = raw.map(normalizeBrc20ProgBalance).filter(Boolean);
         if (detail.length !== raw.length) throw new Error('Invalid BRC20-Prog balance response');
-        return Response.json({ network: 'BITCOIN_MAINNET', address, detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
+        return Response.json({ network: chain, address, detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
       } catch {
-        return Response.json({ error: 'Les soldes BRC20-Prog Bitcoin sont temporairement indisponibles.' }, { status: 503, headers: noStore });
+        return Response.json({ error: `Les soldes BRC20-Prog ${chain === 'BITCOIN_MAINNET' ? 'Bitcoin' : 'Fractal'} sont temporairement indisponibles.` }, { status: 503, headers: noStore });
       }
     }
     if (request.method === 'GET' && url.pathname === '/api/brc20-prog/module/status') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
-      if (!env.BRC20_PROG_RPC_URL) return Response.json({ error: 'Indexeur BRC2.0 non configuré. Renseignez BRC20_PROG_RPC_URL côté Worker.' }, { status: 503, headers: noStore });
+      const chain = url.searchParams.get('chain') || 'BITCOIN_MAINNET';
+      if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Réseau BRC2.0 invalide.' }, { status: 400, headers: noStore });
       try {
-        const rpcUrl = new URL(env.BRC20_PROG_RPC_URL);
-        if (rpcUrl.protocol !== 'https:' || rpcUrl.username || rpcUrl.password) throw new Error('Invalid BRC2.0 RPC URL');
-        const rpcHeaders = new Headers({ 'Accept': 'application/json', 'Content-Type': 'application/json' });
-        if (env.BRC20_PROG_RPC_USER || env.BRC20_PROG_RPC_PASSWORD) {
-          if (!env.BRC20_PROG_RPC_USER || !env.BRC20_PROG_RPC_PASSWORD) throw new Error('Incomplete BRC2.0 RPC credentials');
-          rpcHeaders.set('Authorization', 'Basic ' + btoa(`${env.BRC20_PROG_RPC_USER}:${env.BRC20_PROG_RPC_PASSWORD}`));
-        }
+        const rpcUrl = brc20ProgRpcUrl(env, chain);
+        const rpcHeaders = brc20ProgRpcHeaders(env, chain);
         const upstream = await fetch(rpcUrl.toString(), {
           method: 'POST', headers: rpcHeaders, signal: AbortSignal.timeout(8000),
           body: JSON.stringify({ jsonrpc: '2.0', id: 'brc20-prog-health', method: 'eth_blockNumber', params: [] }),
@@ -860,34 +885,30 @@ export default {
         if (!upstream.ok) throw new Error('BRC2.0 RPC unavailable');
         const payload = await upstream.json();
         if (payload?.error || typeof payload?.result !== 'string' || !/^0x[0-9a-f]+$/i.test(payload.result)) throw new Error('Invalid BRC2.0 RPC response');
-        return Response.json({ network: 'BITCOIN_MAINNET', configured: true, blockNumber: payload.result, refreshedAt: new Date().toISOString() }, { headers: noStore });
+        return Response.json({ network: chain, configured: true, blockNumber: payload.result, refreshedAt: new Date().toISOString() }, { headers: noStore });
       } catch {
-        return Response.json({ error: 'Le RPC BRC2.0 Bitcoin est indisponible ou a retourné une réponse invalide.' }, { status: 503, headers: noStore });
+        return Response.json({ error: `Le RPC BRC2.0 ${chain === 'BITCOIN_MAINNET' ? 'Bitcoin' : 'Fractal Bitcoin'} est indisponible ou a retourné une réponse invalide.` }, { status: 503, headers: noStore });
       }
     }
     if (request.method === 'POST' && url.pathname === '/api/brc20-prog/module/balance') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (!ALLOWED_ORIGINS.has(origin)) return Response.json({ error: 'Origine non autorisée pour consulter le solde BRC2.0.' }, { status: 403, headers: noStore });
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
-      if (!env.BRC20_PROG_RPC_URL) return Response.json({ error: 'Indexeur BRC2.0 non configuré. Renseignez BRC20_PROG_RPC_URL côté Worker.' }, { status: 503, headers: noStore });
       try {
         const length = Number(request.headers.get('Content-Length') || '0');
         if (length > MAX_BRC20_PROG_BALANCE_BODY_BYTES) return Response.json({ error: 'Requête de solde BRC2.0 trop volumineuse.' }, { status: 413, headers: noStore });
         const rawBody = await request.text();
         if (new TextEncoder().encode(rawBody).length > MAX_BRC20_PROG_BALANCE_BODY_BYTES) return Response.json({ error: 'Requête de solde BRC2.0 trop volumineuse.' }, { status: 413, headers: noStore });
         const body = JSON.parse(rawBody);
+        const chain = body?.chain || 'BITCOIN_MAINNET';
+        if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Réseau BRC2.0 invalide.' }, { status: 400, headers: noStore });
         const ticker = body?.ticker;
         const evmAddress = body?.evmAddress;
         if (typeof ticker !== 'string' || !/^[a-z0-9-]{6}$/i.test(ticker) || typeof evmAddress !== 'string' || !/^0x[a-f0-9]{40}$/i.test(evmAddress)) {
           return Response.json({ error: 'Ticker BRC20-Prog ou identité EVM invalide.' }, { status: 400, headers: noStore });
         }
-        const rpcUrl = new URL(env.BRC20_PROG_RPC_URL);
-        if (rpcUrl.protocol !== 'https:' || rpcUrl.username || rpcUrl.password) throw new Error('Invalid BRC2.0 RPC URL');
-        const rpcHeaders = new Headers({ 'Accept': 'application/json', 'Content-Type': 'application/json' });
-        if (env.BRC20_PROG_RPC_USER || env.BRC20_PROG_RPC_PASSWORD) {
-          if (!env.BRC20_PROG_RPC_USER || !env.BRC20_PROG_RPC_PASSWORD) throw new Error('Incomplete BRC2.0 RPC credentials');
-          rpcHeaders.set('Authorization', 'Basic ' + btoa(`${env.BRC20_PROG_RPC_USER}:${env.BRC20_PROG_RPC_PASSWORD}`));
-        }
+        const rpcUrl = brc20ProgRpcUrl(env, chain);
+        const rpcHeaders = brc20ProgRpcHeaders(env, chain);
         const upstream = await fetch(rpcUrl.toString(), {
           method: 'POST', headers: rpcHeaders, signal: AbortSignal.timeout(8000),
           body: JSON.stringify({
@@ -898,7 +919,7 @@ export default {
         if (!upstream.ok) throw new Error('BRC2.0 RPC unavailable');
         const payload = await upstream.json();
         if (payload?.error || typeof payload?.result !== 'string' || !/^0x[0-9a-f]{64}$/i.test(payload.result)) throw new Error('Invalid BRC2.0 balance response');
-        return Response.json({ ticker, evmAddress, balance: BigInt(payload.result).toString(10), decimals: 18, refreshedAt: new Date().toISOString() }, { headers: noStore });
+        return Response.json({ network: chain, ticker, evmAddress, balance: BigInt(payload.result).toString(10), decimals: 18, refreshedAt: new Date().toISOString() }, { headers: noStore });
       } catch {
         return Response.json({ error: 'Le solde du module BRC2.0 est indisponible ou la réponse RPC est invalide.' }, { status: 503, headers: noStore });
       }

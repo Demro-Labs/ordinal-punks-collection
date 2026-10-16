@@ -19,11 +19,9 @@ export function ProtocolAssetsPanel({ address, network, site = "pokedex" }: { ad
       .then(setData)
       .catch(cause => setError(cause instanceof Error ? cause.message : "Données protocole indisponibles."))
       .finally(() => setLoading(false));
-    if (network === "BITCOIN_MAINNET") {
-      void fetchBrc20ProgModuleStatus()
-        .then(status => setModuleStatus(`RPC EVM configuré · hauteur ${Number.parseInt(status.blockNumber ?? "0", 16).toLocaleString()} · vérifier que le point d’accès indexe bien BRC2.0 Bitcoin.`))
-        .catch(() => setModuleStatus("RPC BRC2.0 non configuré ou indisponible."));
-    } else setModuleStatus("BRC2.0 est disponible uniquement sur Bitcoin mainnet.");
+    void fetchBrc20ProgModuleStatus(network)
+      .then(status => setModuleStatus(`RPC EVM configuré · hauteur ${Number.parseInt(status.blockNumber ?? "0", 16).toLocaleString()} · indexeur BRC2.0 ${network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"}.`))
+      .catch(() => setModuleStatus("RPC BRC2.0 non configuré ou indisponible pour ce réseau."));
   };
   useEffect(() => { setClassicTicker(""); setProgTicker(""); load(); }, [address, network]);
   const selectedClassic = data?.brc20.find(item => item.ticker === classicTicker);
@@ -47,8 +45,8 @@ export function ProtocolAssetsPanel({ address, network, site = "pokedex" }: { ad
     <div className="mt-3 grid gap-3 md:grid-cols-2">
       <div className="border border-[#3b434d] bg-[#10151a] p-3"><div className="flex items-center justify-between"><p className="font-mono text-[10px] uppercase text-[#f2bd63]">BRC‑20 classique</p><span className="font-mono text-[10px] text-[#718092]">{data?.brc20.length ?? 0}</span></div>
         {assetRows(data?.brc20 ?? [], setClassicTicker, "BRC‑20")}</div>
-      <div className="border border-[#3b434d] bg-[#10151a] p-3"><div className="flex items-center justify-between"><p className="font-mono text-[10px] uppercase text-[#f2bd63]">BRC20‑Prog · tickers 6 caractères</p><span className="font-mono text-[10px] text-[#718092]">{network === "BITCOIN_MAINNET" ? data?.brc20Prog.length ?? 0 : "Bitcoin only"}</span></div>
-        {network === "BITCOIN_MAINNET" ? assetRows(data?.brc20Prog ?? [], setProgTicker, "BRC20‑Prog") : <p className="mt-3 font-mono text-[10px] leading-5 text-[#718092]">L’indexeur UniSat BRC20‑Prog est Bitcoin-only. Aucun appel de solde n’est envoyé sur Fractal.</p>}
+      <div className="border border-[#3b434d] bg-[#10151a] p-3"><div className="flex items-center justify-between"><p className="font-mono text-[10px] uppercase text-[#f2bd63]">BRC20‑Prog · tickers 6 caractères</p><span className="font-mono text-[10px] text-[#718092]">{data?.brc20Prog.length ?? 0}</span></div>
+        {assetRows(data?.brc20Prog ?? [], setProgTicker, "BRC20‑Prog")}
         {data?.brc20ProgError && <p className="mt-2 font-mono text-[9px] text-[#e08b7d]" role="status">Indexeur BRC20‑Prog indisponible : {data.brc20ProgError}</p>}
       </div>
       <div className="border border-[#3b434d] bg-[#10151a] p-3"><div className="flex items-center justify-between"><p className="font-mono text-[10px] uppercase text-[#f2bd63]">Alkanes / collections</p><span className="font-mono text-[10px] text-[#718092]">{data?.alkanes.length ?? 0}</span></div>
@@ -59,6 +57,6 @@ export function ProtocolAssetsPanel({ address, network, site = "pokedex" }: { ad
     </div>
     {selectedClassic && <Brc20TransferFlow key={`classic-${selectedClassic.ticker}`} address={address} network={network} ticker={selectedClassic.ticker} amount={selectedClassic.availableBalance} site={site} onDone={load} kind="classic" />}
     {selectedProg && <Brc20TransferFlow key={`prog-${selectedProg.ticker}`} address={address} network={network} ticker={selectedProg.ticker} amount={selectedProg.availableBalance} site={site} onDone={load} kind="prog" />}
-    {data && <p className="mt-2 font-mono text-[9px] text-[#718092]">Synchronisé {new Date(data.refreshedAt).toLocaleTimeString()} · BRC20‑Prog indexé uniquement sur Bitcoin mainnet.</p>}
+    {data && <p className="mt-2 font-mono text-[9px] text-[#718092]">Synchronisé {new Date(data.refreshedAt).toLocaleTimeString()} · BRC20‑Prog indexé sur le réseau sélectionné.</p>}
   </section>;
 }

@@ -27,7 +27,7 @@ export type ProtocolBalances = {
 };
 
 export type Brc20ProgModuleStatus = {
-  network: "BITCOIN_MAINNET";
+  network: ProtocolNetwork;
   configured: boolean;
   blockNumber: string | null;
   refreshedAt: string;
@@ -49,20 +49,17 @@ export async function fetchProtocolBalances(address: string, network: ProtocolNe
     request<{ detail?: Brc20Balance[] }>(`/api/brc20/balances?${query}`, signal),
     request<{ detail?: AlkaneBalance[] }>(`/api/alkanes/balances?${query}`, signal),
   ]);
-  // UniSat documents BRC20-Prog indexing as Bitcoin-only; never query it on Fractal.
   let prog: { detail?: Brc20Balance[] } | null = null;
   let brc20ProgError: string | undefined;
-  if (network === "BITCOIN_MAINNET") {
-    try {
-      prog = await request<{ detail?: Brc20Balance[] }>(`/api/brc20-prog/balances?${new URLSearchParams({ address })}`, signal);
-    } catch (cause) {
+  try {
+      prog = await request<{ detail?: Brc20Balance[] }>(`/api/brc20-prog/balances?${new URLSearchParams({ address, chain: network })}`, signal);
+  } catch (cause) {
       if (signal?.aborted) throw cause;
       brc20ProgError = cause instanceof Error ? cause.message : "Indexeur BRC20-Prog indisponible.";
-    }
   }
   return { network, address, brc20: brc20.detail || [], brc20Prog: prog?.detail || [], brc20ProgError, alkanes: alkanes.detail || [], refreshedAt: new Date().toISOString() };
 }
 
-export async function fetchBrc20ProgModuleStatus(signal?: AbortSignal): Promise<Brc20ProgModuleStatus> {
-  return request<Brc20ProgModuleStatus>("/api/brc20-prog/module/status", signal);
+export async function fetchBrc20ProgModuleStatus(network: ProtocolNetwork, signal?: AbortSignal): Promise<Brc20ProgModuleStatus> {
+  return request<Brc20ProgModuleStatus>(`/api/brc20-prog/module/status?${new URLSearchParams({ chain: network })}`, signal);
 }
