@@ -45,10 +45,15 @@ async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
 export async function fetchProtocolBalances(address: string, network: ProtocolNetwork, signal?: AbortSignal): Promise<ProtocolBalances> {
   if (!/^[A-Za-z0-9]{14,100}$/.test(address)) throw new Error("Adresse wallet invalide.");
   const query = new URLSearchParams({ address, chain: network });
-  const [brc20, alkanes] = await Promise.all([
+  const [brc20Result, alkanesResult] = await Promise.allSettled([
     request<{ detail?: Brc20Balance[] }>(`/api/brc20/balances?${query}`, signal),
-    request<{ detail?: AlkaneBalance[] }>(`/api/alkanes/balances?${query}`, signal),
+    network === "BITCOIN_MAINNET"
+      ? request<{ detail?: AlkaneBalance[] }>(`/api/alkanes/balances?${query}`, signal)
+      : Promise.resolve<{ detail?: AlkaneBalance[] }>({ detail: [] }),
   ]);
+  if (brc20Result.status === "rejected") throw brc20Result.reason;
+  const brc20 = brc20Result.value;
+  const alkanes = alkanesResult.status === "fulfilled" ? alkanesResult.value : { detail: [] };
   let prog: { detail?: Brc20Balance[] } | null = null;
   let brc20ProgError: string | undefined;
   try {
