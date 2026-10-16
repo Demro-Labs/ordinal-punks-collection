@@ -16,6 +16,7 @@ import { UniSatRunesSendPanel } from "@/components/UniSatRunesSendPanel";
 import { UniSatWalletAuth } from "@/components/UniSatWalletAuth";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
+import { ProtocolAssetsPanel } from "@/components/ProtocolAssetsPanel";
 
 type UniSatChain = {
   enum?: string;
@@ -1254,6 +1255,9 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       )}
       {connectedToFractal && (
         <UniSatRunesSendPanel site={site} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} />
+      )}
+      {address && isSupportedMainnet(chain?.enum) && (
+        <ProtocolAssetsPanel address={address} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} />
       )}
       {connectedToFractal && inscriptions.length > 0 && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-gallery-title">
