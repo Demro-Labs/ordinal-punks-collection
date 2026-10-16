@@ -268,9 +268,13 @@ export function Brc20ProgModulePanel({ network, address, site = "pokedex" }: { n
         const broadcastTxid = typeof pushed === "string" ? pushed : "";
         if (!/^[a-f0-9]{64}$/i.test(broadcastTxid) || broadcastTxid.toLowerCase() !== txid.toLowerCase()) throw new Error(`UniSat a retourné un résultat de diffusion incertain. Vérifiez ${txid} dans Mempool avant tout nouvel essai.`);
       } else {
-        const mempool = getMempoolConfig(BITCOIN)!;
-        const broadcastTxid = await fetchText(`${mempool.api}/api/tx`, { method: "POST", headers: { "Content-Type": "text/plain" }, body: txHex });
-        if (!/^[a-f0-9]{64}$/i.test(broadcastTxid) || broadcastTxid.toLowerCase() !== txid.toLowerCase()) throw new Error(`Mempool n’a pas confirmé le TXID prévu. Vérifiez ${txid} avant tout nouvel essai.`);
+        const response = await fetch(`${API_BASE}/api/brc20-prog/activation/broadcast`, {
+          method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ txHex, inscriptionOutpoint: plan.inscriptionOutpoint }),
+        });
+        const result = await response.json() as { txid?: string; error?: string };
+        const broadcastTxid = result.txid || "";
+        if (!response.ok || !/^[a-f0-9]{64}$/i.test(broadcastTxid) || broadcastTxid.toLowerCase() !== txid.toLowerCase()) throw new Error(result.error || `Le Worker n’a pas confirmé le TXID prévu. Vérifiez ${txid} dans Mempool avant toute nouvelle tentative.`);
       }
       saveFlow(site, { mode, data, contract, inscriptionIdTarget, orderId, payAddress, payAmount, feeRate: paymentFeeRate, flowAddress, paymentTxid, paymentStarted, inscriptionId, activationStarted: false, activationTxid: txid });
       setStage("done"); setMessage(`Activation BRC2.0 diffusée sur Bitcoin mainnet · TXID ${txid}. Les frais estimés étaient de ${plan.feeSats.toLocaleString()} sats; vérifiez la confirmation et l’exécution de l’indexeur.`);
