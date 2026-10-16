@@ -316,6 +316,80 @@ test('uses the separate Bitcoin UniSat secret for Bitcoin fees without exposing 
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('routes live classic BRC-20 summaries to the selected Bitcoin or Fractal UniSat indexer', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const tickers = ['ABCD', 'ABCDE', 'ABCDEF'];
+  const rows = tickers.map(ticker => ({ ticker, overallBalance: '100', transferableBalance: '25', availableBalance: '75' }));
+  const sources = [
+    { chain: 'BITCOIN_MAINNET', base: 'https://open-api.unisat.io', key: 'bitcoin-test-only', ip: '192.0.2.90' },
+    { chain: 'FRACTAL_BITCOIN_MAINNET', base: 'https://open-api-fractal.unisat.io', key: 'fractal-test-only', ip: '192.0.2.91' },
+  ];
+  globalThis.fetch = async (input, init = {}) => {
+    const source = sources.find(item => String(input).startsWith(item.base));
+    assert.ok(source, `Unexpected upstream URL: ${String(input)}`);
+    assert.equal(String(input), `${source.base}/v1/indexer/address/${address}/brc20/summary?start=0&limit=100&tick_filter=56&exclude_zero=true`);
+    assert.equal(new Headers(init.headers).get('Authorization'), `Bearer ${source.key}`);
+    return Response.json({ code: 0, data: { detail: rows } });
+  };
+  try {
+    for (const source of sources) {
+      const response = await worker.fetch(makeRequest(`/api/brc20/balances?address=${address}&chain=${source.chain}`, { ip: source.ip }), {
+        UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only',
+      });
+      const data = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      assert.equal(data.network, source.chain);
+      assert.equal(data.address, address);
+      assert.deepEqual(data.detail.map(item => item.ticker), tickers);
+      assert.equal(JSON.stringify(data).includes('test-only'), false);
+    }
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('requires an explicit network for classic BRC-20 balances and transferable inscriptions', async () => {
+  const previousFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => { upstreamCalls += 1; throw new Error('must not reach upstream'); };
+  try {
+    const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+    const balances = await worker.fetch(makeRequest(`/api/brc20/balances?address=${address}`, { ip: '192.0.2.92' }), {});
+    const transferable = await worker.fetch(makeRequest(`/api/brc20/transferable?address=${address}&ticker=ABCDEF`, { ip: '192.0.2.93' }), {});
+    assert.equal(balances.status, 400);
+    assert.equal(transferable.status, 400);
+    assert.equal(upstreamCalls, 0);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('does not turn a malformed classic BRC-20 summary into an empty live balance', async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ code: 0, data: { total: 1 } });
+  try {
+    const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+    const response = await worker.fetch(makeRequest(`/api/brc20/balances?address=${address}&chain=FRACTAL_BITCOIN_MAINNET`, { ip: '192.0.2.94' }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).error, /BRC-20.*indisponibles/i);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('returns transferable inscriptions for a six-character classic BRC-20 ticker', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const inscriptionId = `${'a'.repeat(64)}i0`;
+  globalThis.fetch = async input => {
+    assert.equal(String(input), `https://open-api-fractal.unisat.io/v1/indexer/address/${address}/brc20/ABCDEF/info`);
+    return Response.json({ code: 0, data: { transferableInscriptions: [{ inscriptionId, data: { amt: '12.5' }, confirmations: 3 }] } });
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/brc20/transferable?address=${address}&ticker=ABCDEF&chain=FRACTAL_BITCOIN_MAINNET`, { ip: '192.0.2.95' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.ticker, 'ABCDEF');
+    assert.equal(data.detail[0].amount, '12.5');
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('returns a live Fractal balance without exposing the UniSat API key', async () => {
   const previousFetch = globalThis.fetch;
   let unisatAuth = '';
