@@ -233,7 +233,7 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
         </div>
       )}
       {error && !(mobileSignTimedOut && isMobileUniSatDevice()) && <p className="mt-3 font-mono text-[10px] leading-5 text-[#e08b7d]" role="alert">{error}</p>}
-      <p className="mt-3 font-mono text-[9px] leading-4 text-[#718092]">Only mainnet bc1q (native SegWit) and bc1p (single-key Taproot) wallets are supported. Authentication is separate from every transaction approval.</p>
+      <p className="mt-3 font-mono text-[9px] leading-4 text-[#718092]">Transactions accept the four mainnet formats on Bitcoin and Fractal Bitcoin: 1… (P2PKH), 3… (P2SH-nested SegWit), bc1q… (P2WPKH) and bc1p… (P2TR). Authentication uses BIP-322 where available and an explicit wallet/network check for the other two formats.</p>
     </section>
   );
 }
