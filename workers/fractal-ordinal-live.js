@@ -418,6 +418,106 @@ function normalizeAlkaneBalance(value) {
   };
 }
 
+
+function validAlkaneId(value) { return typeof value === 'string' && /^\d{1,20}:\d{1,20}$/.test(value); }
+function validProtocolAmount(value) { return typeof value === 'string' && /^(?:0|[1-9]\d{0,79})(?:\.\d{1,38})?$/.test(value); }
+function normalizeBrc20InventoryBalance(value) {
+  if (!value || typeof value !== 'object' || typeof value.ticker !== 'string' || !/^[A-Za-z0-9]{1,32}$/.test(value.ticker) || !validProtocolAmount(value.overallBalance) || !validProtocolAmount(value.transferableBalance) || !validProtocolAmount(value.availableBalance)) return null;
+  return { ticker: value.ticker, overallBalance: value.overallBalance, transferableBalance: value.transferableBalance, availableBalance: value.availableBalance };
+}
+
+function normalizeAlkaneInfo(value) {
+  if (!value || typeof value !== 'object' || !validAlkaneId(value.alkaneid) || !['token', 'collection'].includes(value.type)) return null;
+  const tokenData = value.tokenData && typeof value.tokenData === 'object' ? value.tokenData : null;
+  const collectionData = value.collectionData && typeof value.collectionData === 'object' ? value.collectionData : null;
+  if (value.type === 'token' && (!tokenData || typeof tokenData.name !== 'string' || typeof tokenData.symbol !== 'string')) return null;
+  if (value.type === 'collection' && (!collectionData || typeof collectionData.name !== 'string')) return null;
+  const divisibility = Number(tokenData?.divisibility);
+  if (tokenData && (!Number.isSafeInteger(divisibility) || divisibility < 0 || divisibility > 38)) return null;
+  return {
+    alkaneid: value.alkaneid,
+    type: value.type,
+    tokenData: tokenData ? {
+      name: tokenData.name,
+      symbol: tokenData.symbol,
+      divisibility,
+      totalSupply: typeof tokenData.totalSupply === 'string' ? tokenData.totalSupply : '',
+      minted: typeof tokenData.minted === 'string' ? tokenData.minted : '',
+      mintable: typeof tokenData.mintable === 'boolean' ? tokenData.mintable : false,
+    } : undefined,
+    collectionData: collectionData ? {
+      name: collectionData.name,
+      totalSupply: typeof collectionData.totalSupply === 'string' ? collectionData.totalSupply : '',
+      minted: Number.isSafeInteger(collectionData.minted) ? collectionData.minted : null,
+    } : undefined,
+  };
+}
+
+function normalizeAlkaneUtxo(value, address, alkaneid) {
+  const txid = typeof value?.txid === 'string' ? value.txid.toLowerCase() : '';
+  const vout = Number(value?.vout);
+  const satoshi = Number(value?.satoshi);
+  const confirmations = Number(value?.confirmations);
+  if (
+    value?.address !== address || !/^[a-f0-9]{64}$/.test(txid) ||
+    !Number.isSafeInteger(vout) || vout < 0 ||
+    !Number.isSafeInteger(satoshi) || satoshi < 0 ||
+    !Number.isSafeInteger(confirmations) || confirmations < 0 ||
+    !Array.isArray(value.alkanes)
+  ) return null;
+  const balances = value.alkanes.filter(item => item?.alkaneid === alkaneid);
+  if (!balances.length || balances.some(item => typeof item.amount !== 'string' || !/^\d{1,80}$/.test(item.amount))) return null;
+  const amount = balances.reduce((total, item) => total + BigInt(item.amount), 0n).toString();
+  return { txid, vout, satoshi, confirmations, amount };
+}
+
+async function walletProtocolAssets(request, env, headers) {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const chain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
+  const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
+  const address = url.searchParams.get('address') || '';
+  const start = parseBoundedInteger(url.searchParams.get('start'), 0, MAX_RUNES_OFFSET);
+  const limit = parseBoundedInteger(url.searchParams.get('limit'), 20, MAX_RUNES_PAGE_SIZE);
+  const alkaneid = url.searchParams.get('alkaneid') || '';
+  const noStore = { ...headers, 'Cache-Control': 'no-store' };
+  if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain) || !validWalletAddress(address) || start === null || limit === null || limit < 1) {
+    return Response.json({ error: 'Réseau, adresse ou pagination protocolaire invalide.' }, { status: 400, headers: noStore });
+  }
+  if (path === '/api/alkanes/utxo-list' && !validAlkaneId(alkaneid)) {
+    return Response.json({ error: 'Identifiant Alkane invalide.' }, { status: 400, headers: noStore });
+  }
+  try {
+    if (path === '/api/brc20/balance-list') {
+      const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/brc20/summary?start=${start}&limit=${limit}&exclude_zero=true`, env, { signal: AbortSignal.timeout(8000) });
+      if (Number(source?.start) !== start || !Number.isSafeInteger(Number(source?.total)) || Number(source.total) < 0 || !Array.isArray(source?.detail) || source.detail.length > limit) throw new Error('Invalid UniSat BRC-20 balance response');
+      const detail = source.detail.map(normalizeBrc20InventoryBalance);
+      if (detail.some(item => item === null)) throw new Error('Invalid UniSat BRC-20 balance item');
+      return Response.json({ network: chain, address, start, total: Number(source.total), detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
+    }
+    if (path === '/api/alkanes/token-list' || path === '/api/alkanes/collection-list') {
+      const suffix = path.endsWith('collection-list') ? 'collection-list' : 'token-list';
+      const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/alkanes/${suffix}?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
+      if (Number(source?.start) !== start || !Number.isSafeInteger(Number(source?.total)) || Number(source.total) < 0 || !Array.isArray(source?.detail) || source.detail.length > limit) throw new Error('Invalid UniSat Alkanes list response');
+      const detail = source.detail.map(normalizeAlkaneInfo);
+      if (detail.some(item => item === null || (suffix === 'token-list' ? item.type !== 'token' : item.type !== 'collection'))) throw new Error('Invalid UniSat Alkane metadata item');
+      return Response.json({ network: chain, address, start, total: Number(source.total), detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
+    }
+    if (path === '/api/alkanes/utxo-list') {
+      const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/alkanes/${encodeURIComponent(alkaneid)}/utxo?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
+      if (Number(source?.start) !== start || !Number.isSafeInteger(Number(source?.total)) || Number(source.total) < 0 || !Array.isArray(source?.utxo) || source.utxo.length > limit) throw new Error('Invalid UniSat Alkane UTXO response');
+      const utxo = source.utxo.map(item => normalizeAlkaneUtxo(item, address, alkaneid));
+      if (utxo.some(item => item === null)) throw new Error('Invalid UniSat Alkane UTXO item');
+      return Response.json({ network: chain, address, alkaneid, start, total: Number(source.total), utxo, refreshedAt: new Date().toISOString() }, { headers: noStore });
+    }
+  } catch {
+    console.warn('Wallet protocol balance lookup failed', { path, chain });
+    return Response.json({ error: 'Les données de portefeuille protocolaires sont temporairement indisponibles.' }, { status: 503, headers: noStore });
+  }
+  return Response.json({ error: 'Route protocolaire inconnue.' }, { status: 404, headers: noStore });
+}
+
+
 class SpendableUtxoError extends Error {
   constructor(code, status = 503) {
     super(code);
@@ -719,26 +819,120 @@ function validateInscribeFile(file) {
   return { filename: file.filename, dataURL: file.dataURL };
 }
 
+function boundedProtocolCount(value) {
+  const count = Number(value);
+  if (!Number.isSafeInteger(count) || count < 1 || count > 1000) throw new InscribeRequestError('Le nombre de lots doit être compris entre 1 et 1000.');
+  return count;
+}
+
+function validateInscribeProtocol(value) {
+  if (value == null) return { type: 'files' };
+  if (!value || typeof value !== 'object') throw new InscribeRequestError('Protocole d’inscription invalide.');
+  const type = value.type;
+  if (type === 'files' || type === 'alkanes-deploy') return { type };
+  if (type === 'brc20') {
+    const operation = value.operation;
+    const ticker = typeof value.ticker === 'string' ? value.ticker : '';
+    if (!['deploy', 'mint', 'transfer'].includes(operation) || !/^[A-Za-z0-9]{1,32}$/.test(ticker)) throw new InscribeRequestError('Opération ou ticker BRC-20 invalide.');
+    if (operation === 'deploy') {
+      const max = typeof value.max === 'string' ? value.max : '';
+      const limit = typeof value.limit === 'string' ? value.limit : '';
+      const decimals = value.decimals == null ? 18 : Number(value.decimals);
+      if (!/^\d{1,80}$/.test(max) || !/^\d{1,80}$/.test(limit) || !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 18) throw new InscribeRequestError('Paramètres de déploiement BRC-20 invalides.');
+      return { type, operation, ticker, max, limit, decimals };
+    }
+    const amount = typeof value.amount === 'string' ? value.amount : '';
+    if (!/^(?:0|[1-9]\d{0,79})(?:\.\d{1,18})?$/.test(amount) || /^0(?:\.0+)?$/.test(amount)) throw new InscribeRequestError('Montant BRC-20 invalide.');
+    return { type, operation, ticker, amount };
+  }
+  if (type === 'runes-etch') {
+    const spacedRune = typeof value.spacedRune === 'string' ? value.spacedRune : '';
+    const symbol = value.symbol == null ? '' : value.symbol;
+    const divisibility = Number(value.divisibility);
+    const premine = typeof value.premine === 'string' ? value.premine : '';
+    if (!/^[A-Z0-9•]{1,64}$/.test(spacedRune) || spacedRune.startsWith('•') || spacedRune.endsWith('•') || spacedRune.includes('••') || (typeof symbol !== 'string' || [...symbol].length > 1) || !Number.isSafeInteger(divisibility) || divisibility < 0 || divisibility > 38 || !/^\d{1,80}$/.test(premine)) throw new InscribeRequestError('Paramètres d’etch Runes invalides.');
+    let terms;
+    if (value.terms != null) {
+      const raw = value.terms;
+      if (!raw || typeof raw !== 'object' || !/^\d{1,80}$/.test(String(raw.amount ?? '')) || !/^\d{1,80}$/.test(String(raw.cap ?? ''))) throw new InscribeRequestError('Conditions d’etch Runes invalides.');
+      const validateRange = range => Array.isArray(range) && range.length === 2 && range.every(item => Number.isSafeInteger(item) && item >= 0);
+      if ((raw.height != null && !validateRange(raw.height)) || (raw.offset != null && !validateRange(raw.offset))) throw new InscribeRequestError('Plage de hauteur ou d’offset Rune invalide.');
+      terms = { amount: String(raw.amount), cap: String(raw.cap), ...(raw.height ? { height: raw.height } : {}), ...(raw.offset ? { offset: raw.offset } : {}) };
+    }
+    return { type, etching: { spacedRune, ...(symbol ? { symbol } : {}), divisibility, premine, ...(terms ? { terms } : {}) } };
+  }
+  if (type === 'runes-mint') {
+    const runeid = typeof value.runeid === 'string' ? value.runeid : '';
+    if (!validRuneId(runeid)) throw new InscribeRequestError('Identifiant Rune invalide.');
+    return { type, runeid, count: boundedProtocolCount(value.count) };
+  }
+  if (type === 'alkanes-mint') {
+    const alkaneid = typeof value.alkaneid === 'string' ? value.alkaneid : '';
+    if (!validAlkaneId(alkaneid)) throw new InscribeRequestError('Identifiant Alkane invalide.');
+    return { type, alkaneid, count: boundedProtocolCount(value.count) };
+  }
+  throw new InscribeRequestError('Type d’inscription non pris en charge.');
+}
+
+function protocolDataUrl(value) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:text/plain;charset=utf-8;base64,${btoa(binary)}`;
+}
+
 async function inscribeOrder(request, env, corsHeaders) {
   let body;
   try { body = await request.json(); } catch { throw new InscribeRequestError('Corps JSON invalide.'); }
-  const filesInput = Array.isArray(body?.files) ? body.files : (body?.file ? [body.file] : []);
+  const protocol = validateInscribeProtocol(body?.protocol);
+  let filesInput = Array.isArray(body?.files) ? body.files : (body?.file ? [body.file] : []);
+  if (protocol.type === 'brc20') {
+    const inscription = { p: 'brc-20', op: protocol.operation, tick: protocol.ticker, ...(protocol.operation === 'deploy' ? { max: protocol.max, lim: protocol.limit, dec: String(protocol.decimals) } : { amt: protocol.amount }) };
+    filesInput = [{ filename: `brc20-${protocol.operation}-${protocol.ticker}.json`, dataURL: protocolDataUrl(inscription) }];
+  }
+  if (protocol.type === 'runes-etch' && !filesInput.length) {
+    filesInput = [{ filename: 'runes-etch.json', dataURL: protocolDataUrl({ p: 'runes', op: 'etch', ...protocol.etching }) }];
+  }
   const requestedFeeRate = body?.feeRate == null ? 0 : Number(body.feeRate);
   const outputValue = Number(body?.outputValue ?? 546);
   const chain = body?.chain || 'FRACTAL_BITCOIN_MAINNET';
   if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) throw new InscribeRequestError('Réseau d’inscription non pris en charge.');
   if (!validAddress(body?.receiver) || !validAddress(body?.refundAddress) || !validAddress(body?.userAddress) || !validPubkey(body?.userPubkey)) throw new InscribeRequestError('Adresse de wallet ou clé publique invalide.');
   if ((requestedFeeRate !== 0 && (!Number.isSafeInteger(requestedFeeRate) || requestedFeeRate < 1 || requestedFeeRate > 10000)) || outputValue !== 546) throw new InscribeRequestError('Fee rate ou valeur de sortie invalide.');
-  if (!filesInput.length || filesInput.length > MAX_INSCRIBE_FILES) throw new InscribeRequestError(`La commande doit contenir de 1 à ${MAX_INSCRIBE_FILES} fichiers.`);
-  const files = filesInput.map(validateInscribeFile);
+  if ((protocol.type !== 'runes-mint' && protocol.type !== 'alkanes-mint' && !filesInput.length) || filesInput.length > MAX_INSCRIBE_FILES) throw new InscribeRequestError(`La commande doit contenir de 1 à ${MAX_INSCRIBE_FILES} fichiers.`);
+  if (protocol.type === 'runes-etch' && filesInput.length > 1) throw new InscribeRequestError('L’etch Rune accepte un seul fichier de données par commande.');
+  let files = filesInput.map(validateInscribeFile);
+  if (protocol.type === 'runes-etch') files = files.map(file => ({ ...file, runes_etch: { etching: protocol.etching } }));
   const estimatedPayloadBytes = files.reduce((total, file) => total + file.dataURL.length + file.filename.length + 512, 4096);
   if (estimatedPayloadBytes > MAX_INSCRIBE_BODY_BYTES) throw new InscribeRequestError('Le lot encodé dépasse 95 Mo. Réduisez la taille des fichiers ou créez plusieurs lots.', 413);
   const feeEstimate = await recommendedFeeEstimate(chain, env);
   const feeRate = feeEstimate.feeRate;
   const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
-  const upstream = await uniNetwork(base, '/v5/inscribe/order/create', env, { method: 'POST', body: JSON.stringify({ clientId: 'demro-labs-gallery', receiver: body.receiver, refundAddress: body.refundAddress, userAddress: body.userAddress, userPubkey: body.userPubkey, feeRate, outputValue, files }) });
+  const common = { clientId: 'demro-labs-gallery', receiver: body.receiver, refundAddress: body.refundAddress, userAddress: body.userAddress, userPubkey: body.userPubkey, feeRate, outputValue };
+  let quotePath = '/v5/inscribe/order/estimate-fee';
+  let createPath = '/v5/inscribe/order/create';
+  let payload = { ...common, files };
+  if (protocol.type === 'runes-etch') {
+    quotePath = '/v5/inscribe/order/quote/runes-etch';
+    createPath = '/v5/inscribe/order/create/runes-etch';
+  } else if (protocol.type === 'runes-mint') {
+    quotePath = '/v5/inscribe/order/quote/runes-mint';
+    createPath = '/v5/inscribe/order/create/runes-mint';
+    payload = { ...common, runeId: protocol.runeid, count: protocol.count };
+  } else if (protocol.type === 'alkanes-deploy') {
+    quotePath = '/v5/inscribe/order/quote/alkanes-deploy';
+    createPath = '/v5/inscribe/order/create/alkanes-deploy';
+  } else if (protocol.type === 'alkanes-mint') {
+    quotePath = '/v5/inscribe/order/quote/alkanes-mint';
+    createPath = '/v5/inscribe/order/create/alkanes-mint';
+    payload = { ...common, alkaneid: protocol.alkaneid, count: protocol.count };
+  }
+  const quote = await uniNetwork(base, quotePath, env, { method: 'POST', body: JSON.stringify(payload) });
+  const quoteAmount = Number(quote?.payableAmount);
+  if (!Number.isSafeInteger(quoteAmount) || quoteAmount <= 0) throw new Error('UniSat returned an invalid protocol inscription quote. No order was created.');
+  const upstream = await uniNetwork(base, createPath, env, { method: 'POST', body: JSON.stringify(payload) });
   if (!upstream?.orderId || !upstream?.payAddress || !Number.isSafeInteger(Number(upstream?.amount))) throw new Error('UniSat returned an incomplete inscription order.');
-  return Response.json({ orderId: upstream.orderId, status: upstream.status, payAddress: upstream.payAddress, amount: Number(upstream.amount), network: chain, feeRate, feeTarget: feeEstimate.target, feeSources: feeEstimate.sources, feeStrategy: feeEstimate.strategy }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  return Response.json({ orderId: upstream.orderId, status: upstream.status, payAddress: upstream.payAddress, amount: Number(upstream.amount), quoteAmount, network: chain, feeRate, feeTarget: feeEstimate.target, feeSources: feeEstimate.sources, feeStrategy: feeEstimate.strategy }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
 
 async function cancelInscribeOrder(request, env, corsHeaders) {
@@ -970,17 +1164,23 @@ export default {
         return Response.json({ error: `Les soldes ${isBrc20 ? 'BRC-20' : 'Alkanes'} sont temporairement indisponibles.` }, { status: 503, headers: noStore });
       }
     }
+    if (request.method === 'GET' && ['/api/brc20/balance-list', '/api/alkanes/token-list', '/api/alkanes/collection-list', '/api/alkanes/utxo-list'].includes(url.pathname)) {
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
+      return walletProtocolAssets(request, env, headers);
+    }
     if (request.method === 'GET' && url.pathname === '/api/runes/balance-list') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const chain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
+      const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
       const address = url.searchParams.get('address') || '';
       const start = parseBoundedInteger(url.searchParams.get('start'), 0, MAX_RUNES_OFFSET);
       const limit = parseBoundedInteger(url.searchParams.get('limit'), 20, MAX_RUNES_PAGE_SIZE);
-      if (!validWalletAddress(address) || start === null || limit === null || limit < 1) {
-        return Response.json({ error: 'Adresse ou pagination Runes Fractal invalide.' }, { status: 400, headers: noStore });
+      if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain) || !validWalletAddress(address) || start === null || limit === null || limit < 1) {
+        return Response.json({ error: 'Réseau, adresse ou pagination Runes invalide.' }, { status: 400, headers: noStore });
       }
       try {
-        const source = await uniNetwork(API_BASE, `/v1/indexer/address/${encodeURIComponent(address)}/runes/balance-list?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/runes/balance-list?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
         const sourceStart = Number(source?.start);
         const total = Number(source?.total);
         if (!Number.isSafeInteger(sourceStart) || sourceStart !== start || !Number.isSafeInteger(total) || total < 0 || !Array.isArray(source?.detail) || source.detail.length > limit) {
@@ -988,28 +1188,30 @@ export default {
         }
         const detail = source.detail.map(normalizeRuneBalance);
         if (detail.some(item => item === null)) throw new Error('Invalid UniSat Rune balance item');
-        return Response.json({ network: 'FRACTAL_BITCOIN_MAINNET', address, start, total, detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
+        return Response.json({ network: chain, address, start, total, detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
       } catch {
-        console.warn('Fractal Rune balance list lookup failed');
-        return Response.json({ error: 'Les soldes Runes Fractal sont temporairement indisponibles.' }, { status: 503, headers: noStore });
+        console.warn('Rune balance list lookup failed');
+        return Response.json({ error: 'Les soldes Runes sont temporairement indisponibles.' }, { status: 503, headers: noStore });
       }
     }
     if (request.method === 'GET' && url.pathname === '/api/runes/balance') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const chain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
+      const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
       const address = url.searchParams.get('address') || '';
       const runeid = url.searchParams.get('runeid') || '';
-      if (!validWalletAddress(address) || !validRuneId(runeid)) {
-        return Response.json({ error: 'Adresse ou identifiant Rune Fractal invalide.' }, { status: 400, headers: noStore });
+      if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain) || !validWalletAddress(address) || !validRuneId(runeid)) {
+        return Response.json({ error: 'Réseau, adresse ou identifiant Rune invalide.' }, { status: 400, headers: noStore });
       }
       try {
-        const source = await uniNetwork(API_BASE, `/v1/indexer/address/${encodeURIComponent(address)}/runes/${encodeURIComponent(runeid)}/balance`, env, { signal: AbortSignal.timeout(8000) });
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/runes/${encodeURIComponent(runeid)}/balance`, env, { signal: AbortSignal.timeout(8000) });
         const balance = normalizeRuneBalance(source);
         if (!balance || balance.runeid !== runeid) throw new Error('Invalid UniSat Rune balance response');
-        return Response.json({ network: 'FRACTAL_BITCOIN_MAINNET', address, balance, refreshedAt: new Date().toISOString() }, { headers: noStore });
+        return Response.json({ network: chain, address, balance, refreshedAt: new Date().toISOString() }, { headers: noStore });
       } catch {
-        console.warn('Fractal Rune balance lookup failed');
-        return Response.json({ error: 'Le solde Rune Fractal est temporairement indisponible.' }, { status: 503, headers: noStore });
+        console.warn('Rune balance lookup failed');
+        return Response.json({ error: 'Le solde Rune est temporairement indisponible.' }, { status: 503, headers: noStore });
       }
     }
     if (request.method === 'GET' && url.pathname === '/api/spendable-utxos') {

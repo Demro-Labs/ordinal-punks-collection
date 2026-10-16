@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import {
   describeFeeSources,
+  getMempoolConfig,
   getRecommendedFeeEstimate,
   getSpendableUtxos,
   InsufficientSafeUtxosError,
@@ -20,16 +21,16 @@ import { normalizeUniSatTxid } from "@/lib/native-fb-send";
 import { sendNativeUniSatRunes } from "@/lib/native-unisat-actions";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
 import {
-  fetchFractalRuneBalance,
-  fetchFractalRuneBalancePage,
+  fetchRuneBalance,
+  fetchRuneBalancePage,
   formatRuneAmount,
   parseRuneAmountToBaseUnits,
-  type FractalRuneBalance,
+  type RuneBalance,
+  type RuneNetwork,
 } from "@/lib/runes";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 
-const NETWORK = "FRACTAL_BITCOIN_MAINNET";
 const PAGE_SIZE = 20;
 const MINIMUM_RUNE_FEE_UTXO_SATS = 1_200;
 const RUNE_FEE_VBYTES_RESERVE = 500;
@@ -55,6 +56,7 @@ type PreparedTransfer = {
 type RuneReceipt = {
   txid: string;
   network: string;
+  networkEnum: RuneNetwork;
   sender: string;
   recipient: string;
   runeid: string;
@@ -70,26 +72,32 @@ function getProvider(): Provider | undefined {
   if (typeof window === "undefined") return undefined;
   return (window as Window & { unisat?: Provider }).unisat;
 }
-function storageKey(address: string) {
-  return `fractal-runes-send:v1:${address.toLowerCase()}`;
+function storageKey(address: string, network: RuneNetwork) {
+  if (network === "FRACTAL_BITCOIN_MAINNET")
+    return `fractal-runes-send:v1:${address.toLowerCase()}`;
+  return `runes-send:v1:${network}:${address.toLowerCase()}`;
 }
-function saveReceipt(address: string, receipt: RuneReceipt) {
+function saveReceipt(receipt: RuneReceipt) {
   try {
-    localStorage.setItem(storageKey(address), JSON.stringify(receipt));
+    localStorage.setItem(
+      storageKey(receipt.sender, receipt.networkEnum),
+      JSON.stringify(receipt)
+    );
   } catch {
     /* Private mode or storage quota. */
   }
 }
-function readReceipt(address: string): RuneReceipt | null {
+function readReceipt(address: string, network: RuneNetwork): RuneReceipt | null {
   try {
     const value = JSON.parse(
-      localStorage.getItem(storageKey(address)) ?? "null"
+      localStorage.getItem(storageKey(address, network)) ?? "null"
     ) as Partial<RuneReceipt> | null;
     if (
       !value ||
       typeof value.txid !== "string" ||
       !/^[a-f0-9]{64}$/i.test(value.txid) ||
-      value.network !== "Fractal Bitcoin" ||
+      (value.networkEnum !== network &&
+        !(network === "FRACTAL_BITCOIN_MAINNET" && value.network === "Fractal Bitcoin")) ||
       value.sender !== address ||
       typeof value.recipient !== "string" ||
       typeof value.runeid !== "string" ||
@@ -120,8 +128,14 @@ export function UniSatRunesSendPanel({
   onWalletRefresh: () => void;
 }) {
   const provider = getProvider();
-  const connected = Boolean(address && chain?.enum === NETWORK);
-  const [balances, setBalances] = useState<FractalRuneBalance[]>([]);
+  const network: RuneNetwork | null =
+    chain?.enum === "BITCOIN_MAINNET" ||
+    chain?.enum === "FRACTAL_BITCOIN_MAINNET"
+      ? chain.enum
+      : null;
+  const networkLabel = network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin";
+  const connected = Boolean(address && network);
+  const [balances, setBalances] = useState<RuneBalance[]>([]);
   const [totalBalances, setTotalBalances] = useState(0);
   const [nextStart, setNextStart] = useState(0);
   const [balancesLoading, setBalancesLoading] = useState(false);
@@ -143,14 +157,14 @@ export function UniSatRunesSendPanel({
     feeSource: string;
   } | null>(null);
   const [receipt, setReceipt] = useState<RuneReceipt | null>(() =>
-    address ? readReceipt(address) : null
+    address && network ? readReceipt(address, network) : null
   );
   const [outcomeUnclear, setOutcomeUnclear] = useState(() => {
     try {
       return (
         typeof window !== "undefined" &&
-        Boolean(address) &&
-        sessionStorage.getItem(`${storageKey(address)}:unclear`) === "1"
+        Boolean(address && network) &&
+        sessionStorage.getItem(`${storageKey(address, network!)}:unclear`) === "1"
       );
     } catch {
       return false;
@@ -189,18 +203,18 @@ export function UniSatRunesSendPanel({
   );
 
   const loadBalances = async (start = 0, replace = true) => {
-    if (!address || chain?.enum !== NETWORK) return;
+    if (!address || !network) return;
     const requestId = ++balanceRequestId.current;
     setBalancesLoading(true);
     setBalanceError("");
     try {
-      const page = await fetchFractalRuneBalancePage(address, start, PAGE_SIZE);
+      const page = await fetchRuneBalancePage(address, network, start, PAGE_SIZE);
       if (requestId !== balanceRequestId.current) return;
       setBalances(current => {
         if (replace) return page.detail;
         const byId = new Map(current.map(item => [item.runeid, item]));
         page.detail.forEach(item => byId.set(item.runeid, item));
-        const merged: FractalRuneBalance[] = [];
+        const merged: RuneBalance[] = [];
         byId.forEach(item => merged.push(item));
         return merged;
       });
@@ -213,7 +227,7 @@ export function UniSatRunesSendPanel({
         setBalanceError(
           cause instanceof Error
             ? cause.message
-            : "Unable to load live Fractal Rune balances."
+            : "Unable to load live Rune balances."
         );
     } finally {
       if (requestId === balanceRequestId.current) setBalancesLoading(false);
@@ -233,11 +247,11 @@ export function UniSatRunesSendPanel({
     setOwnershipProofVersion(version => version + 1);
     setPrepared(null);
     setError("");
-    setReceipt(address ? readReceipt(address) : null);
+    setReceipt(address && network ? readReceipt(address, network) : null);
     try {
       setOutcomeUnclear(
-        Boolean(address) &&
-          sessionStorage.getItem(`${storageKey(address)}:unclear`) === "1"
+        Boolean(address && network) &&
+          sessionStorage.getItem(`${storageKey(address, network!)}:unclear`) === "1"
       );
     } catch {
       setOutcomeUnclear(false);
@@ -249,14 +263,14 @@ export function UniSatRunesSendPanel({
   }, [address, chain?.enum]);
 
   useEffect(() => {
-    if (!connected) {
+    if (!connected || !network) {
       setFeeEstimate(null);
       return;
     }
     let active = true;
     const refresh = async () => {
       try {
-        const estimate = await getRecommendedFeeEstimate(NETWORK);
+        const estimate = await getRecommendedFeeEstimate(network);
         if (active)
           setFeeEstimate({
             feeRate: Math.ceil(estimate.feeRate),
@@ -272,19 +286,19 @@ export function UniSatRunesSendPanel({
       active = false;
       window.clearInterval(timer);
     };
-  }, [connected]);
+  }, [connected, network]);
 
   useEffect(() => {
     if (!receipt || runningTxid.current === receipt.txid) return;
     const txid = receipt.txid;
     let active = true;
     runningTxid.current = txid;
-    void trackMempoolTransaction(txid, NETWORK, update => {
+    void trackMempoolTransaction(txid, receipt.networkEnum, update => {
       if (!active) return;
       setReceipt(current => {
         if (!current || current.txid !== txid) return current;
         const next = { ...current, mempool: update };
-        saveReceipt(current.sender, next);
+        saveReceipt(next);
         return next;
       });
     })
@@ -304,7 +318,7 @@ export function UniSatRunesSendPanel({
               checkedAt: new Date().toISOString(),
             },
           };
-          saveReceipt(current.sender, next);
+          saveReceipt(next);
           return next;
         });
       })
@@ -327,12 +341,13 @@ export function UniSatRunesSendPanel({
     }
     if (
       !connected ||
+      !network ||
       !provider?.sendRunes ||
       !provider.getAccounts ||
       !provider.getChain
     ) {
       setError(
-        "Connect a UniSat wallet on Fractal Bitcoin mainnet with sendRunes support. No transfer was requested."
+        "Connect a UniSat wallet on Bitcoin or Fractal Bitcoin mainnet with sendRunes support. No transfer was requested."
       );
       return;
     }
@@ -344,7 +359,7 @@ export function UniSatRunesSendPanel({
     }
     if (!confirmed) {
       setError(
-        "Review and confirm the Rune, recipient, amount and Fractal network first."
+        "Review and confirm the Rune, recipient, amount and active network first."
       );
       return;
     }
@@ -356,7 +371,7 @@ export function UniSatRunesSendPanel({
     }
     const to = recipient.trim();
     if (!to || to.length > 100) {
-      setError("Enter a valid Fractal recipient address.");
+      setError(`Enter a valid ${networkLabel} recipient address.`);
       return;
     }
     setPreparing(true);
@@ -365,13 +380,14 @@ export function UniSatRunesSendPanel({
         provider.getAccounts(),
         provider.getChain(),
       ]);
-      if (currentChain.enum !== NETWORK || !accounts.includes(address))
+      if (currentChain.enum !== network || !accounts.includes(address))
         throw new Error(
           "The UniSat account or network changed. Reconnect the intended address and network."
         );
-      await validateMempoolAddress(NETWORK, to);
-      const currentBalance = await fetchFractalRuneBalance(
+      await validateMempoolAddress(network, to);
+      const currentBalance = await fetchRuneBalance(
         address,
+        network,
         selectedRune.runeid
       );
       if (
@@ -386,18 +402,18 @@ export function UniSatRunesSendPanel({
           "The live Rune balance or divisibility changed. Refresh the balance list and review the amount."
         );
       }
-      const estimate = await getRecommendedFeeEstimate(NETWORK);
+      const estimate = await getRecommendedFeeEstimate(network);
       const feeRate = Math.ceil(estimate.feeRate);
       if (!Number.isFinite(feeRate) || feeRate < 1 || feeRate > 10_000)
         throw new Error(
-          "The live Fractal fee estimate is invalid; no transfer was requested."
+          `The live ${networkLabel} fee estimate is invalid; no transfer was requested.`
         );
       const minimumSafeFeeSats = Math.max(
         MINIMUM_RUNE_FEE_UTXO_SATS,
         feeRate * RUNE_FEE_VBYTES_RESERVE + 600
       );
       const safeFeeUtxos = await getSpendableUtxos(
-        NETWORK,
+        network,
         address,
         minimumSafeFeeSats,
         { mobile: isMobileUniSatDevice() }
@@ -408,7 +424,7 @@ export function UniSatRunesSendPanel({
       );
       if (safeFeeSats < minimumSafeFeeSats)
         throw new Error(
-          "Not enough confirmed, asset-free FB UTXOs were verified to cover a conservative Rune-transfer fee reserve. No transfer was requested."
+          `Not enough confirmed, asset-free ${network === "BITCOIN_MAINNET" ? "BTC" : "FB"} UTXOs were verified to cover a conservative Rune-transfer fee reserve. No transfer was requested.`
         );
       setFeeEstimate({
         feeRate,
@@ -428,7 +444,7 @@ export function UniSatRunesSendPanel({
           : "Rune transfer preflight failed. No transfer was requested.";
       const mobileFundingGuidance =
         isMobileUniSatDevice() && cause instanceof InsufficientSafeUtxosError
-          ? " Sur mobile, ajoutez un UTXO FB confirmé distinct couvrant le minimum indiqué et la marge de frais, sans Ordinal, Rune ni Alkane, puis relancez la vérification. Le solde Rune ne paie pas les frais réseau. Cette vérification n’a ouvert aucune approbation UniSat et n’a lancé aucune transaction."
+          ? ` Sur mobile, ajoutez un UTXO ${network === "BITCOIN_MAINNET" ? "BTC" : "FB"} confirmé distinct couvrant le minimum indiqué et la marge de frais, sans Ordinal, Rune ni Alkane, puis relancez la vérification. Le solde Rune ne paie pas les frais réseau. Cette vérification n’a ouvert aucune approbation UniSat et n’a lancé aucune transaction.`
           : "";
       setError(`${message}${mobileFundingGuidance}`);
     } finally {
@@ -439,6 +455,8 @@ export function UniSatRunesSendPanel({
   const openWalletApproval = () => {
     setError("");
     const activeProvider = getProvider();
+    const activeNetwork = network;
+    const mempoolConfig = activeNetwork ? getMempoolConfig(activeNetwork) : undefined;
     if (outcomeUnclear) {
       setError(
         "A previous Rune send has an uncertain outcome. Check UniSat and Mempool before retrying."
@@ -446,6 +464,8 @@ export function UniSatRunesSendPanel({
       return;
     }
     if (
+      !activeNetwork ||
+      !mempoolConfig ||
       !activeProvider?.sendRunes ||
       !selectedRune ||
       !prepared ||
@@ -508,7 +528,7 @@ export function UniSatRunesSendPanel({
         if (!txid) {
           setOutcomeUnclear(true);
           try {
-            sessionStorage.setItem(`${storageKey(address)}:unclear`, "1");
+            sessionStorage.setItem(`${storageKey(address, activeNetwork)}:unclear`, "1");
           } catch {
             /* In-memory safety lock remains. */
           }
@@ -518,16 +538,17 @@ export function UniSatRunesSendPanel({
         }
         const mempool: MempoolReceipt = {
           txid,
-          network: "Fractal Bitcoin",
+          network: mempoolConfig.label,
           status: "checking",
           message: "Searching for the transaction in Mempool…",
           blockHeight: null,
-          explorerUrl: `https://mempool.fractalbitcoin.io/tx/${encodeURIComponent(txid)}`,
+          explorerUrl: `${mempoolConfig.explorer}${encodeURIComponent(txid)}`,
           checkedAt: new Date().toISOString(),
         };
         const next: RuneReceipt = {
           txid,
-          network: "Fractal Bitcoin",
+          network: mempoolConfig.label,
+          networkEnum: activeNetwork,
           sender: address,
           recipient: to,
           runeid: runeId,
@@ -539,10 +560,10 @@ export function UniSatRunesSendPanel({
           mempool,
         };
         setReceipt(next);
-        saveReceipt(address, next);
+        saveReceipt(next);
         setOutcomeUnclear(false);
         try {
-          sessionStorage.removeItem(`${storageKey(address)}:unclear`);
+          sessionStorage.removeItem(`${storageKey(address, activeNetwork)}:unclear`);
         } catch {
           /* Receipt remains available. */
         }
@@ -567,7 +588,7 @@ export function UniSatRunesSendPanel({
         if (!cancelled) {
           setOutcomeUnclear(true);
           try {
-            sessionStorage.setItem(`${storageKey(address)}:unclear`, "1");
+            sessionStorage.setItem(`${storageKey(address, activeNetwork)}:unclear`, "1");
           } catch {
             /* In-memory safety lock remains. */
           }
@@ -591,7 +612,7 @@ export function UniSatRunesSendPanel({
         <Send size={15} className="mt-0.5 shrink-0 text-[#f2bd63]" />
         <div>
           <p className="font-mono text-[9px] uppercase tracking-[0.15em] text-[#d99a54]">
-            UniSat · Fractal Bitcoin
+            UniSat · {network ? `${networkLabel} mainnet` : "Bitcoin / Fractal"}
           </p>
           <h3
             id="runes-send-title"
@@ -601,7 +622,7 @@ export function UniSatRunesSendPanel({
           </h3>
           <p className="mt-1 font-mono text-[10px] leading-5 text-[#9ea7b3]">
             Desktop et mobile si le provider UniSat expose{" "}
-            <code>sendRunes</code>. Les soldes viennent de l’indexeur Fractal;
+            <code>sendRunes</code>. Les soldes viennent de l’indexeur du réseau actif;
             UniSat construit, signe et diffuse la transaction après ton
             approbation.
           </p>
@@ -612,7 +633,7 @@ export function UniSatRunesSendPanel({
           className="mt-3 border border-[#3b434d] p-3 font-mono text-[10px] text-[#e0b45f]"
           role="status"
         >
-          Connecte UniSat au réseau Fractal Bitcoin mainnet pour consulter et
+          Connecte UniSat à Bitcoin ou Fractal Bitcoin mainnet pour consulter et
           envoyer des Runes.
         </p>
       ) : (
@@ -642,13 +663,13 @@ export function UniSatRunesSendPanel({
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <div>
                 <label
-                  htmlFor="fractal-rune-select"
+                  htmlFor="rune-select"
                   className="font-mono text-[9px] uppercase text-[#718092]"
                 >
                   Rune à envoyer
                 </label>
                 <select
-                  id="fractal-rune-select"
+                  id="rune-select"
                   value={selectedRuneId}
                   onChange={event => {
                     setSelectedRuneId(event.target.value);
@@ -679,13 +700,13 @@ export function UniSatRunesSendPanel({
               </div>
               <div>
                 <label
-                  htmlFor="fractal-rune-recipient"
+                  htmlFor="rune-recipient"
                   className="font-mono text-[9px] uppercase text-[#718092]"
                 >
-                  Adresse Fractal destinataire
+                  Adresse destinataire · {networkLabel}
                 </label>
                 <input
-                  id="fractal-rune-recipient"
+                  id="rune-recipient"
                   value={recipient}
                   onChange={event => {
                     setRecipient(event.target.value.trim());
@@ -700,14 +721,14 @@ export function UniSatRunesSendPanel({
               </div>
               <div>
                 <label
-                  htmlFor="fractal-rune-amount"
+                  htmlFor="rune-amount"
                   className="font-mono text-[9px] uppercase text-[#718092]"
                 >
                   Montant
                 </label>
                 <div className="mt-1 flex gap-2">
                   <input
-                    id="fractal-rune-amount"
+                    id="rune-amount"
                     value={amount}
                     onChange={event => {
                       setAmount(event.target.value);
@@ -749,7 +770,7 @@ export function UniSatRunesSendPanel({
               </div>
               <div className="border border-[#3b434d] bg-[#151a1f] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">
                 <p className="flex items-center gap-2 text-[#f2bd63]">
-                  <ShieldCheck size={12} /> Frais en FB · jamais en Runes
+                  <ShieldCheck size={12} /> Frais en {network === "BITCOIN_MAINNET" ? "BTC" : "FB"} · jamais en Runes
                 </p>
                 <p className="mt-1">
                   La vérification requiert un UTXO confirmé sans inscription,
@@ -767,7 +788,7 @@ export function UniSatRunesSendPanel({
           ) : (
             <p className="mt-3 border border-[#3b434d] p-3 font-mono text-[10px] text-[#718092]">
               {balancesLoading
-                ? "Chargement des soldes Runes Fractal…"
+                ? `Chargement des soldes Runes ${networkLabel}…`
                 : "Aucun solde Rune trouvé dans la première page."}
             </p>
           )}
@@ -798,7 +819,7 @@ export function UniSatRunesSendPanel({
                   Vérifie le récapitulatif avant l’approbation UniSat
                 </p>
                 <p className="mt-1 break-all">
-                  Réseau : Fractal Bitcoin mainnet
+                  Réseau : {networkLabel} mainnet
                 </p>
                 <p>
                   Actif : {selectedRune.spacedRune} · {selectedRune.runeid}
@@ -814,7 +835,7 @@ export function UniSatRunesSendPanel({
                 </p>
                 <p className="break-all">Destinataire : {recipient || "—"}</p>
                 <p>
-                  Frais réseau payés en FB : taux estimé live affiché ci-dessus;
+                  Frais réseau payés en {network === "BITCOIN_MAINNET" ? "BTC" : "FB"} : taux estimé live affiché ci-dessus;
                   le wallet présente le montant final.
                 </p>
               </div>
@@ -930,7 +951,7 @@ export function UniSatRunesSendPanel({
                 type="button"
                 onClick={() => {
                   try {
-                    sessionStorage.removeItem(`${storageKey(address)}:unclear`);
+                    if (network) sessionStorage.removeItem(`${storageKey(address, network)}:unclear`);
                   } catch {
                     /* In-memory lock can be cleared after explicit check. */
                   }
