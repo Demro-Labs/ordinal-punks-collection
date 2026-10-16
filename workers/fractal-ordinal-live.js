@@ -202,6 +202,29 @@ function normalizeRuneBalance(value) {
   };
 }
 
+function normalizeBrc20Balance(value) {
+  if (!value || typeof value.ticker !== 'string' || !/^[a-z0-9]{1,32}$/i.test(value.ticker)) return null;
+  const amounts = ['overallBalance', 'transferableBalance', 'availableBalance'];
+  if (amounts.some(key => typeof value[key] !== 'string' || !/^\d+(\.\d+)?$/.test(value[key]))) return null;
+  return { ticker: value.ticker, overallBalance: value.overallBalance, transferableBalance: value.transferableBalance, availableBalance: value.availableBalance };
+}
+
+function normalizeAlkaneBalance(value) {
+  if (!value || typeof value.alkaneid !== 'string' || value.alkaneid.length > 128 || typeof value.amount !== 'string' || !/^\d+$/.test(value.amount)) return null;
+  const tokenData = value.tokenData && typeof value.tokenData === 'object' ? value.tokenData : {};
+  const nftData = value.nftData && typeof value.nftData === 'object' ? value.nftData : {};
+  const collectionData = value.collectionData && typeof value.collectionData === 'object' ? value.collectionData : {};
+  const divisibility = Number(tokenData.divisibility);
+  return {
+    alkaneid: value.alkaneid,
+    amount: value.amount,
+    type: typeof value.type === 'string' ? value.type : 'token',
+    name: typeof tokenData.name === 'string' ? tokenData.name : typeof nftData.name === 'string' ? nftData.name : typeof collectionData.name === 'string' ? collectionData.name : '',
+    symbol: typeof tokenData.symbol === 'string' ? tokenData.symbol : '',
+    divisibility: Number.isSafeInteger(divisibility) && divisibility >= 0 && divisibility <= 38 ? divisibility : null,
+  };
+}
+
 class SpendableUtxoError extends Error {
   constructor(code, status = 503) {
     super(code);
@@ -615,6 +638,27 @@ export default {
         return Response.json(estimate, { headers: noStore });
       } catch {
         return Response.json({ error: 'Les estimateurs Mempool et UniSat sont temporairement indisponibles. Aucun taux périmé ne sera utilisé.' }, { status: 503, headers: noStore });
+      }
+    }
+    if (request.method === 'GET' && (url.pathname === '/api/brc20/balances' || url.pathname === '/api/alkanes/balances')) {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const address = url.searchParams.get('address') || '';
+      const chain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
+      if (!validWalletAddress(address) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse ou réseau invalide.' }, { status: 400, headers: noStore });
+      const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
+      const isBrc20 = url.pathname === '/api/brc20/balances';
+      try {
+        const path = isBrc20
+          ? `/v1/indexer/address/${encodeURIComponent(address)}/brc20/summary?start=0&limit=100`
+          : `/v1/indexer/address/${encodeURIComponent(address)}/alkanes/token-list?start=0&limit=100`;
+        const source = await uniNetwork(base, path, env, { signal: AbortSignal.timeout(8000) });
+        const detail = Array.isArray(source?.detail) ? source.detail : [];
+        const normalized = detail.map(isBrc20 ? normalizeBrc20Balance : normalizeAlkaneBalance).filter(Boolean);
+        return Response.json({ network: chain, address, detail: normalized, refreshedAt: new Date().toISOString() }, { headers: noStore });
+      } catch {
+        console.warn(`${isBrc20 ? 'BRC20' : 'Alkanes'} balance lookup failed`, { chain });
+        return Response.json({ error: `Les soldes ${isBrc20 ? 'BRC-20' : 'Alkanes'} sont temporairement indisponibles.` }, { status: 503, headers: noStore });
       }
     }
     if (request.method === 'GET' && url.pathname === '/api/runes/balance-list') {
