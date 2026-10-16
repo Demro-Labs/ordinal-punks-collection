@@ -780,7 +780,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     const review = psbtReview;
     const signPsbt = psbtReviewSignPsbtRef.current;
     if (!review || !signPsbt || !psbtReviewResolverRef.current) return;
-    if (isMobileUniSatDevice() && (!ownershipContextKey || ownershipProofKey !== ownershipContextKey)) {
+    if (!ownershipContextKey || ownershipProofKey !== ownershipContextKey) {
       const cause = new Error("The wallet ownership check is missing or no longer matches the transfer. No PSBT was signed.");
       setTransferError(cause.message);
       rejectPsbtReview(cause);
@@ -859,7 +859,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       setTransferError("Review the inscription and destination, then confirm the transfer checkbox.");
       return;
     }
-    if (isMobileUniSatDevice() && (!ownershipContextKey || ownershipProofKey !== ownershipContextKey)) {
+    if (!ownershipContextKey || ownershipProofKey !== ownershipContextKey) {
       setTransferError("Complete the wallet ownership check shown below the receipt first. No transaction was opened.");
       return;
     }
@@ -1257,7 +1257,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         <UniSatRunesSendPanel site={site} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} />
       )}
       {address && isSupportedMainnet(chain?.enum) && (
-        <ProtocolAssetsPanel address={address} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} />
+        <ProtocolAssetsPanel address={address} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} site={site} />
       )}
       {connectedToFractal && inscriptions.length > 0 && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-gallery-title">
@@ -1336,7 +1336,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                 />
                 <span>I checked this inscription and destination. I understand the on-chain transfer cannot be reversed.</span>
               </label>
-              {isMobileUniSatDevice() && confirmed && selectedInscription && destination.trim() && address && isSupportedMainnet(chain?.enum) && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={window.unisat} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
+              {confirmed && selectedInscription && destination.trim() && address && isSupportedMainnet(chain?.enum) && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={window.unisat} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
               {mobileNativeReadyForContext && <p className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#70c7a0]" role="status">Pre-check complete. Wallet ownership check is valid. Tap again to open UniSat transaction confirmation.</p>}
               {isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) && (
                 <button
@@ -1356,8 +1356,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                   (isMobileBrowser() &&
                     (!isUniSatMobileContext() || !providerAvailable)) ||
                   !confirmed ||
-                  (isMobileUniSatDevice() &&
-                    ownershipProofKey !== ownershipContextKey) ||
+                  ownershipProofKey !== ownershipContextKey ||
                   transferBusy ||
                   busy ||
                   transferLiveLoading
