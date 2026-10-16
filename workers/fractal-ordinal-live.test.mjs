@@ -90,6 +90,55 @@ test('reports BRC2.0 RPC as unconfigured without attempting an upstream request'
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('reads BRC2.0 module balance using only the canonical controller balanceOf call', async () => {
+  const previousFetch = globalThis.fetch;
+  let forwarded = null;
+  globalThis.fetch = async (input, init = {}) => {
+    forwarded = { url: String(input), auth: new Headers(init.headers).get('Authorization'), body: JSON.parse(init.body) };
+    return Response.json({ jsonrpc: '2.0', id: 'brc20-prog-balance', result: `0x${123456789n.toString(16).padStart(64, '0')}` });
+  };
+  try {
+    const evmAddress = '0x39280601edee011475789c611568e4e925c2dac4';
+    const response = await worker.fetch(makeRequest('/api/brc20-prog/module/balance', {
+      method: 'POST', ip: '192.0.2.236', body: JSON.stringify({ ticker: 'ABC-12', evmAddress }),
+    }), {
+      BRC20_PROG_RPC_URL: 'https://brc20-prog.example/rpc', BRC20_PROG_RPC_USER: 'worker-user', BRC20_PROG_RPC_PASSWORD: 'worker-secret',
+    });
+    const data = await response.json();
+    const word = value => BigInt(value).toString(16).padStart(64, '0');
+    const ticker = Buffer.from('ABC-12').toString('hex').padEnd(64, '0');
+    assert.equal(response.status, 200);
+    assert.equal(data.balance, '123456789');
+    assert.equal(data.decimals, 18);
+    assert.equal(forwarded.url, 'https://brc20-prog.example/rpc');
+    assert.equal(forwarded.body.method, 'eth_call');
+    assert.deepEqual(forwarded.body.params, [{
+      to: '0xc54dd4581af2dbf18e4d90840226756e9d2b3cdb',
+      data: `0xfc124ebd${word(64)}${evmAddress.slice(2).padStart(64, '0')}${word(6)}${ticker}`,
+    }, 'latest']);
+    assert.match(forwarded.auth, /^Basic /);
+    assert.equal(JSON.stringify(data).includes('worker-secret'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('rejects malformed BRC2.0 module balance inputs and untrusted origins before RPC access', async () => {
+  const previousFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => { upstreamCalls += 1; throw new Error('must not call upstream'); };
+  try {
+    const env = { BRC20_PROG_RPC_URL: 'https://brc20-prog.example/rpc' };
+    const invalid = await worker.fetch(makeRequest('/api/brc20-prog/module/balance', {
+      method: 'POST', ip: '192.0.2.235', body: JSON.stringify({ ticker: 'BAD', evmAddress: '0x1234' }),
+    }), env);
+    assert.equal(invalid.status, 400);
+    const denied = await worker.fetch(makeRequest('/api/brc20-prog/module/balance', {
+      method: 'POST', origin: 'https://attacker.example', ip: '192.0.2.234', body: JSON.stringify({ ticker: 'ABC-12', evmAddress: `0x${'11'.repeat(20)}` }),
+    }), env);
+    assert.equal(denied.status, 403);
+    assert.equal(upstreamCalls, 0);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('broadcasts only a structurally valid BRC2.0 activation and returns the matching Bitcoin TXID', async () => {
   const previousFetch = globalThis.fetch;
   const rawTx = activationTx({ segwit: true });
