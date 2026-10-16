@@ -11,8 +11,8 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 curl -fsS --max-time 20 -H "${AUTH_HEADER}" "${SCRIPT_API}/secrets" \
-  | jq -e '.success == true and any(.result[]?; .name == "UNISAT_API_KEY" and .type == "secret_text") and any(.result[]?; .name == "UNISAT_BITCOIN_API" and .type == "secret_text")' >/dev/null
-echo "Cloudflare UniSat Bitcoin and Fractal secret names/types verified; values were not read."
+  | jq -e '.success == true and any(.result[]?; .name == "UNISAT_API_KEY" and .type == "secret_text") and any(.result[]?; .name == "UNISAT_BITCOIN_API" and .type == "secret_text") and any(.result[]?; .name == "ETH_API" and .type == "secret_text")' >/dev/null
+echo "Cloudflare UniSat and ETH API secret names/types verified; values were not read."
 
 bitcoin_fees="$(curl -fsS --retry 2 --max-time 20 "${BASE_URL}/api/fees/recommended?chain=BITCOIN_MAINNET" \
   -H 'Origin: https://demro-labs.github.io')"

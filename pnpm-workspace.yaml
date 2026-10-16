@@ -4,6 +4,8 @@ packages:
 allowBuilds:
   "@tailwindcss/oxide": true
   esbuild: true
+  secp256k1: false
+  workerd: true
 
 patchedDependencies:
   wouter@3.7.1: patches/wouter@3.7.1.patch

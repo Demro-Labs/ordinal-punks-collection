@@ -1,3 +1,95 @@
+test('quotes and creates BRC-20, Runes, and Alkanes protocol orders using V5 routes', async () => {
+  const previousFetch = globalThis.fetch;
+  const protocolCalls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/v1/indexer/fees/recommended')) return Response.json({ code: 0, data: { halfHourFee: 6 } });
+    if (url.origin === 'https://mempool.space' || url.origin === 'https://mempool.fractalbitcoin.io') return Response.json({ halfHourFee: 5 });
+    if (!url.pathname.startsWith('/v5/inscribe/')) throw new Error(`Unexpected upstream URL: ${url}`);
+    const auth = new Headers(init.headers).get('Authorization');
+    const body = init.body ? JSON.parse(init.body) : {};
+    protocolCalls.push({ path: url.pathname, body, auth });
+    if (url.pathname.includes('/quote/')) return Response.json({ code: 0, data: { payableAmount: 25000 } });
+    if (url.pathname === '/v5/inscribe/order/estimate-fee') return Response.json({ code: 0, data: { payableAmount: 25000 } });
+    if (url.pathname.includes('/order/create')) return Response.json({ code: 0, data: { orderId: `order-${protocolCalls.length}-test`, status: 'pending', payAddress: 'bc1qtestaddress0000000000000000000000000', amount: 25000 } });
+    throw new Error(`Unexpected V5 inscription route: ${url}`);
+  };
+  const common = {
+    receiver: 'bc1qtestaddress0000000000000000000000000',
+    refundAddress: 'bc1qtestaddress0000000000000000000000000',
+    userAddress: 'bc1qtestaddress0000000000000000000000000',
+    userPubkey: '02' + 'a'.repeat(64),
+    feeRate: 5,
+    outputValue: 546,
+  };
+  try {
+    const orders = [
+      { chain: 'BITCOIN_MAINNET', protocol: { type: 'brc20', operation: 'deploy', ticker: 'ordi', max: '21000000', limit: '1000', decimals: 18 } },
+      { chain: 'FRACTAL_BITCOIN_MAINNET', protocol: { type: 'runes-etch', spacedRune: 'TEST•RUNE', symbol: 'T', divisibility: 2, premine: '1000', terms: { amount: '1', cap: '100', height: [850000, 850100] } } },
+      { chain: 'FRACTAL_BITCOIN_MAINNET', protocol: { type: 'runes-mint', runeid: '840000:3', count: 2 } },
+      { chain: 'FRACTAL_BITCOIN_MAINNET', protocol: { type: 'alkanes-deploy' }, files: [{ filename: 'contract.wasm', dataURL: 'data:application/octet-stream;base64,QQ==' }] },
+      { chain: 'FRACTAL_BITCOIN_MAINNET', protocol: { type: 'alkanes-mint', alkaneid: '2:1', count: 2 } },
+    ];
+    for (let index = 0; index < orders.length; index += 1) {
+      const order = orders[index];
+      const response = await worker.fetch(makeRequest('/api/inscribe/order', { method: 'POST', ip: `192.0.2.${60 - index}`, body: JSON.stringify({ ...common, ...order }) }), {
+        UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only',
+      });
+      const result = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(result));
+      assert.equal(result.quoteAmount, 25000);
+      assert.equal(result.amount, 25000);
+    }
+
+    const expectedPaths = [
+      '/v5/inscribe/order/estimate-fee', '/v5/inscribe/order/create',
+      '/v5/inscribe/order/quote/runes-etch', '/v5/inscribe/order/create/runes-etch',
+      '/v5/inscribe/order/quote/runes-mint', '/v5/inscribe/order/create/runes-mint',
+      '/v5/inscribe/order/quote/alkanes-deploy', '/v5/inscribe/order/create/alkanes-deploy',
+      '/v5/inscribe/order/quote/alkanes-mint', '/v5/inscribe/order/create/alkanes-mint',
+    ];
+    assert.deepEqual(protocolCalls.map(call => call.path), expectedPaths);
+    const brc20Payload = JSON.parse(Buffer.from(protocolCalls[1].body.files[0].dataURL.split(',')[1], 'base64').toString('utf8'));
+    assert.deepEqual(brc20Payload, { p: 'brc-20', op: 'deploy', tick: 'ordi', max: '21000000', lim: '1000', dec: '18' });
+    assert.equal(protocolCalls[2].body.files[0].runes_etch.etching.spacedRune, 'TEST•RUNE');
+    assert.equal(protocolCalls[5].body.runeId, '840000:3');
+    assert.equal(protocolCalls[9].body.alkaneid, '2:1');
+    assert.deepEqual(protocolCalls.map(call => call.auth), [
+      'Bearer bitcoin-test-only', 'Bearer bitcoin-test-only',
+      'Bearer fractal-test-only', 'Bearer fractal-test-only',
+      'Bearer fractal-test-only', 'Bearer fractal-test-only',
+      'Bearer fractal-test-only', 'Bearer fractal-test-only',
+      'Bearer fractal-test-only', 'Bearer fractal-test-only',
+    ]);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('rejects malformed protocol inscription payloads before upstream calls', async () => {
+  const previousFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => { upstreamCalls += 1; throw new Error('Unexpected upstream call'); };
+  try {
+    const common = {
+      receiver: 'bc1qtestaddress0000000000000000000000000',
+      refundAddress: 'bc1qtestaddress0000000000000000000000000',
+      userAddress: 'bc1qtestaddress0000000000000000000000000',
+      userPubkey: '02' + 'a'.repeat(64),
+      feeRate: 5,
+      outputValue: 546,
+      chain: 'BITCOIN_MAINNET',
+    };
+    for (const protocol of [
+      { type: 'brc20', operation: 'deploy', ticker: 'ordi', max: '1x', limit: '1', decimals: 18 },
+      { type: 'runes-mint', runeid: 'invalid', count: 1 },
+      { type: 'alkanes-mint', alkaneid: '2:1', count: 0 },
+    ]) {
+      const response = await worker.fetch(makeRequest('/api/inscribe/order', { method: 'POST', ip: '192.0.2.50', body: JSON.stringify({ ...common, protocol }) }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+      assert.equal(response.status, 400);
+    }
+    assert.equal(upstreamCalls, 0);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
@@ -461,6 +553,106 @@ test('returns one current Fractal Rune balance and rejects invalid Rune queries 
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('routes Bitcoin Rune balances through the Bitcoin UniSat secret and rejects unsupported chains', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const authHeaders = [];
+  let upstreamCalls = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    upstreamCalls += 1;
+    assert.equal(url.origin, 'https://open-api.unisat.io');
+    authHeaders.push(new Headers(init.headers).get('Authorization'));
+    if (url.pathname.endsWith('/runes/balance-list')) {
+      return Response.json({ code: 0, data: { start: 0, total: 1, detail: [{ amount: '123450', runeid: '840000:3', rune: 'EXAMPLE', spacedRune: 'EXAMPLE', symbol: 'E', divisibility: 2 }] } });
+    }
+    if (url.pathname.endsWith('/runes/840000%3A3/balance')) {
+      return Response.json({ code: 0, data: { amount: '123450', runeid: '840000:3', rune: 'EXAMPLE', spacedRune: 'EXAMPLE', symbol: 'E', divisibility: 2 } });
+    }
+    throw new Error(`Unexpected Bitcoin Rune URL: ${url}`);
+  };
+  try {
+    const invalid = await worker.fetch(makeRequest(`/api/runes/balance-list?chain=BITCOIN_TESTNET&address=${address}`, { ip: '192.0.2.75' }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    assert.equal(invalid.status, 400);
+    assert.equal(upstreamCalls, 0);
+
+    const listResponse = await worker.fetch(makeRequest(`/api/runes/balance-list?chain=BITCOIN_MAINNET&address=${address}&start=0&limit=2`, { ip: '192.0.2.74' }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    const list = await listResponse.json();
+    assert.equal(listResponse.status, 200);
+    assert.equal(list.network, 'BITCOIN_MAINNET');
+    assert.equal(list.detail[0].amount, '123450');
+
+    const balanceResponse = await worker.fetch(makeRequest(`/api/runes/balance?chain=BITCOIN_MAINNET&address=${address}&runeid=840000%3A3`, { ip: '192.0.2.73' }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    const balance = await balanceResponse.json();
+    assert.equal(balanceResponse.status, 200);
+    assert.equal(balance.network, 'BITCOIN_MAINNET');
+    assert.equal(balance.balance.runeid, '840000:3');
+    assert.deepEqual(authHeaders, ['Bearer bitcoin-test-only', 'Bearer bitcoin-test-only']);
+    assert.equal(JSON.stringify(list).includes('bitcoin-test-only'), false);
+    assert.equal(JSON.stringify(balance).includes('bitcoin-test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('routes BRC-20 and Alkanes wallet inventory through the selected network secret', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const authHeaders = [];
+  let upstreamCalls = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    upstreamCalls += 1;
+    authHeaders.push(new Headers(init.headers).get('Authorization'));
+    if (url.pathname.endsWith('/brc20/summary')) {
+      assert.equal(url.origin, 'https://open-api.unisat.io');
+      assert.equal(url.searchParams.get('exclude_zero'), 'true');
+      return Response.json({ code: 0, data: { start: 0, total: 1, detail: [{ ticker: 'ordi', overallBalance: '12', transferableBalance: '2', availableBalance: '10' }] } });
+    }
+    assert.equal(url.origin, 'https://open-api-fractal.unisat.io');
+    if (url.pathname.endsWith('/alkanes/token-list')) {
+      return Response.json({ code: 0, data: { start: 0, total: 1, detail: [{ alkaneid: '2:1', type: 'token', tokenData: { name: 'Example', symbol: 'EX', divisibility: 0, totalSupply: '1000', minted: '10', mintable: true } }] } });
+    }
+    if (url.pathname.endsWith('/alkanes/collection-list')) {
+      return Response.json({ code: 0, data: { start: 0, total: 1, detail: [{ alkaneid: '2:2', type: 'collection', collectionData: { name: 'Example Collection', totalSupply: '10', minted: 3, holders: 3 } }] } });
+    }
+    if (url.pathname.endsWith('/alkanes/2%3A1/utxo')) {
+      return Response.json({ code: 0, data: { start: 0, total: 1, utxo: [{ address, txid: 'a'.repeat(64), vout: 0, satoshi: 546, confirmations: 3, alkanes: [{ alkaneid: '2:1', amount: '1500', type: 'token' }] }] } });
+    }
+    throw new Error(`Unexpected wallet protocol URL: ${url}`);
+  };
+  try {
+    const invalid = await worker.fetch(makeRequest(`/api/alkanes/utxo-list?chain=BITCOIN_TESTNET&address=${address}&alkaneid=2%3A1`, { ip: '192.0.2.71' }), { UNISAT_API_KEY: 'fractal-test-only', UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    assert.equal(invalid.status, 400);
+    assert.equal(upstreamCalls, 0);
+
+    const brc20Response = await worker.fetch(makeRequest(`/api/brc20/balance-list?chain=BITCOIN_MAINNET&address=${address}`, { ip: '192.0.2.70' }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    const brc20 = await brc20Response.json();
+    assert.equal(brc20Response.status, 200);
+    assert.equal(brc20.network, 'BITCOIN_MAINNET');
+    assert.deepEqual(brc20.detail[0], { ticker: 'ordi', overallBalance: '12', transferableBalance: '2', availableBalance: '10' });
+
+    const tokenResponse = await worker.fetch(makeRequest(`/api/alkanes/token-list?chain=FRACTAL_BITCOIN_MAINNET&address=${address}`, { ip: '192.0.2.69' }), { UNISAT_API_KEY: 'fractal-test-only' });
+    const tokens = await tokenResponse.json();
+    assert.equal(tokenResponse.status, 200);
+    assert.equal(tokens.detail[0].tokenData.symbol, 'EX');
+    assert.equal(Object.hasOwn(tokens.detail[0], 'balance'), false);
+
+    const collectionResponse = await worker.fetch(makeRequest(`/api/alkanes/collection-list?chain=FRACTAL_BITCOIN_MAINNET&address=${address}`, { ip: '192.0.2.68' }), { UNISAT_API_KEY: 'fractal-test-only' });
+    const collections = await collectionResponse.json();
+    assert.equal(collectionResponse.status, 200);
+    assert.equal(collections.detail[0].collectionData.name, 'Example Collection');
+
+    const utxoResponse = await worker.fetch(makeRequest(`/api/alkanes/utxo-list?chain=FRACTAL_BITCOIN_MAINNET&address=${address}&alkaneid=2%3A1`, { ip: '192.0.2.67' }), { UNISAT_API_KEY: 'fractal-test-only' });
+    const utxos = await utxoResponse.json();
+    assert.equal(utxoResponse.status, 200);
+    assert.equal(utxos.utxo[0].amount, '1500');
+    assert.equal(utxos.utxo[0].confirmations, 3);
+    assert.deepEqual(authHeaders, ['Bearer bitcoin-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only']);
+    for (const result of [brc20, tokens, collections, utxos]) {
+      assert.equal(JSON.stringify(result).includes('test-only'), false);
+    }
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('caches successful public market responses at the edge', async () => {
   const previousCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
   const previousFetch = globalThis.fetch;
@@ -590,16 +782,22 @@ test('applies the per-isolate request ceiling and a retry hint', async () => {
 test('creates a V5 order without a human token and supports file batches', async () => {
   const previousFetch = globalThis.fetch;
   let createUrl = '';
+  const upstreamCalls = [];
   let upstreamBody;
   let authHeader = '';
   globalThis.fetch = async (input, init = {}) => {
     const url = String(input);
     if (url.endsWith('/v1/indexer/fees/recommended')) return Response.json({ code: 0, data: { halfHourFee: 6 } });
     if (url === 'https://mempool.fractalbitcoin.io/api/v1/fees/recommended') return Response.json({ halfHourFee: 5 });
-    createUrl = url;
-    authHeader = new Headers(init.headers).get('Authorization') || '';
-    upstreamBody = JSON.parse(init.body);
-    return Response.json({ code: 0, data: { orderId: 'order-test-123', status: 'pending', payAddress: 'bc1qtestaddress0000000000000000000000000', amount: 12345 } });
+    upstreamCalls.push(url);
+    if (url === 'https://open-api-fractal.unisat.io/v5/inscribe/order/estimate-fee') return Response.json({ code: 0, data: { payableAmount: 12000 } });
+    if (url === 'https://open-api-fractal.unisat.io/v5/inscribe/order/create') {
+      createUrl = url;
+      authHeader = new Headers(init.headers).get('Authorization') || '';
+      upstreamBody = JSON.parse(init.body);
+      return Response.json({ code: 0, data: { orderId: 'order-test-123', status: 'pending', payAddress: 'bc1qtestaddress0000000000000000000000000', amount: 12345 } });
+    }
+    throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
     const body = JSON.stringify({
@@ -622,11 +820,13 @@ test('creates a V5 order without a human token and supports file batches', async
     const data = await response.json();
     assert.equal(response.status, 200);
     assert.equal(data.orderId, 'order-test-123');
+    assert.equal(data.quoteAmount, 12000);
     assert.equal(data.feeRate, 6);
     assert.equal(data.feeStrategy, 'maximum-of-mempool-and-unisat');
     assert.equal(data.feeSources.mempool.feeRate, 5);
     assert.equal(data.feeSources.unisat.feeRate, 6);
     assert.match(createUrl, /^https:\/\/open-api-fractal\.unisat\.io\/v5\/inscribe\/order\/create$/);
+    assert.deepEqual(upstreamCalls, ['https://open-api-fractal.unisat.io/v5/inscribe/order/estimate-fee', createUrl]);
     assert.equal(authHeader, 'Bearer test-only');
     assert.equal(upstreamBody.files.length, 2);
     assert.equal(upstreamBody.clientId, 'demro-labs-gallery');
@@ -644,6 +844,10 @@ test('creates Bitcoin V5 orders with the Bitcoin UniSat key and Bitcoin Mempool 
       return Response.json({ code: 0, data: { halfHourFee: 7 } });
     }
     if (url === 'https://mempool.space/api/v1/fees/recommended') return Response.json({ halfHourFee: 5 });
+    if (url === 'https://open-api.unisat.io/v5/inscribe/order/estimate-fee') {
+      upstreamAuth.push(new Headers(init.headers).get('Authorization'));
+      return Response.json({ code: 0, data: { payableAmount: 23000 } });
+    }
     if (url === 'https://open-api.unisat.io/v5/inscribe/order/create') {
       createUrl = url;
       upstreamAuth.push(new Headers(init.headers).get('Authorization'));
@@ -670,10 +874,11 @@ test('creates Bitcoin V5 orders with the Bitcoin UniSat key and Bitcoin Mempool 
     assert.equal(data.network, 'BITCOIN_MAINNET');
     assert.equal(data.orderId, 'btc-order-789');
     assert.equal(data.feeRate, 7);
+    assert.equal(data.quoteAmount, 23000);
     assert.equal(data.feeSources.mempool.feeRate, 5);
     assert.equal(data.feeSources.unisat.feeRate, 7);
     assert.equal(createUrl, 'https://open-api.unisat.io/v5/inscribe/order/create');
-    assert.deepEqual(upstreamAuth, ['Bearer bitcoin-test-only', 'Bearer bitcoin-test-only']);
+    assert.deepEqual(upstreamAuth, ['Bearer bitcoin-test-only', 'Bearer bitcoin-test-only', 'Bearer bitcoin-test-only']);
     assert.equal(JSON.stringify(data).includes('bitcoin-test-only'), false);
     assert.equal(JSON.stringify(data).includes('fractal-test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
@@ -1007,6 +1212,7 @@ test('preserves the 1000-file Inscribe limit and rejects file 1001 before upstre
     const url = String(input);
     if (url.endsWith('/v1/indexer/fees/recommended')) return Response.json({ code: 0, data: { halfHourFee: 6 } });
     if (url === 'https://mempool.fractalbitcoin.io/api/v1/fees/recommended') return Response.json({ halfHourFee: 5 });
+    if (url === 'https://open-api-fractal.unisat.io/v5/inscribe/order/estimate-fee') return Response.json({ code: 0, data: { payableAmount: 12345 } });
     if (url.endsWith('/v5/inscribe/order/create')) {
       orderCalls += 1;
       acceptedFileCount = JSON.parse(init.body).files.length;
