@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, Wallet } from "lucide-react";
 import { fetchLiveInscription, type LiveInscription } from "@/lib/live";
-import { describeFeeSources, getRecommendedFeeEstimate } from "@/lib/mempool";
+import { describeFeeSources, getMempoolConfig, getRecommendedFeeEstimate } from "@/lib/mempool";
 import {
   ensureNativeInscriptionFeeBalance,
   getMobileUtxoErrorGuidance,
@@ -100,24 +100,8 @@ declare global {
 
 const FRACTAL_MAINNET = "FRACTAL_BITCOIN_MAINNET";
 const BITCOIN_MAINNET = "BITCOIN_MAINNET";
-const MEMPOOL_ENDPOINTS: Record<string, { api: string; explorer: string; label: string }> = {
-  [FRACTAL_MAINNET]: {
-    api: "https://mempool.fractalbitcoin.io",
-    explorer: "https://mempool.fractalbitcoin.io/tx/",
-    label: "Fractal Bitcoin",
-  },
-  [BITCOIN_MAINNET]: {
-    api: "https://mempool.space",
-    explorer: "https://mempool.space/tx/",
-    label: "Bitcoin",
-  },
-};
 type MempoolTrackingStatus = "idle" | "checking" | "pending" | "confirmed" | "timeout" | "error";
 type TransferReceipt = { txid: string; network: string; status: string; message: string; blockHeight: number | null; explorerUrl: string; checkedAt: string; liveBefore?: LiveInscription | null; liveAfter?: LiveInscription | null };
-
-function getMempoolConfig(networkEnum?: string) {
-  return networkEnum ? MEMPOOL_ENDPOINTS[networkEnum] : undefined;
-}
 
 function isSupportedMainnet(networkEnum?: string) {
   return Boolean(getMempoolConfig(networkEnum));
@@ -701,7 +685,18 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   };
 
   const trackTransaction = async (transactionId: string, networkEnum?: string, liveBefore?: LiveInscription | null) => {
-    const config = MEMPOOL_ENDPOINTS[networkEnum ?? FRACTAL_MAINNET] ?? MEMPOOL_ENDPOINTS[FRACTAL_MAINNET];
+    const config = getMempoolConfig(networkEnum);
+    if (!networkEnum || !config) {
+      const message = `Unsupported or missing UniSat network (${networkEnum ?? "unknown"}); Mempool was not selected. Check the wallet network before retrying.`;
+      ++trackingRunRef.current;
+      setMempoolStatus("error");
+      setMempoolMessage(message);
+      setMempoolNetwork("Network not verified");
+      setMempoolBlockHeight(null);
+      setMempoolExplorerUrl("");
+      setFinalReceipt(null);
+      return;
+    }
     const run = ++trackingRunRef.current;
     setMempoolStatus("checking");
     setMempoolMessage("Checking the transaction in Mempool…");
@@ -726,7 +721,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
             setMempoolMessage("Transaction confirmed on-chain.");
             setMempoolBlockHeight(typeof status.block_height === "number" ? status.block_height : null);
             setFinalReceipt(current => current ? { ...current, status: "confirmed", message: liveBefore ? "Transaction confirmed on-chain. Synchronisation des données UniSat en cours…" : "Transaction confirmed on-chain.", blockHeight: typeof status.block_height === "number" ? status.block_height : null, checkedAt: new Date().toISOString() } : current);
-            if (liveBefore) void refreshConfirmedLiveData(transactionId, liveBefore.inscriptionId, networkEnum ?? FRACTAL_MAINNET, run);
+            if (liveBefore && networkEnum) void refreshConfirmedLiveData(transactionId, liveBefore.inscriptionId, networkEnum, run);
             return;
           }
           setMempoolStatus("pending");
@@ -1251,7 +1246,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         <UniSatWalletAuth key={`${address ?? ""}:${chain?.enum ?? ""}`} site="punks" address={address ?? ""} network={chain?.enum ?? ""} provider={window.unisat} />
       )}
       {connectedToFractal && (
-        <UniSatFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} network={chain?.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET" | undefined} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} site={site} />
+        <UniSatFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} site={site} />
       )}
       {connectedToFractal && chain?.enum === FRACTAL_MAINNET && (
         <UniSatRunesSendPanel site={site} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} />
