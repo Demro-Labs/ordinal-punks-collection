@@ -10,6 +10,6 @@ Load manifest.json temporarily from about:debugging#/runtime/this-firefox. Tempo
 
 SECURITY / SCOPE
 - Unsigned developer preview; not store-published and not independently audited. Test only with a wallet that holds no valuable funds.
-- Import wallet is available before connecting any website wallet. The encrypted vault is stored in this extension's own browser origin. Website vaults are separate; no provider is injected and no private keys are shared with sites.
+- The encrypted vault is stored in this extension's own browser origin. Website vaults are separate; no provider is injected and no private keys are shared with sites.
 - Live public balances use Mempool endpoints. Local PSBT signing is limited to the Native SegWit vault key and requires an explicit review. Broadcasting is a separate irreversible action.
 - Desktop only. Safari and mobile extension installation are not supported.

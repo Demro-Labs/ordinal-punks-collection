@@ -1,6 +1,6 @@
 export type InscribeFileMetadata = { name: string; size: number };
 
-export const DEFAULT_INSCRIBE_BATCH_MAX_FILES = 100;
+export const DEFAULT_INSCRIBE_BATCH_MAX_FILES = 1_000;
 export const DEFAULT_INSCRIBE_BATCH_MAX_BYTES = 95_000_000;
 export const DEFAULT_INSCRIBE_FILE_MAX_BYTES = 365 * 1024;
 const JSON_REQUEST_OVERHEAD_BYTES = 4_096;

@@ -7,18 +7,16 @@ import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink"
 import { estimateInscribeRequestBytes, splitInscribeFilesIntoBatches } from "@/lib/inscribe-file-batches";
 import { canRemoveInscribeQueueFile, mergeSelectedInscribeFiles } from "@/lib/inscribe-queue-state";
 import { getInscribeOrderTotalSats, getUnpreparedInscribeFileIndexes } from "@/lib/inscribe-order-queue";
-import { canAccessInscribeReceiptForWallet } from "@/lib/inscribe-access";
 
 const API_BASE = "https://fractal-ordinal-live.servostar23.workers.dev";
 const MAX_FILE_BYTES = 365 * 1024;
-const MAX_FILES = 100;
+const MAX_FILES = 1000;
 // Worker request-size limits are handled by the Inscribe batch planner.
 type Chain = { enum?: string; name?: string };
 type InscribeFile = { filename: string; size: number; type: string; dataURL?: string };
 type InscribeReceipt = { orderId: string; payAddress: string; amount: number; files: InscribeFile[]; feeRate: number; paymentFeeRate?: number; feeSourceLabel: string; chain: string; walletAddress: string; createdAt: string };
 type InscribeStage = "idle" | "preparing" | "awaiting-approval" | "paying" | "tracking" | "completed";
-type InscribeSite = "punks" | "pokedex";
-type InscribeMode = "files" | "brc20-deploy" | "brc20-mint" | "brc20-transfer" | "runes-etch" | "runes-mint" | "alkanes-deploy" | "alkanes-mint";
+type InscribeMode = "files" | "brc20" | "runes-etch" | "runes-mint" | "alkanes-deploy" | "alkanes-mint";
 type OrderFile = { inscriptionId?: string; filename?: string; status?: string; txid?: string; inscriptionTxid?: string };
 type LiveWalletData = { publicKey: string; available: number | null; confirmed: number | null; total: number | null; safeAvailableSats: number | null; asset: string; refreshedAt: string };
 type InscriptionHistoryItem = { inscriptionId: string; transactionId: string; paymentTxid?: string; finalPaymentReceipt?: MempoolReceipt; filename: string; orderId: string; network: string; walletAddress: string; createdAt: string; status?: string; amountSats?: number; fileCount?: number };
@@ -28,10 +26,9 @@ type PreparedOrder = { receipt: InscribeReceipt; fileIndexes: number[]; status: 
 type PersistedPreparedOrders = { orders: PreparedOrder[]; activeIndex: number; savedAt: string };
 const HISTORY_RETENTION_MONTHS = 2;
 const HISTORY_PAGE_SIZE = 10;
-function siteStorageKey(site: InscribeSite, resource: string) { return `ordinal-${site}:${resource}:v1`; }
-function activeMobileOrderStorageKey(site: InscribeSite) { return siteStorageKey(site, "active-mobile-inscribe-order"); }
-function preparedOrdersStorageKey(site: InscribeSite) { return siteStorageKey(site, "prepared-inscribe-orders"); }
-function inscribeCreationUncertainStorageKey(site: InscribeSite) { return siteStorageKey(site, "inscribe-order-creation-uncertain"); }
+const ACTIVE_MOBILE_ORDER_STORAGE_KEY = "ordinal-punks:active-mobile-inscribe-order:v1";
+const PREPARED_ORDERS_STORAGE_KEY = "ordinal-punks:prepared-inscribe-orders:v1";
+const INSCRIBE_CREATION_UNCERTAIN_KEY = "ordinal-punks:inscribe-order-creation-uncertain:v1";
 type HistorySortKey = "date" | "filename" | "inscriptionId" | "transactionId" | "orderId" | "network";
 
 function isInscribeReceipt(value: unknown): value is InscribeReceipt {
@@ -43,9 +40,9 @@ function isInscribeReceipt(value: unknown): value is InscribeReceipt {
     Array.isArray(receipt.files) && receipt.files.every(file => Boolean(file) && typeof file === "object" && typeof (file as InscribeFile).filename === "string");
 }
 
-function readPreparedOrders(site: InscribeSite = "punks"): PersistedPreparedOrders | null {
+function readPreparedOrders(): PersistedPreparedOrders | null {
   try {
-    const value = JSON.parse(localStorage.getItem(preparedOrdersStorageKey(site)) ?? "null") as Partial<PersistedPreparedOrders> | null;
+    const value = JSON.parse(localStorage.getItem(PREPARED_ORDERS_STORAGE_KEY) ?? "null") as Partial<PersistedPreparedOrders> | null;
     if (!value || !Array.isArray(value.orders) || !Number.isSafeInteger(value.activeIndex) || Number(value.activeIndex) < 0 || typeof value.savedAt !== "string") return null;
     const validStatuses = ["awaiting-payment", "payment-review", "payment-sent", "completed", "cancelled"];
     const orders = value.orders.filter((order): order is PreparedOrder => Boolean(order) && isInscribeReceipt(order.receipt) &&
@@ -55,16 +52,16 @@ function readPreparedOrders(site: InscribeSite = "punks"): PersistedPreparedOrde
   } catch { return null; }
 }
 
-function persistPreparedOrders(orders: PreparedOrder[], activeIndex: number, site: InscribeSite = "punks") {
+function persistPreparedOrders(orders: PreparedOrder[], activeIndex: number) {
   try {
-    if (!orders.length) localStorage.removeItem(preparedOrdersStorageKey(site));
-    else localStorage.setItem(preparedOrdersStorageKey(site), JSON.stringify({ orders, activeIndex, savedAt: new Date().toISOString() } satisfies PersistedPreparedOrders));
+    if (!orders.length) localStorage.removeItem(PREPARED_ORDERS_STORAGE_KEY);
+    else localStorage.setItem(PREPARED_ORDERS_STORAGE_KEY, JSON.stringify({ orders, activeIndex, savedAt: new Date().toISOString() } satisfies PersistedPreparedOrders));
   } catch { /* private mode or storage quota */ }
 }
 
-function readActiveMobileOrder(site: InscribeSite = "punks"): PersistedMobileOrder | null {
+function readActiveMobileOrder(): PersistedMobileOrder | null {
   try {
-    const value = JSON.parse(localStorage.getItem(activeMobileOrderStorageKey(site)) ?? "null") as Partial<PersistedMobileOrder> | null;
+    const value = JSON.parse(localStorage.getItem(ACTIVE_MOBILE_ORDER_STORAGE_KEY) ?? "null") as Partial<PersistedMobileOrder> | null;
     if (!value || !isInscribeReceipt(value.receipt) || typeof value.savedAt !== "string" || (typeof value.txid !== "string" || (value.txid !== "" && !/^[a-f0-9]{64}$/i.test(value.txid))) || (value.paymentStarted !== undefined && typeof value.paymentStarted !== "boolean")) return null;
     return { receipt: value.receipt, txid: value.txid, paymentStarted: value.paymentStarted === true, savedAt: value.savedAt };
   } catch {
@@ -72,15 +69,15 @@ function readActiveMobileOrder(site: InscribeSite = "punks"): PersistedMobileOrd
   }
 }
 
-function saveActiveMobileOrder(receipt: InscribeReceipt, txid = "", paymentStarted = false, site: InscribeSite = "punks") {
-  try { localStorage.setItem(activeMobileOrderStorageKey(site), JSON.stringify({ receipt, txid, paymentStarted, savedAt: new Date().toISOString() } satisfies PersistedMobileOrder)); } catch { /* private mode or storage quota */ }
+function saveActiveMobileOrder(receipt: InscribeReceipt, txid = "", paymentStarted = false) {
+  try { localStorage.setItem(ACTIVE_MOBILE_ORDER_STORAGE_KEY, JSON.stringify({ receipt, txid, paymentStarted, savedAt: new Date().toISOString() } satisfies PersistedMobileOrder)); } catch { /* private mode or storage quota */ }
 }
 
-function clearActiveMobileOrder(site: InscribeSite = "punks") {
-  try { localStorage.removeItem(activeMobileOrderStorageKey(site)); return true; } catch { /* private mode */ return false; }
+function clearActiveMobileOrder() {
+  try { localStorage.removeItem(ACTIVE_MOBILE_ORDER_STORAGE_KEY); return true; } catch { /* private mode */ return false; }
 }
 
-function historyStorageKeyFor(network: string, walletAddress: string, site: InscribeSite = "punks") { const scope = site === "pokedex" ? "pokedex:" : ""; return `fractal-inscription-history:${scope}${network}:${walletAddress.toLowerCase()}`; }
+function historyStorageKeyFor(network: string, walletAddress: string) { return `fractal-inscription-history:${network}:${walletAddress.toLowerCase()}`; }
 function mempoolPaymentStorageKey(historyKey: string, orderId: string) { return `${historyKey}:mempool-payment:${orderId}`; }
 function isMempoolReceipt(value: unknown): value is MempoolReceipt {
   if (!value || typeof value !== "object") return false;
@@ -173,10 +170,8 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     return () => window.removeEventListener("keydown", handleDialogKeyDown);
   }, [open]);
   const [files, setFiles] = useState<File[]>([]);
-  const [fileQueueWalletKey, setFileQueueWalletKey] = useState("");
   const [mode, setMode] = useState<InscribeMode>("files");
-  const brc20Operation = mode.startsWith("brc20-") ? mode.slice("brc20-".length) as "deploy" | "mint" | "transfer" : "deploy";
-
+  const [brc20Operation, setBrc20Operation] = useState<"deploy" | "mint" | "transfer">("deploy");
   const [ticker, setTicker] = useState("");
   const [brc20Max, setBrc20Max] = useState("");
   const [brc20Limit, setBrc20Limit] = useState("");
@@ -199,9 +194,9 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("");
   const [receipt, setReceipt] = useState<InscribeReceipt | null>(null);
-  const [preparedOrders, setPreparedOrders] = useState<PreparedOrder[]>(() => readPreparedOrders(site)?.orders ?? []);
-  const [activePreparedIndex, setActivePreparedIndex] = useState(() => readPreparedOrders(site)?.activeIndex ?? 0);
-  const [creationUncertain, setCreationUncertain] = useState(() => { try { return localStorage.getItem(inscribeCreationUncertainStorageKey(site)) === "true"; } catch { return false; } });
+  const [preparedOrders, setPreparedOrders] = useState<PreparedOrder[]>(() => readPreparedOrders()?.orders ?? []);
+  const [activePreparedIndex, setActivePreparedIndex] = useState(() => readPreparedOrders()?.activeIndex ?? 0);
+  const [creationUncertain, setCreationUncertain] = useState(() => { try { return localStorage.getItem(INSCRIBE_CREATION_UNCERTAIN_KEY) === "true"; } catch { return false; } });
   const [mobilePaymentPreflight, setMobilePaymentPreflight] = useState<{ key: string; checkedAt: number } | null>(null);
   const [mobilePreflightBusy, setMobilePreflightBusy] = useState(false);
   const [txid, setTxid] = useState("");
@@ -218,18 +213,11 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   const filePickerRef = useRef<HTMLInputElement>(null);
   const paymentReceiptRef = useRef<{ historyKey: string; orderId: string; receipt: MempoolReceipt } | null>(null);
   const totalBytes = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
-  const eligibleWalletConnected = Boolean(address.trim() && (chain?.enum === "BITCOIN_MAINNET" || chain?.enum === "FRACTAL_BITCOIN_MAINNET"));
-  const currentWalletKey = eligibleWalletConnected ? `${chain!.enum}:${address.toLowerCase()}` : "";
-  const canCurrentWalletAccessReceipt = (candidate: InscribeReceipt | null | undefined) => Boolean(candidate && canAccessInscribeReceiptForWallet(candidate, address, chain?.enum));
-  const fileQueueAccessible = !files.length || (eligibleWalletConnected && fileQueueWalletKey === currentWalletKey);
-  const setFilesForCurrentWallet = (nextFiles: File[]) => { setFiles(nextFiles); setFileQueueWalletKey(currentWalletKey); };
   const fileBatches = useMemo(() => splitInscribeFilesIntoBatches(files), [files]);
-  const preparedOrdersForCurrentWallet = preparedOrders.filter(order => canCurrentWalletAccessReceipt(order.receipt));
-  const hasLockedPreparedOrders = preparedOrders.some(order => !canCurrentWalletAccessReceipt(order.receipt));
-  const unpreparedFileIndexes = getUnpreparedInscribeFileIndexes(files.length, preparedOrdersForCurrentWallet.map(order => ({ ...order, amount: order.receipt.amount })));
+  const unpreparedFileIndexes = getUnpreparedInscribeFileIndexes(files.length, preparedOrders.map(order => ({ ...order, amount: order.receipt.amount })));
   const unpreparedFiles = unpreparedFileIndexes.map(index => files[index]);
   const unpreparedBatches = useMemo(() => splitInscribeFilesIntoBatches(unpreparedFiles), [unpreparedFiles]);
-  const outstandingOrderTotal = getInscribeOrderTotalSats(preparedOrdersForCurrentWallet.filter(order => !["completed", "cancelled"].includes(order.status)).map(order => order.receipt));
+  const outstandingOrderTotal = getInscribeOrderTotalSats(preparedOrders.filter(order => !["completed", "cancelled"].includes(order.status)).map(order => order.receipt));
   const totalInscribed = orderFiles.filter(file => file.inscriptionId).length;
   const mobileDevice = isMobileUniSatDevice();
   const paymentPreflightKeyFor = (activeReceipt: InscribeReceipt) => JSON.stringify([
@@ -240,14 +228,9 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     mobilePaymentPreflight.key === paymentPreflightKeyFor(activeReceipt) &&
     Date.now() - mobilePaymentPreflight.checkedAt < 2 * 60 * 1000);
   const hasFreshMobilePaymentPreflight = Boolean(receipt && isMobilePaymentPreflightFresh(receipt));
-  const currentWalletHistory = useMemo(() => {
-    if (!eligibleWalletConnected) return [];
-    const expectedNetwork = chain?.enum === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin";
-    return inscriptionHistory.filter(item => item.walletAddress?.toLowerCase() === address.toLowerCase() && item.network === expectedNetwork);
-  }, [inscriptionHistory, eligibleWalletConnected, address, chain?.enum]);
   const historyGroups = useMemo(() => {
     const groups = new Map<string, InscriptionHistoryItem[]>();
-    for (const item of currentWalletHistory) { const group = groups.get(item.orderId) ?? []; group.push(item); groups.set(item.orderId, group); }
+    for (const item of inscriptionHistory) { const group = groups.get(item.orderId) ?? []; group.push(item); groups.set(item.orderId, group); }
     const valueFor = (item: InscriptionHistoryItem) => historySortKey === "date" ? item.createdAt : item[historySortKey];
     const compareItems = (left: InscriptionHistoryItem, right: InscriptionHistoryItem) => {
       const leftValue = valueFor(left);
@@ -261,14 +244,14 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     return result.sort((left, right) => historySortKey === "orderId"
       ? left.orderId.localeCompare(right.orderId, undefined, { numeric: true, sensitivity: "base" }) * (historySortDirection === "asc" ? 1 : -1)
       : compareItems(left.items[0], right.items[0]));
-  }, [currentWalletHistory, historySortKey, historySortDirection]);
+  }, [inscriptionHistory, historySortKey, historySortDirection]);
   const historyPageCount = Math.max(1, Math.ceil(historyGroups.length / HISTORY_PAGE_SIZE));
   const visibleHistoryGroups = historyGroups.slice(historyPage * HISTORY_PAGE_SIZE, (historyPage + 1) * HISTORY_PAGE_SIZE);
-  const historyStorageKey = eligibleWalletConnected ? historyStorageKeyFor(chain!.enum!, address, site) : "";
+  const historyStorageKey = address && chain?.enum ? historyStorageKeyFor(chain.enum, address) : "";
   const storePreparedOrders = (orders: PreparedOrder[], activeIndex: number) => {
     setPreparedOrders(orders);
     setActivePreparedIndex(activeIndex);
-    persistPreparedOrders(orders, activeIndex, site);
+    persistPreparedOrders(orders, activeIndex);
   };
   const updatePreparedOrderStatus = (orderId: string, nextStatus: PreparedOrderStatus) => {
     const updated = preparedOrders.map(order => order.receipt.orderId === orderId ? { ...order, status: nextStatus } : order);
@@ -276,12 +259,12 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     return updated;
   };
   const acknowledgeNoUnknownUniSatOrder = () => {
-    try { localStorage.removeItem(inscribeCreationUncertainStorageKey(site)); } catch { /* unavailable storage */ }
+    try { localStorage.removeItem(INSCRIBE_CREATION_UNCERTAIN_KEY); } catch { /* unavailable storage */ }
     setCreationUncertain(false);
     setMessage("Untracked order check acknowledged. You may prepare only after confirming UniSat has no additional receipt for the interrupted batch.");
   };
   const recordOrderHistory = (activeReceipt: InscribeReceipt, orderStatus: string, paymentTxid = "") => {
-    const activeHistoryKey = historyStorageKeyFor(activeReceipt.chain, activeReceipt.walletAddress, site);
+    const activeHistoryKey = historyStorageKeyFor(activeReceipt.chain, activeReceipt.walletAddress);
     const networkLabel = activeReceipt.chain === "BITCOIN_MAINNET" ? "Bitcoin" : activeReceipt.chain === "FRACTAL_BITCOIN_MAINNET" ? "Fractal Bitcoin" : activeReceipt.chain;
     const fileLabel = activeReceipt.files.slice(0, 3).map(file => file.filename).join(", ") + (activeReceipt.files.length > 3 ? ` +${activeReceipt.files.length - 3} files` : "");
     const orderRow: InscriptionHistoryItem = { inscriptionId: "", transactionId: paymentTxid || orderStatus, paymentTxid, filename: fileLabel || `${activeReceipt.files.length} file(s)`, orderId: activeReceipt.orderId, network: networkLabel, walletAddress: activeReceipt.walletAddress, createdAt: activeReceipt.createdAt, status: orderStatus, amountSats: activeReceipt.amount, fileCount: activeReceipt.files.length };
@@ -296,7 +279,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     if (activeHistoryKey === historyStorageKey) { setInscriptionHistory(merged); setHistoryPage(0); }
   };
   const saveCompletedHistory = (completedFiles: OrderFile[], activeReceipt: InscribeReceipt, paymentTxid: string) => {
-    const activeHistoryKey = historyStorageKeyFor(activeReceipt.chain, activeReceipt.walletAddress, site);
+    const activeHistoryKey = historyStorageKeyFor(activeReceipt.chain, activeReceipt.walletAddress);
     const inMemoryReceipt = paymentReceiptRef.current?.historyKey === activeHistoryKey && paymentReceiptRef.current.orderId === activeReceipt.orderId ? paymentReceiptRef.current.receipt : undefined;
     const finalPaymentReceipt = inMemoryReceipt ?? readSavedMempoolReceipt(activeHistoryKey, activeReceipt.orderId);
     const now = new Date().toISOString();
@@ -311,7 +294,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     try { localStorage.setItem(activeHistoryKey, JSON.stringify(merged)); localStorage.removeItem(mempoolPaymentStorageKey(activeHistoryKey, activeReceipt.orderId)); } catch { /* private mode or storage quota */ }
   };
   const recordFinalMempoolReceipt = (activeReceipt: InscribeReceipt, paymentReceipt: MempoolReceipt) => {
-    const key = historyStorageKeyFor(activeReceipt.chain, activeReceipt.walletAddress, site);
+    const key = historyStorageKeyFor(activeReceipt.chain, activeReceipt.walletAddress);
     const previous = paymentReceiptRef.current?.historyKey === key && paymentReceiptRef.current.orderId === activeReceipt.orderId ? paymentReceiptRef.current.receipt : readSavedMempoolReceipt(key, activeReceipt.orderId);
     const changed = !previous || previous.txid !== paymentReceipt.txid || previous.status !== paymentReceipt.status || previous.message !== paymentReceipt.message || previous.blockHeight !== paymentReceipt.blockHeight || previous.network !== paymentReceipt.network || previous.explorerUrl !== paymentReceipt.explorerUrl;
     paymentReceiptRef.current = { historyKey: key, orderId: activeReceipt.orderId, receipt: paymentReceipt };
@@ -397,8 +380,8 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
 
   useEffect(() => { void refreshWallet(); const listener = () => void refreshWallet(); window.unisat?.on?.("accountsChanged", listener); window.unisat?.on?.("chainChanged", listener); return () => { window.unisat?.removeListener?.("accountsChanged", listener); window.unisat?.removeListener?.("chainChanged", listener); }; }, []);
   useEffect(() => {
-    if (!eligibleWalletConnected) { setInscriptionHistory([]); setHistoryPage(0); setSelectedHistoryItem(null); setSelectedHistoryBatches([]); return; }
-    const key = historyStorageKeyFor(chain!.enum!, address, site);
+    if (!address || !chain?.enum) { setInscriptionHistory([]); setHistoryPage(0); setSelectedHistoryItem(null); setSelectedHistoryBatches([]); return; }
+    const key = `fractal-inscription-history:${chain.enum}:${address.toLowerCase()}`;
     const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - HISTORY_RETENTION_MONTHS);
     try {
       const stored = JSON.parse(localStorage.getItem(key) ?? "[]") as InscriptionHistoryItem[];
@@ -409,12 +392,10 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       setSelectedHistoryBatches([]);
       localStorage.setItem(key, JSON.stringify(valid));
     } catch { setInscriptionHistory([]); }
-  }, [address, chain?.enum, eligibleWalletConnected, site]);
+  }, [address, chain?.enum]);
   const chooseFiles = (next: File[]) => {
     const mobileDevice = isMobileUniSatDevice();
-    const savedMobileOrder = readActiveMobileOrder(site);
-    if (!eligibleWalletConnected) { setMessage("Connect a UniSat wallet on Bitcoin mainnet or Fractal Bitcoin mainnet before accessing inscription data."); return; }
-    if (!fileQueueAccessible || hasLockedPreparedOrders) { setMessage("Saved file or receipt data is locked to another wallet. Reconnect its eligible address before using it."); return; }
+    const savedMobileOrder = readActiveMobileOrder();
     if (!next.length) return;
     if (!mobileDevice && receipt && stage !== "completed") return setMessage("An Inscribe receipt is active. Complete, cancel, or review it before editing this queue.");
     const replaceCompletedReceipt = Boolean(receipt && stage === "completed" && files.length <= receipt.files.length);
@@ -427,49 +408,42 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     const plannedBatches = splitInscribeFilesIntoBatches(combined);
     const batchNotice = plannedBatches.length > 1 ? ` ${combined.length} fichiers répartis automatiquement en ${plannedBatches.length} lots; chaque lot aura son propre reçu et son approbation UniSat.` : "";
     if (receipt && stage === "completed" && replaceCompletedReceipt) {
-      setFilesForCurrentWallet(combined); setReceipt(null); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("idle");
-      setPreparedOrders([]); setActivePreparedIndex(0); persistPreparedOrders([], 0, site); clearActiveMobileOrder(site);
+      setFiles(combined); setReceipt(null); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("idle");
+      setPreparedOrders([]); setActivePreparedIndex(0); persistPreparedOrders([], 0); clearActiveMobileOrder();
       setMessage(`Le reçu précédent est terminé et conservé dans l’historique. Nouvelle file prête.${batchNotice}`); return;
     }
-    if (receipt && stage === "completed") { setFilesForCurrentWallet(combined); setMessage(batchNotice || "Les fichiers terminés restent dans l’historique; les nouveaux fichiers sont ajoutés à la file du prochain reçu."); return; }
+    if (receipt && stage === "completed") { setFiles(combined); setMessage(batchNotice || "Les fichiers terminés restent dans l’historique; les nouveaux fichiers sont ajoutés à la file du prochain reçu."); return; }
     if (mobileDevice && (receipt || savedMobileOrder)) {
-      setFilesForCurrentWallet(combined);
+      setFiles(combined);
       const paymentMayHaveStarted = Boolean(txid || savedMobileOrder?.txid || savedMobileOrder?.paymentStarted);
       setMessage(`${paymentMayHaveStarted ? "Files added to the local queue. The current receipt/payment remains intact; resume tracking before preparing another order." : "Files added to the local queue. The current receipt is unchanged; verify that no payment was sent, then clear only its local copy to prepare this new batch."}${batchNotice}`);
       return;
     }
     if (savedMobileOrder) return setMessage("A saved Inscribe receipt exists. Review or clear that receipt before creating a new order.");
-    setFilesForCurrentWallet(combined); setMessage(batchNotice); setStage("idle"); setReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]);
+    setFiles(combined); setMessage(batchNotice); setStage("idle"); setReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]);
   };
   const removeFile = (index: number) => {
-    if (!eligibleWalletConnected || !fileQueueAccessible) return setMessage("Connect the eligible wallet that owns this file queue before changing it.");
     if (!canRemoveInscribeQueueFile(index, stage, receipt?.files.length ?? null, ["preparing", "paying"].includes(stage))) return;
     setFiles(current => current.filter((_, currentIndex) => currentIndex !== index));
   };
   const clearFileQueue = () => {
-    if (!eligibleWalletConnected || !fileQueueAccessible) return setMessage("Connect the eligible wallet that owns this file queue before clearing it.");
     if (["preparing", "paying"].includes(stage) || (receipt && stage !== "completed")) return;
-    if (hasLockedPreparedOrders) return setMessage("This queue contains receipt data owned by another wallet. Reconnect that wallet before clearing it.");
     if (preparedOrders.some(order => !["completed", "cancelled"].includes(order.status))) return setMessage("A UniSat receipt is still pending. Review or cancel the order before clearing the local file queue.");
     setFiles([]);
-    setFileQueueWalletKey("");
     if (receipt && stage === "completed") { setReceipt(null); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("idle"); }
-    setPreparedOrders([]); setActivePreparedIndex(0); persistPreparedOrders([], 0, site); clearActiveMobileOrder(site);
+    setPreparedOrders([]); setActivePreparedIndex(0); persistPreparedOrders([], 0); clearActiveMobileOrder();
     setMessage("File queue cleared. Completed inscriptions remain in wallet history.");
   };
   const startNewInscribeOrder = () => {
-    if (!receipt || stage !== "completed" || !canCurrentWalletAccessReceipt(receipt)) return;
-    setFiles([]); setFileQueueWalletKey(""); setReceipt(null); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("idle");
-    setPreparedOrders([]); setActivePreparedIndex(0); persistPreparedOrders([], 0, site); clearActiveMobileOrder(site);
+    if (!receipt || stage !== "completed") return;
+    setFiles([]); setReceipt(null); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("idle");
+    setPreparedOrders([]); setActivePreparedIndex(0); persistPreparedOrders([], 0); clearActiveMobileOrder();
     setMessage("Previous Inscribe order remains in history. Choose files to start a new order.");
   };
   const prepareOrder = async () => {
-    if (!eligibleWalletConnected) return setMessage("Connect an eligible UniSat wallet on Bitcoin mainnet or Fractal Bitcoin mainnet first.");
-    if (!fileQueueAccessible || hasLockedPreparedOrders) return setMessage("This file or receipt queue is locked to another wallet. Reconnect its owner before preparing an order.");
     const provider = window.unisat;
     const mobileUniSat = isMobileUniSatDevice();
-    const saved = readActiveMobileOrder(site);
-    if (saved && !canCurrentWalletAccessReceipt(saved.receipt)) return setMessage("A saved receipt is locked to another wallet or network. Reconnect its eligible UniSat account to continue.");
+    const saved = readActiveMobileOrder();
     if (saved) {
       return setMessage("A saved Inscribe order exists. Review its receipt before resuming; no new order was created.");
     }
@@ -485,7 +459,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     if (mode === "alkanes-deploy" && !submissionFiles.length) return setMessage("Add at least one file to inscribe.");
     const submissionBatches = submissionFiles.length ? splitInscribeFilesIntoBatches(submissionFiles) : [[] as File[]];
     let protocol: Record<string, unknown> | undefined;
-    if (mode.startsWith("brc20-")) {
+    if (mode === "brc20") {
       if (!/^[A-Za-z0-9]{1,32}$/.test(ticker)) return setMessage("Enter a valid BRC-20 ticker.");
       if (brc20Operation === "deploy") {
         if (!/^\d{1,80}$/.test(brc20Max) || !/^\d{1,80}$/.test(brc20Limit) || !/^\d+$/.test(brc20Decimals) || Number(brc20Decimals) > 18) return setMessage("Enter a valid BRC-20 maximum supply, per-mint limit, and decimals (0–18).");
@@ -567,7 +541,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
           throw new Error(created.error || `UniSat did not verify receipt ${batchIndex + 1}/${submissionBatches.length}.`);
         }
         const feeSourceLabel = describeFeeSources(created.feeStrategy ?? feeEstimate.strategy, created.feeSources ?? feeEstimate.sources);
-        const receiptFiles = batchFiles.length ? batchFiles.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })) : [{ filename: mode.startsWith("brc20-") ? `brc20-${brc20Operation}-${ticker}.json` : mode === "runes-etch" ? "runes-etch.json" : mode === "runes-mint" ? "runes-mint.json" : mode === "alkanes-deploy" ? "alkanes-deploy-payload" : "alkanes-mint.json", size: 0, type: "Protocol inscription" }];
+        const receiptFiles = batchFiles.length ? batchFiles.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })) : [{ filename: mode === "brc20" ? `brc20-${brc20Operation}-${ticker}.json` : mode === "runes-etch" ? "runes-etch.json" : mode === "runes-mint" ? "runes-mint.json" : mode === "alkanes-deploy" ? "alkanes-deploy-payload" : "alkanes-mint.json", size: 0, type: "Protocol inscription" }];
         const newReceipt: InscribeReceipt = { orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: receiptFiles, feeRate: Number(created.feeRate), paymentFeeRate: liveFeeRate, feeSourceLabel, chain: activeChainEnum, walletAddress: activeAddress, createdAt: new Date().toISOString() };
         requestMayHaveCreatedUntrackedOrder = false;
         ordersBeingPrepared = [...ordersBeingPrepared, { receipt: newReceipt, fileIndexes: batchFileIndexes, status: "awaiting-payment" }];
@@ -583,7 +557,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
         setMobilePaymentPreflight({ key: paymentPreflightKeyFor(firstNewOrder.receipt), checkedAt: Date.now() });
       }
       setReceipt(firstNewOrder.receipt);
-      saveActiveMobileOrder(firstNewOrder.receipt, "", false, site);
+      saveActiveMobileOrder(firstNewOrder.receipt);
       setTxid("");
       setInscriptionIds([]);
       setOrderFiles([]);
@@ -593,7 +567,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     } catch (error) {
       if (requestMayHaveCreatedUntrackedOrder) {
         setCreationUncertain(true);
-        try { localStorage.setItem(inscribeCreationUncertainStorageKey(site), "true"); } catch { /* unavailable storage */ }
+        try { localStorage.setItem(INSCRIBE_CREATION_UNCERTAIN_KEY, "true"); } catch { /* unavailable storage */ }
       }
       const newlyCreated = ordersBeingPrepared.slice(startingOrderIndex);
       if (newlyCreated.length) {
@@ -601,8 +575,8 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
         setMobilePaymentPreflight(null);
         setReceipt(firstNewOrder.receipt);
         setActivePreparedIndex(startingOrderIndex);
-        persistPreparedOrders(ordersBeingPrepared, startingOrderIndex, site);
-        saveActiveMobileOrder(firstNewOrder.receipt, "", false, site);
+        persistPreparedOrders(ordersBeingPrepared, startingOrderIndex);
+        saveActiveMobileOrder(firstNewOrder.receipt);
         setTxid("");
         setStage("awaiting-approval");
         setMessage(`${newlyCreated.length} receipt(s) created before preparation stopped. The created receipts are saved and no payment was started. ${requestMayHaveCreatedUntrackedOrder ? "The interrupted batch may also have created an order; check UniSat before retrying it." : ""} Approve or cancel these orders first; then prepare the still-unreceipted files. Details: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -626,21 +600,21 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       if (data.files) { setOrderFiles(data.files); setInscriptionIds(data.files.map(file => file.inscriptionId).filter((id): id is string => Boolean(id))); }
       if (["minted", "completed", "success"].includes(nextStatus)) {
         saveCompletedHistory(data.files ?? [], activeReceipt, paymentTxid);
-        clearActiveMobileOrder(site);
+        clearActiveMobileOrder();
         const updatedOrders = updatePreparedOrderStatus(activeReceipt.orderId, "completed");
         const completedIndex = updatedOrders.findIndex(order => order.receipt.orderId === activeReceipt.orderId);
         const nextIndex = updatedOrders.findIndex((order, index) => index > completedIndex && order.status === "awaiting-payment");
         if (nextIndex >= 0) {
           const nextOrder = updatedOrders[nextIndex];
           setActivePreparedIndex(nextIndex);
-          persistPreparedOrders(updatedOrders, nextIndex, site);
+          persistPreparedOrders(updatedOrders, nextIndex);
           setReceipt(nextOrder.receipt);
           setTxid("");
           setStatus("");
           setFinalReceipt(null);
           setOrderFiles([]);
           setInscriptionIds([]);
-          saveActiveMobileOrder(nextOrder.receipt, "", false, site);
+          saveActiveMobileOrder(nextOrder.receipt);
           setStage("awaiting-approval");
           setMessage(`Receipt ${completedIndex + 1}/${updatedOrders.length} is complete. Receipt ${nextIndex + 1}/${updatedOrders.length} is ready for separate approval: ${nextOrder.receipt.amount.toLocaleString()} sats to ${nextOrder.receipt.payAddress}, plus UniSat wallet fees. No next payment has been sent.`);
           return;
@@ -657,7 +631,6 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   };
   const resumeOrderTracking = async () => {
     if (!receipt || !txid) return;
-    if (!canCurrentWalletAccessReceipt(receipt)) return setMessage("Only the eligible wallet and network that own this receipt can resume its tracking.");
     setStage("tracking"); setMessage("Resuming tracking of the existing payment — no new payment will be sent.");
     try { await pollOrder(receipt.orderId, txid, receipt.chain, receipt); }
     catch (error) { setMessage(`Payment was already sent. Do not pay again. UniSat tracking: ${error instanceof Error ? error.message : "indisponible"}`); }
@@ -677,7 +650,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       returnedPaymentTxid = normalizedTxid;
       setTxid(normalizedTxid);
       updatePreparedOrderStatus(activeReceipt.orderId, "payment-sent");
-      saveActiveMobileOrder(activeReceipt, normalizedTxid, false, site);
+      saveActiveMobileOrder(activeReceipt, normalizedTxid);
       recordOrderHistory(activeReceipt, "payment-sent", normalizedTxid);
       const initialPaymentReceipt: MempoolReceipt = { txid: normalizedTxid, network: activeReceipt.chain === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin", status: "checking", message: "Payment approved. Searching Mempool…", blockHeight: null, explorerUrl: "", checkedAt: new Date().toISOString() };
       recordFinalMempoolReceipt(activeReceipt, initialPaymentReceipt);
@@ -699,7 +672,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       if (mobileUtxoGuidance && !canceled) {
         if (mobileUtxoGuidance.definitelyNotBroadcast) {
           updatePreparedOrderStatus(activeReceipt.orderId, "awaiting-payment");
-          saveActiveMobileOrder(activeReceipt, "", false, site);
+          saveActiveMobileOrder(activeReceipt, "", false);
           recordOrderHistory(activeReceipt, "awaiting-payment");
           setStage("awaiting-approval");
         } else {
@@ -710,7 +683,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
         setMessage(`${mobileUtxoGuidance.message} UniSat detail : ${detail}`);
         return;
       }
-      if (canceled) { updatePreparedOrderStatus(activeReceipt.orderId, "awaiting-payment"); saveActiveMobileOrder(activeReceipt, "", false, site); recordOrderHistory(activeReceipt, "approval-cancelled"); }
+      if (canceled) { updatePreparedOrderStatus(activeReceipt.orderId, "awaiting-payment"); saveActiveMobileOrder(activeReceipt, "", false); recordOrderHistory(activeReceipt, "approval-cancelled"); }
       const mayHaveBeenSent = paymentReturned || !canceled;
       if (mayHaveBeenSent) { updatePreparedOrderStatus(activeReceipt.orderId, "payment-sent"); recordOrderHistory(activeReceipt, "payment-uncertain"); }
       setStage(mayHaveBeenSent ? "tracking" : "awaiting-approval");
@@ -746,7 +719,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     const provider = window.unisat;
     if (!receipt) return setMessage("Aucune commande d’inscription n’est en attente d’approbation.");
     if (!provider?.sendBitcoin) return setMessage("This UniSat version does not provide sendBitcoin; no payment was started.");
-    if (!canCurrentWalletAccessReceipt(receipt)) return setMessage("The connected eligible wallet does not own this receipt; no payment was started.");
+    if (chain?.enum !== receipt.chain || address !== receipt.walletAddress) return setMessage("The UniSat account or network changed after the receipt was created; no payment was started.");
     if (mobileDevice && !isMobilePaymentPreflightFresh(receipt)) {
       setMobilePaymentPreflight(null);
       return setMessage("Safe-balance verification is missing or expired. Tap “Verify safe balance” again; no payment was started.");
@@ -756,7 +729,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     setStage("paying");
     setMessage(`Opening sendBitcoin in UniSat. Verify ${receipt.amount.toLocaleString()} sats to ${receipt.payAddress} and the fees displayed by the wallet before approving.`);
     updatePreparedOrderStatus(receipt.orderId, "payment-review");
-    saveActiveMobileOrder(receipt, "", true, site);
+    saveActiveMobileOrder(receipt, "", true);
     recordOrderHistory(receipt, "payment-review");
     let paymentPromise: Promise<string>;
     try {
@@ -765,7 +738,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     } catch (error) {
       if (mobileDevice) setMobilePaymentPreflight(null);
       updatePreparedOrderStatus(receipt.orderId, isWalletCancellation(error) ? "awaiting-payment" : "payment-sent");
-      saveActiveMobileOrder(receipt, "", false, site);
+      saveActiveMobileOrder(receipt, "", false);
       recordOrderHistory(receipt, isWalletCancellation(error) ? "approval-cancelled" : "awaiting-payment");
       setStage("awaiting-approval");
       const mobileUtxoGuidance = isMobileUniSatDevice() ? getMobileUtxoErrorGuidance(error, "inscribe-payment") : null;
@@ -783,28 +756,24 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       setMessage("This receipt cannot be reopened for payment. Check UniSat activity before continuing.");
       return;
     }
-    if (!canCurrentWalletAccessReceipt(receipt)) {
-      setMessage("Reconnect the same eligible UniSat wallet and network as this receipt before restoring payment approval.");
+    if (chain?.enum !== receipt.chain || address !== receipt.walletAddress) {
+      setMessage("Reconnect the same UniSat wallet and network as this receipt before restoring payment approval.");
       return;
     }
-    const saved = readActiveMobileOrder(site);
+    const saved = readActiveMobileOrder();
     if (saved && (saved.receipt.orderId !== receipt.orderId || saved.txid)) {
       setMessage("The saved receipt does not match or already has a TXID. Do not send again.");
       return;
     }
     setMobilePaymentPreflight(null);
     updatePreparedOrderStatus(receipt.orderId, "awaiting-payment");
-    saveActiveMobileOrder(receipt, "", false, site);
+    saveActiveMobileOrder(receipt, "", false);
     setStage("awaiting-approval");
     setMessage("Approval is available again for this same receipt. Tap Approve payment in UniSat only after confirming no payment was sent.");
   };
   const cancelUnpaidOrder = async () => {
     if (!receipt || txid || !["awaiting-approval", "tracking"].includes(stage)) {
       setMessage("Cette commande ne peut pas être annulée ici. Vérifiez d’abord UniSat et Mempool; aucun paiement ne sera renvoyé.");
-      return;
-    }
-    if (!canCurrentWalletAccessReceipt(receipt)) {
-      setMessage("Only the eligible wallet and network that own this receipt can cancel it.");
       return;
     }
     if (stage === "tracking") {
@@ -822,7 +791,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       const result = await response.json().catch(() => ({})) as { cancelled?: boolean; error?: string };
       if (!response.ok || result.cancelled !== true) throw new Error(result.error || "UniSat n’a pas confirmé l’annulation.");
       recordOrderHistory(receipt, "cancelled");
-      clearActiveMobileOrder(site);
+      clearActiveMobileOrder();
       setMobilePaymentPreflight(null);
       const updatedOrders = updatePreparedOrderStatus(receipt.orderId, "cancelled");
       const cancelledIndex = updatedOrders.findIndex(order => order.receipt.orderId === receipt.orderId);
@@ -830,9 +799,9 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       if (nextIndex >= 0) {
         const nextOrder = updatedOrders[nextIndex];
         setActivePreparedIndex(nextIndex);
-        persistPreparedOrders(updatedOrders, nextIndex, site);
+        persistPreparedOrders(updatedOrders, nextIndex);
         setReceipt(nextOrder.receipt); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("awaiting-approval");
-        saveActiveMobileOrder(nextOrder.receipt, "", false, site);
+        saveActiveMobileOrder(nextOrder.receipt);
         setMessage(`The current unpaid UniSat order was canceled. Receipt ${nextIndex + 1}/${updatedOrders.length} remains ready; review and approve it separately, or cancel it in UniSat.`);
       } else {
         setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("completed");
@@ -845,12 +814,11 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     }
   };
   const reviewSavedMobileOrder = () => {
-    const saved = readActiveMobileOrder(site);
-    const savedQueue = readPreparedOrders(site);
+    const saved = readActiveMobileOrder();
+    const savedQueue = readPreparedOrders();
     const activeOrder = savedQueue?.orders[savedQueue.activeIndex];
     const savedReceipt = saved?.receipt ?? activeOrder?.receipt;
     if (!savedReceipt) return setMessage("No saved Inscribe receipt is available.");
-    if (!canCurrentWalletAccessReceipt(savedReceipt)) return setMessage("Saved receipt data is locked. Reconnect the same eligible UniSat wallet and network to review it.");
     if (savedQueue) {
       setPreparedOrders(savedQueue.orders);
       setActivePreparedIndex(savedQueue.activeIndex);
@@ -863,15 +831,14 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     setMessage(savedTxid ? "Saved receipt displayed. Resume tracking without restarting payment." : paymentMayHaveStarted ? "A payment may have started for this saved receipt. Verify UniSat activity before any other action; no second payment will be sent." : `Saved UniSat receipt ${savedQueue ? `${savedQueue.activeIndex + 1}/${savedQueue.orders.length}` : ""} displayed. No payment is recorded as started.`);
   };
   const clearUnpaidMobileReceipt = () => {
-    const saved = readActiveMobileOrder(site);
-    if ((receipt && !canCurrentWalletAccessReceipt(receipt)) || (saved && !canCurrentWalletAccessReceipt(saved.receipt))) return setMessage("This saved receipt is locked to its owner. Reconnect the same eligible UniSat wallet and network before clearing it.");
+    const saved = readActiveMobileOrder();
     const inMemoryUnpaidReceipt = Boolean(receipt && stage === "awaiting-approval" && !txid);
     if ((saved && receipt && saved.receipt.orderId !== receipt.orderId) || saved?.txid || saved?.paymentStarted || txid || (!saved && !inMemoryUnpaidReceipt)) {
       setMessage("This receipt may correspond to a payment attempt. Check UniSat and resume tracking; nothing was cleared.");
       return;
     }
     const receiptToClear = receipt ?? saved?.receipt;
-    if (saved && !clearActiveMobileOrder(site)) {
+    if (saved && !clearActiveMobileOrder()) {
       setMessage("The saved receipt could not be cleared from this browser. No file or order was modified.");
       return;
     }
@@ -881,7 +848,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     setMessage(`Unpaid receipt cleared from this device only. The UniSat order may still exist; ${files.length ? `${files.length} fichier(s) choisi(s) conservé(s).` : "vous pouvez maintenant choisir des fichiers."}`);
   };
   const prepareNextBatch = () => {
-    if (stage !== "completed" || !receipt || !unpreparedFileIndexes.length || !canCurrentWalletAccessReceipt(receipt)) return;
+    if (stage !== "completed" || !receipt || !unpreparedFileIndexes.length) return;
     setMobilePaymentPreflight(null);
     setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]);
     void prepareOrder();
@@ -902,35 +869,29 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = item.inscriptionId ? `inscription-${item.inscriptionId}.txt` : `inscription-order-${item.orderId.replace(/[^a-zA-Z0-9_-]/g, "_")}.txt`; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
-  const canApprovePayment = Boolean(receipt && canCurrentWalletAccessReceipt(receipt) && (receipt.paymentFeeRate ?? receipt.feeRate) > 0 && receipt.amount > 0 && receipt.payAddress);
+  const canApprovePayment = Boolean(receipt && (receipt.paymentFeeRate ?? receipt.feeRate) > 0 && receipt.amount > 0 && receipt.payAddress);
   const busy = ["preparing", "paying"].includes(stage) || mobilePreflightBusy;
-  const savedMobileOrder = readActiveMobileOrder(site);
-  const savedMobileOrderAccessible = Boolean(savedMobileOrder && canCurrentWalletAccessReceipt(savedMobileOrder.receipt));
-  const receiptAccessible = canCurrentWalletAccessReceipt(receipt);
-  const hasUnresolvedPreparedOrders = preparedOrdersForCurrentWallet.some(order => !["completed", "cancelled"].includes(order.status));
-  const canClearUnpaidMobileReceipt = Boolean(eligibleWalletConnected && !busy && !txid && (savedMobileOrderAccessible ? (!savedMobileOrder?.txid && !savedMobileOrder?.paymentStarted && (!receipt || savedMobileOrder?.receipt.orderId === receipt.orderId)) : (receiptAccessible && receipt && stage === "awaiting-approval")));
-  const fileSelectionLocked = !eligibleWalletConnected || !fileQueueAccessible || hasLockedPreparedOrders || busy || Boolean(savedMobileOrder && !receipt) || Boolean(hasUnresolvedPreparedOrders && !receipt) || (!mobileDevice && Boolean(receipt) && stage !== "completed");
+  const savedMobileOrder = readActiveMobileOrder();
+  const hasUnresolvedPreparedOrders = preparedOrders.some(order => !["completed", "cancelled"].includes(order.status));
+  const canClearUnpaidMobileReceipt = Boolean(!busy && !txid && (savedMobileOrder ? (!savedMobileOrder.txid && !savedMobileOrder.paymentStarted && (!receipt || savedMobileOrder.receipt.orderId === receipt.orderId)) : (receipt && stage === "awaiting-approval")));
+  const fileSelectionLocked = busy || Boolean(savedMobileOrder && !receipt) || Boolean(hasUnresolvedPreparedOrders && !receipt) || (!mobileDevice && Boolean(receipt) && stage !== "completed");
   const fileSelectionAllowed = mode === "files" || mode === "runes-etch" || mode === "alkanes-deploy";
-  const canPrepareOrder = eligibleWalletConnected && fileQueueAccessible && (mode === "files" ? unpreparedFileIndexes.length > 0 : mode === "alkanes-deploy" ? files.length > 0 : true);
+  const canPrepareOrder = mode === "files" ? unpreparedFileIndexes.length > 0 : mode === "alkanes-deploy" ? files.length > 0 : true;
   return <>
     <button id="inscribe-start" type="button" onClick={() => setOpen(true)} className="inline-flex min-h-11 scroll-mt-16 items-center gap-2 border border-[#d99a54] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63] hover:bg-[#d99a54]/10"><FilePlus2 size={13} /> Inscribe files</button>
     {open && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#07090c]/80 p-4" onClick={event => { if (event.target === event.currentTarget) setOpen(false); }} role="dialog" aria-modal="true" aria-labelledby="inscribe-modal-title" data-transaction-dialog><div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto border border-[#3b434d] bg-[#14191f] p-5 shadow-2xl">
       <div className="flex items-start justify-between gap-4"><div><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#d99a54]">{chain?.enum === "BITCOIN_MAINNET" ? "Bitcoin" : chain?.enum === "FRACTAL_BITCOIN_MAINNET" ? "Fractal Bitcoin" : "Bitcoin / Fractal Bitcoin"} Ordinals · UniSat approved</p><h2 id="inscribe-modal-title" className="mt-2 font-display text-2xl text-[#f3efe5]">Inscribe files dashboard</h2></div><button type="button" onClick={() => setOpen(false)} className="p-2 text-[#9ea7b3] hover:text-[#f3efe5]" aria-label="Close"><X size={18} /></button></div>
       <p className="mt-2 font-mono text-[10px] leading-5 text-[#7f8b99]">Images, text, HTML, JSON, SVG, audio, video, PDF, and binary files are accepted. Each file must stay within the UniSat 365 KB limit.</p>
-      {!eligibleWalletConnected && <p className="mt-3 border border-[#a45e54]/60 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#ffb8aa]" role="status">Connect an eligible UniSat wallet on Bitcoin mainnet or Fractal Bitcoin mainnet. Receipt and history data are shown only to the matching wallet and network.</p>}
-      {(savedMobileOrder && !savedMobileOrderAccessible || hasLockedPreparedOrders) && <p className="mt-3 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="status">A saved receipt is locked to its owner. Connect the same eligible UniSat wallet and network to review it; no payment or cancellation is available to another wallet.</p>}
-      {files.length > 0 && (!fileQueueAccessible || hasLockedPreparedOrders) && <p className="mt-3 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="status">The selected file queue is hidden until its eligible owner wallet and network are reconnected.</p>}
-
-      <div className="mt-5 grid gap-2 sm:grid-cols-4"><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Files</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{fileQueueAccessible ? files.length : "Locked"} / {MAX_FILES}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">{fileBatches.length ? `${fileBatches.length} receipt batch${fileBatches.length === 1 ? "" : "es"}` : "No batch yet"}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Total size</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{fileQueueAccessible ? formatBytes(totalBytes) : "Locked"}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">JSON estimé: {fileQueueAccessible ? formatBytes(estimateInscribeRequestBytes(files)) : "Locked"}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Network</p><p className="mt-1 truncate font-mono text-xs text-[#f2bd63]">{chain?.name ?? chain?.enum}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Live status</p><p className="mt-1 font-mono text-xs text-[#f2bd63]">{status ? describeStatus(status) : "Ready"}</p></div></div>
-{receipt && !receiptAccessible && <p className="mt-3 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="status">This receipt is locked. Reconnect the same eligible UniSat wallet and network to view or act on it.</p>}
-      {(savedMobileOrderAccessible || preparedOrdersForCurrentWallet.length > 0) && !receipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="status"><p>A saved Inscribe receipt queue exists. It will not open automatically. Review it to resume the same UniSat orders; do not prepare duplicates. If a payment may have been sent, check wallet activity before continuing.</p><div className="mt-2 flex flex-wrap gap-2">{canClearUnpaidMobileReceipt && <button type="button" onClick={clearUnpaidMobileReceipt} className="border border-[#e0b45f]/60 px-3 py-2 underline">I verified that no payment was sent — clear local receipt</button>}</div></div>}
+      <div className="mt-5 grid gap-2 sm:grid-cols-4"><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Files</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{files.length} / {MAX_FILES}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">{fileBatches.length ? `${fileBatches.length} receipt batch${fileBatches.length === 1 ? "" : "es"}` : "No batch yet"}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Total size</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{formatBytes(totalBytes)}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">JSON estimé: {formatBytes(estimateInscribeRequestBytes(files))}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Network</p><p className="mt-1 truncate font-mono text-xs text-[#f2bd63]">{chain?.name ?? chain?.enum}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Live status</p><p className="mt-1 font-mono text-xs text-[#f2bd63]">{status ? describeStatus(status) : "Ready"}</p></div></div>
+{(savedMobileOrder || preparedOrders.length > 0) && !receipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="status"><p>A saved Inscribe receipt queue exists. It will not open automatically. Review it to resume the same UniSat orders; do not prepare duplicates. If a payment may have been sent, check wallet activity before continuing.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={reviewSavedMobileOrder} className="border border-[#e0b45f]/60 px-3 py-2 underline">Review saved receipt queue</button>{canClearUnpaidMobileReceipt && <button type="button" onClick={clearUnpaidMobileReceipt} className="border border-[#e0b45f]/60 px-3 py-2 underline">I verified that no payment was sent — clear local receipt</button>}</div></div>}
       {creationUncertain && <div className="mt-4 border border-[#a45e54]/70 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#ffb8aa]" role="alert"><p>The last request to UniSat was interrupted. UniSat may have created an unpaid order even though this page did not receive its ID. Do not retry that batch until you inspect UniSat order activity.</p><button type="button" onClick={acknowledgeNoUnknownUniSatOrder} className="mt-2 border border-[#a45e54]/70 px-3 py-2 underline">I checked UniSat and confirmed no extra order exists</button></div>}
       <div role="tablist" aria-label="Inscription type" className="mt-4 flex gap-1 overflow-x-auto border-b border-[#2c323a]">
         {([
-          ["files", "Files"], ["brc20-deploy", "BRC-20 Deploy"], ["brc20-mint", "BRC-20 Mint"], ["brc20-transfer", "BRC-20 Transfer"], ["runes-etch", "Etch Rune"], ["runes-mint", "Mint Rune"], ["alkanes-deploy", "Deploy Alkane"], ["alkanes-mint", "Mint Alkane"],
-        ] as Array<[InscribeMode, string]>).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={mode === value} disabled={hasUnresolvedPreparedOrders || (preparedOrdersForCurrentWallet.some(order => order.fileIndexes.length > 0) && unpreparedFileIndexes.length > 0 && value !== "files")} onClick={() => { setMode(value); setMessage(""); }} className={`min-h-10 shrink-0 border-b-2 px-3 font-mono text-[9px] uppercase disabled:opacity-40 ${mode === value ? "border-[#d99a54] text-[#f2bd63]" : "border-transparent text-[#718092] hover:text-[#d9d3c6]"}`}>{label}</button>)}
+          ["files", "Files"], ["brc20", "BRC-20"], ["runes-etch", "Etch Rune"], ["runes-mint", "Mint Rune"], ["alkanes-deploy", "Deploy Alkane"], ["alkanes-mint", "Mint Alkane"],
+        ] as Array<[InscribeMode, string]>).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={mode === value} disabled={hasUnresolvedPreparedOrders || (preparedOrders.some(order => order.fileIndexes.length > 0) && unpreparedFileIndexes.length > 0 && value !== "files")} onClick={() => { setMode(value); setMessage(""); }} className={`min-h-10 shrink-0 border-b-2 px-3 font-mono text-[9px] uppercase disabled:opacity-40 ${mode === value ? "border-[#d99a54] text-[#f2bd63]" : "border-transparent text-[#718092] hover:text-[#d9d3c6]"}`}>{label}</button>)}
       </div>
-      {mode.startsWith("brc20-") && <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      {mode === "brc20" && <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <label className="font-mono text-[9px] uppercase text-[#718092]">Operation<select value={brc20Operation} onChange={event => setBrc20Operation(event.target.value as typeof brc20Operation)} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]"><option value="deploy">Deploy</option><option value="mint">Mint</option><option value="transfer">Create transfer inscription</option></select></label>
         <label className="font-mono text-[9px] uppercase text-[#718092]">Ticker<input value={ticker} onChange={event => setTicker(event.target.value)} maxLength={32} autoComplete="off" className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]" /></label>
         {brc20Operation === "deploy" ? <>
           <label className="font-mono text-[9px] uppercase text-[#718092]">Maximum supply<input value={brc20Max} onChange={event => setBrc20Max(event.target.value)} inputMode="numeric" maxLength={80} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]" /></label>
@@ -953,24 +914,24 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       {mode === "alkanes-deploy" && <p className="mt-4 border border-[#3b434d] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">Upload the Alkanes deployment payload file below. UniSat V5 quotes and creates the order; review the exact payload and amount before approving payment.</p>}
       {mode === "alkanes-mint" && <div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="font-mono text-[9px] uppercase text-[#718092]">Alkane ID<input value={alkaneid} onChange={event => setAlkaneid(event.target.value)} maxLength={42} placeholder="block:tx" className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]" /></label><label className="font-mono text-[9px] uppercase text-[#718092]">Mint count<input value={mintCount} onChange={event => setMintCount(event.target.value)} inputMode="numeric" type="number" min={1} max={1000} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]" /></label></div>}
 
-{canClearUnpaidMobileReceipt && receipt && receiptAccessible && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]"><p>Confirm that no payment was sent before adding new files. This clears the receipt from this device; it does not cancel the pending UniSat order.</p><button type="button" onClick={clearUnpaidMobileReceipt} className="mt-2 border border-[#e0b45f]/60 px-3 py-2 underline">I verified that no payment was sent — clear local receipt</button></div>}
-{fileSelectionAllowed ? <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); chooseFiles(Array.from(event.dataTransfer.files ?? [])); }} className={`${mobileDevice ? "relative " : ""}mt-5 flex cursor-pointer flex-col items-center justify-center border border-dashed border-[#d99a54]/70 bg-[#10151a] px-5 py-8 text-center hover:bg-[#d99a54]/5`}><Upload size={22} className="text-[#d99a54]" /><span className="mt-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#d9d3c6]">{mobileDevice ? "Tap here to choose files" : mode === "runes-etch" ? "Drop an optional Rune artwork file" : "Drop or add files to inscribe"}</span><span className="mt-2 font-mono text-[10px] text-[#718092]">Maximum {MAX_FILES} files per inscription · 365 KB per file · multiple selection</span><input ref={filePickerRef} type="file" multiple accept="*/*" className={mobileDevice ? "absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0" : "sr-only"} disabled={fileSelectionLocked} onChange={event => { const selected = Array.from(event.currentTarget.files ?? []); chooseFiles(selected); if (mobileDevice) event.currentTarget.value = ""; }} /></label> : files.length > 0 && <p className="mt-5 border border-[#3b434d] p-3 font-mono text-[10px] leading-5 text-[#718092]">The existing file queue is retained locally and will not be included in this protocol-only order.</p>}
+{canClearUnpaidMobileReceipt && receipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]"><p>Confirm that no payment was sent before adding new files. This clears the receipt from this device; it does not cancel the pending UniSat order.</p><button type="button" onClick={clearUnpaidMobileReceipt} className="mt-2 border border-[#e0b45f]/60 px-3 py-2 underline">I verified that no payment was sent — clear local receipt</button></div>}
+{fileSelectionAllowed ? <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); chooseFiles(Array.from(event.dataTransfer.files ?? [])); }} className={`${mobileDevice ? "relative " : ""}mt-5 flex cursor-pointer flex-col items-center justify-center border border-dashed border-[#d99a54]/70 bg-[#10151a] px-5 py-8 text-center hover:bg-[#d99a54]/5`}><Upload size={22} className="text-[#d99a54]" /><span className="mt-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#d9d3c6]">{mobileDevice ? "Tap here to choose files" : mode === "runes-etch" ? "Drop an optional Rune artwork file" : "Drop or add files to inscribe"}</span><span className="mt-2 font-mono text-[10px] text-[#718092]">Maximum {MAX_FILES} files · 365 KB per file · multiple selection</span><input ref={filePickerRef} type="file" multiple accept="*/*" className={mobileDevice ? "absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0" : "sr-only"} disabled={fileSelectionLocked} onChange={event => { const selected = Array.from(event.currentTarget.files ?? []); chooseFiles(selected); if (mobileDevice) event.currentTarget.value = ""; }} /></label> : files.length > 0 && <p className="mt-5 border border-[#3b434d] p-3 font-mono text-[10px] leading-5 text-[#718092]">The existing file queue is retained locally and will not be included in this protocol-only order.</p>}
       {fileLoadProgress.total > 0 && stage === "preparing" && <div className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3" role="status" aria-live="polite"><div className="flex items-center justify-between gap-3 font-mono text-[10px] uppercase text-[#f2bd63]"><span>Chargement des fichiers</span><span>{fileLoadProgress.completed} / {fileLoadProgress.total}</span></div><div className="mt-2 h-1.5 overflow-hidden bg-[#2c323a]"><div className="h-full bg-[#d99a54] transition-[width] duration-150" style={{ width: `${Math.round((fileLoadProgress.completed / fileLoadProgress.total) * 100)}%` }} /></div></div>}
-      {files.length > 0 && fileQueueAccessible && <div className="mt-4 overflow-hidden border border-[#3b434d] bg-[#10151a]"><div className="flex items-center justify-between border-b border-[#3b434d] px-3 py-2"><span className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#d9d3c6]"><Files size={13} /> File queue</span><button type="button" disabled={busy || Boolean(receipt && receiptAccessible && stage !== "completed") || hasUnresolvedPreparedOrders} onClick={clearFileQueue} className="font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">{receipt && receiptAccessible && stage === "completed" ? "Clear completed queue" : "Vider"}</button></div><div className="max-h-48 overflow-y-auto">{files.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 border-b border-[#2c323a] px-3 py-2 last:border-b-0"><div className="min-w-0"><p className="truncate font-mono text-[10px] text-[#d9d3c6]">{index + 1}. {file.name}</p><p className="font-mono text-[9px] text-[#718092]">{fileKind(file)} · {formatBytes(file.size)}</p></div><button type="button" disabled={!canRemoveInscribeQueueFile(index, stage, receipt?.files.length ?? null, busy)} onClick={() => removeFile(index)} className="shrink-0 font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">Retirer</button></div>)}</div></div>}
-      {fileQueueAccessible && fileBatches.length > 1 && <p className="mt-3 border border-[#d99a54]/50 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#f2bd63]" role="status">The selected files require {fileBatches.length} UniSat receipts because of the request-size limit. “Prepare all receipts” uploads every batch and obtains its unpaid quote first. You will then approve each receipt separately in UniSat; no payment is sent during preparation.</p>}
-      {preparedOrdersForCurrentWallet.length > 0 && <section className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3" aria-label="Prepared UniSat receipt queue"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63]">UniSat receipts prepared · {preparedOrdersForCurrentWallet.length}</h3><p className="font-mono text-[10px] text-[#d9d3c6]">Outstanding order amount: {outstandingOrderTotal.toLocaleString()} sats · plus wallet fees</p></div><p className="mt-1 font-mono text-[9px] leading-4 text-[#9ea7b3]">No payment is sent until you approve a receipt. Each receipt is reviewed and paid separately in UniSat.</p><div className="mt-2 max-h-40 space-y-1 overflow-y-auto">{preparedOrdersForCurrentWallet.map((order, index) => <div key={order.receipt.orderId} className={`flex flex-wrap items-center justify-between gap-2 border px-2 py-1.5 font-mono text-[9px] ${index === activePreparedIndex ? "border-[#d99a54]/70 text-[#f2bd63]" : "border-[#2c323a] text-[#9ea7b3]"}`}><span>Receipt {index + 1} · {order.fileIndexes.length || order.receipt.files.length} file(s) · {order.status.replaceAll("-", " ")}</span><span>{order.receipt.amount.toLocaleString()} sats</span><span className="max-w-full truncate text-[#718092]">{order.receipt.orderId}</span></div>)}</div></section>}
-      <p className="mt-3 border border-[#d99a54]/40 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#f2bd63]">Choose up to 100 files per inscription and tap <strong>Prepare all receipts</strong>. The files are uploaded to the UniSat order service and unpaid receipts are created. Then approve each receipt separately in UniSat; review the destination, exact amount, network and wallet fees before confirming. Preparation alone does not send payment.</p>
+      {files.length > 0 && <div className="mt-4 overflow-hidden border border-[#3b434d] bg-[#10151a]"><div className="flex items-center justify-between border-b border-[#3b434d] px-3 py-2"><span className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#d9d3c6]"><Files size={13} /> File queue</span><button type="button" disabled={busy || Boolean(receipt && stage !== "completed") || hasUnresolvedPreparedOrders} onClick={clearFileQueue} className="font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">{receipt && stage === "completed" ? "Clear completed queue" : "Vider"}</button></div><div className="max-h-48 overflow-y-auto">{files.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 border-b border-[#2c323a] px-3 py-2 last:border-b-0"><div className="min-w-0"><p className="truncate font-mono text-[10px] text-[#d9d3c6]">{index + 1}. {file.name}</p><p className="font-mono text-[9px] text-[#718092]">{fileKind(file)} · {formatBytes(file.size)}</p></div><button type="button" disabled={!canRemoveInscribeQueueFile(index, stage, receipt?.files.length ?? null, busy)} onClick={() => removeFile(index)} className="shrink-0 font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">Retirer</button></div>)}</div></div>}
+      {fileBatches.length > 1 && <p className="mt-3 border border-[#d99a54]/50 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#f2bd63]" role="status">The selected files require {fileBatches.length} UniSat receipts because of the request-size limit. “Prepare all receipts” uploads every batch and obtains its unpaid quote first. You will then approve each receipt separately in UniSat; no payment is sent during preparation.</p>}
+      {preparedOrders.length > 0 && <section className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3" aria-label="Prepared UniSat receipt queue"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63]">UniSat receipts prepared · {preparedOrders.length}</h3><p className="font-mono text-[10px] text-[#d9d3c6]">Outstanding order amount: {outstandingOrderTotal.toLocaleString()} sats · plus wallet fees</p></div><p className="mt-1 font-mono text-[9px] leading-4 text-[#9ea7b3]">No payment is sent until you approve a receipt. Each receipt is reviewed and paid separately in UniSat.</p><div className="mt-2 max-h-40 space-y-1 overflow-y-auto">{preparedOrders.map((order, index) => <div key={order.receipt.orderId} className={`flex flex-wrap items-center justify-between gap-2 border px-2 py-1.5 font-mono text-[9px] ${index === activePreparedIndex ? "border-[#d99a54]/70 text-[#f2bd63]" : "border-[#2c323a] text-[#9ea7b3]"}`}><span>Receipt {index + 1} · {order.fileIndexes.length || order.receipt.files.length} file(s) · {order.status.replaceAll("-", " ")}</span><span>{order.receipt.amount.toLocaleString()} sats</span><span className="max-w-full truncate text-[#718092]">{order.receipt.orderId}</span></div>)}</div></section>}
+      <p className="mt-3 border border-[#d99a54]/40 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#f2bd63]">Choose up to 1,000 files and tap <strong>Prepare all receipts</strong>. The files are uploaded to the UniSat order service and unpaid receipts are created. Then approve each receipt separately in UniSat; review the destination, exact amount, network and wallet fees before confirming. Preparation alone does not send payment.</p>
       <p className="mt-4 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">Dynamic fee rate · 30-minute target · server consensus uses the maximum of Mempool and UniSat recommendations. If estimators are unavailable, no stale manual value is used. UniSat always shows the final cost before signing.</p>
-      {((receipt && receiptAccessible) || busy || stage === "completed") && <div className="mt-5 border border-[#d99a54]/60 bg-[#10151a] p-4"><div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f2bd63]"><ShieldCheck size={14} /> Pre-order receipt and wallet approval</div>{receipt && receiptAccessible && mobileDevice && <UniSatMobileOpenDappLink site={site} walletMethodAvailable={typeof window.unisat?.sendBitcoin === "function"} methodLabel="sendBitcoin" />}{receipt && receiptAccessible && isMobileUniSatDevice() && <MobileReceiptWalletCard address={address} chain={chain} liveWallet={liveWallet} onRefresh={() => { void refreshLiveWalletData(); }} />}{receipt && receiptAccessible && <div className="mt-3 grid gap-2 font-mono text-[10px] text-[#d9d3c6] sm:grid-cols-2"><div className="border border-[#d99a54]/40 bg-[#151a1f] p-3 sm:col-span-2"><p className="flex items-center gap-2 uppercase tracking-[0.1em] text-[#f2bd63]"><Activity size={12} /> Live UniSat data · synchronized before receipt</p><div className="mt-2 grid gap-2 sm:grid-cols-2"><p className="break-all"><span className="text-[#718092]">Address:</span> {address}</p><p><span className="text-[#718092]">Network:</span> {chain?.name ?? chain?.enum}</p><p><span className="text-[#718092]">Available balance:</span> {liveWallet?.available != null ? `${liveWallet.available.toLocaleString()} ${liveWallet.asset}` : "Unavailable"}</p><p><span className="text-[#718092]">Total balance:</span> {liveWallet?.total != null ? `${liveWallet.total.toLocaleString()} ${liveWallet.asset}` : "Unavailable"}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Public key:</span> {liveWallet?.publicKey || "Unavailable"}</p><p><span className="text-[#718092]">Synchronized:</span> {liveWallet ? new Date(liveWallet.refreshedAt).toLocaleTimeString() : "Unavailable"}</p></div></div><p><span className="text-[#718092]">Files:</span> {receipt.files.length} · {formatBytes(receipt.files.reduce((sum, file) => sum + file.size, 0))}</p><p><span className="text-[#718092]">Amount:</span> {receipt.amount.toLocaleString()} sats</p><p><span className="text-[#718092]">Network:</span> {chain?.name ?? chain?.enum}</p><p><span className="text-[#718092]">Fee rate:</span> {receipt.feeRate} sat/vB</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Receiver :</span> {address}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Order ID :</span> {receipt.orderId}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Payment address:</span> {receipt.payAddress}</p>{<div className="border border-[#d99a54]/40 bg-[#151a1f] p-3 sm:col-span-2"><p className="uppercase tracking-[0.1em] text-[#f2bd63]">Native UniSat payment · review before approval</p><p className="mt-1">Exact amount: {receipt.amount.toLocaleString()} sats · requested fee rate: {receipt.paymentFeeRate ?? receipt.feeRate} sat/vB</p><p>UniSat builds and broadcasts the transaction; verify the address, amount, and fees in its confirmation window.</p></div>}{txid && <p className="break-all sm:col-span-2"><span className="text-[#718092]">Payment TXID:</span> {txid}</p>}</div>}</div>}
-      {finalReceipt && receiptAccessible && <div className="mt-4 border border-[#d99a54]/70 bg-[#10151a] p-4 font-mono text-[10px] leading-5" aria-label="Live final receipt"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live final receipt · Mempool payment confirmation</p><p><span className="text-[#718092]">Status:</span> {finalReceipt.message}</p><p><span className="text-[#718092]">Network:</span> {finalReceipt.network}</p><p className="break-all"><span className="text-[#718092]">Payment TXID:</span> {finalReceipt.txid}</p>{finalReceipt.blockHeight !== null && <p><span className="text-[#718092]">Block:</span> {finalReceipt.blockHeight}</p>}<p><span className="text-[#718092]">Verified:</span> {new Date(finalReceipt.checkedAt).toLocaleString()}</p>{finalReceipt.explorerUrl && <a className="inline-flex items-center gap-1 text-[#d99a54] underline" href={finalReceipt.explorerUrl} target="_blank" rel="noreferrer">Open in Mempool <ExternalLink size={11} /></a>}</div>}
-      {orderFiles.length > 0 && receiptAccessible && <div className="mt-4 border border-[#3b434d] bg-[#10151a] p-4"><div className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#f2bd63]"><Activity size={14} /> Live results · {totalInscribed} / {orderFiles.length} created</div><div className="mt-3 grid gap-2 sm:grid-cols-2">{orderFiles.map((file, index) => <div key={`${file.inscriptionId ?? file.filename ?? index}`} className="border border-[#2c323a] p-2 font-mono text-[9px]"><p className="truncate text-[#d9d3c6]">{file.filename ?? `File ${index + 1}`}</p><p className="mt-1 break-all text-[#718092]">{file.inscriptionId ?? describeStatus(file.status ?? status)}</p></div>)}</div></div>}
-      {currentWalletHistory.length > 0 && <div className="mt-4 border border-[#3b434d] bg-[#10151a] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#f2bd63]"><CheckCircle2 size={14} /> Wallet history · retained for 2 months</div><div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 font-mono text-[9px] uppercase text-[#9ea7b3]">Sort by<select value={historySortKey} onChange={event => setHistorySortKey(event.target.value as HistorySortKey)} className="border border-[#3b434d] bg-[#10151a] px-2 py-1 text-[#d9d3c6]"><option value="date">Date</option><option value="filename">Filename</option><option value="inscriptionId">Inscription ID</option><option value="transactionId">Transaction ID</option><option value="orderId">Order ID</option><option value="network">Network</option></select></label><button type="button" onClick={() => setHistorySortDirection(direction => direction === "asc" ? "desc" : "asc")} className="border border-[#3b434d] px-2 py-1 font-mono text-[9px] uppercase text-[#d9d3c6]">{historySortDirection === "asc" ? "Ascending ↑" : "Descending ↓"}</button><button type="button" disabled={!selectedHistoryBatches.length} onClick={downloadSelectedHistoryBatches} className="border border-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#d99a54] disabled:opacity-40">Download selected batch · separate TXT</button><button type="button" onClick={() => { try { if (historyStorageKey) localStorage.removeItem(historyStorageKey); setInscriptionHistory([]); setHistoryPage(0); setSelectedHistoryItem(null); setSelectedHistoryBatches([]); setMessage("This wallet/network history was cleared from this browser."); } catch { setMessage("This browser could not clear the local history."); } }} className="font-mono text-[9px] uppercase text-[#a45e54]">Clear this history</button></div></div><div className="mt-3 max-h-72 overflow-x-auto overflow-y-auto border border-[#2c323a]"><div className="min-w-[1080px] font-mono text-[9px]"><div className="grid grid-cols-[150px_minmax(180px,1fr)_minmax(260px,1.5fr)_minmax(260px,1.5fr)_minmax(180px,1fr)_150px] border-b border-[#3b434d] bg-[#151a1f] px-3 py-2 uppercase tracking-[0.08em] text-[#f2bd63]"><span>Date</span><span>Filename</span><span>Inscription ID</span><span>Transaction ID</span><span>Order ID</span><span>Network</span></div>{visibleHistoryGroups.map(group => <section key={`batch-${group.orderId}`} className="border-b border-[#3b434d] last:border-b-0"><div className="sticky left-0 flex flex-wrap items-center gap-3 border-b border-[#2c323a] bg-[#151a1f] px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-[#f2bd63]"><label className="flex cursor-pointer items-center gap-2"><input type="checkbox" checked={selectedHistoryBatches.includes(group.orderId)} onChange={event => setSelectedHistoryBatches(event.target.checked ? [group.orderId] : [])} aria-label={`Select batch ${group.orderId}`} /><span>Select this batch · {group.items.length} transaction(s)</span></label><span className="break-all normal-case">Order ID: {group.orderId}</span></div>{group.items.map(item => <button type="button" key={`${item.inscriptionId}-${item.transactionId}`} onClick={() => setSelectedHistoryItem(item)} className={`grid w-full grid-cols-[150px_minmax(180px,1fr)_minmax(260px,1.5fr)_minmax(260px,1.5fr)_minmax(180px,1fr)_150px] border-b border-[#2c323a] px-3 py-2 text-left last:border-b-0 hover:bg-[#d99a54]/10 ${selectedHistoryItem?.inscriptionId === item.inscriptionId && selectedHistoryItem?.transactionId === item.transactionId ? "bg-[#d99a54]/10" : ""}`} aria-label={`Open transaction ${item.transactionId}`}><span className="text-[#718092]">{new Date(item.createdAt).toLocaleString()}</span><span className="truncate pr-3 text-[#d9d3c6]" title={item.filename}>{item.filename}</span><span className="break-all pr-3 text-[#718092]">{item.inscriptionId || item.status || "Order pending"}</span><span className="break-all pr-3 text-[#718092]">{item.transactionId}</span><span className="break-all pr-3 text-[#718092]">{item.orderId}</span><span className="truncate text-[#718092]" title={item.network}>{item.network}</span></button>)}</section>)}</div></div>{selectedHistoryItem && <div className="mt-3 border border-[#d99a54]/60 bg-[#151a1f] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#f2bd63]">Selected transaction · details</p><div className="flex gap-3"><button type="button" onClick={() => downloadHistoryItemTxt(selectedHistoryItem)} className="font-mono text-[9px] uppercase text-[#d99a54]">Download this transaction</button><button type="button" onClick={() => setSelectedHistoryItem(null)} className="font-mono text-[9px] uppercase text-[#718092]">Close details</button></div></div><div className="mt-3 grid gap-2 font-mono text-[10px] text-[#d9d3c6] sm:grid-cols-2"><p><span className="text-[#718092]">Date :</span> {new Date(selectedHistoryItem.createdAt).toLocaleString()}</p><p className="break-all"><span className="text-[#718092]">Filename :</span> {selectedHistoryItem.filename}</p><p className="break-all"><span className="text-[#718092]">Inscription ID :</span> {selectedHistoryItem.inscriptionId}</p><p className="break-all"><span className="text-[#718092]">Transaction ID :</span> {selectedHistoryItem.transactionId}</p><p className="break-all"><span className="text-[#718092]">Payment TXID:</span> {selectedHistoryItem.paymentTxid || "Unavailable"}</p><p className="break-all"><span className="text-[#718092]">Order ID :</span> {selectedHistoryItem.orderId}</p><p><span className="text-[#718092]">Network :</span> {selectedHistoryItem.network}</p>{selectedHistoryItem.status && <p><span className="text-[#718092]">Order status:</span> {selectedHistoryItem.status}</p>}{selectedHistoryItem.amountSats != null && <p><span className="text-[#718092]">Order amount:</span> {selectedHistoryItem.amountSats.toLocaleString()} sats · {selectedHistoryItem.fileCount ?? 0} file(s)</p>}</div></div>}<div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#2c323a] pt-3"><span className="font-mono text-[9px] text-[#718092]">Page {historyPage + 1} / {historyPageCount} · {historyGroups.length} lot(s) · {currentWalletHistory.length} transaction(s)</span><div className="flex gap-2"><button type="button" onClick={() => setHistoryPage(page => Math.max(0, page - 1))} disabled={historyPage === 0} className="border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] disabled:opacity-40">Previous</button><button type="button" onClick={() => setHistoryPage(page => Math.min(historyPageCount - 1, page + 1))} disabled={historyPage >= historyPageCount - 1} className="border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] disabled:opacity-40">Next</button></div></div></div>}
+      {(receipt || busy || stage === "completed") && <div className="mt-5 border border-[#d99a54]/60 bg-[#10151a] p-4"><div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f2bd63]"><ShieldCheck size={14} /> Pre-order receipt and wallet approval</div>{receipt && mobileDevice && <UniSatMobileOpenDappLink site={site} walletMethodAvailable={typeof window.unisat?.sendBitcoin === "function"} methodLabel="sendBitcoin" />}{receipt && isMobileUniSatDevice() && <MobileReceiptWalletCard address={address} chain={chain} liveWallet={liveWallet} onRefresh={() => { void refreshLiveWalletData(); }} />}{receipt && <div className="mt-3 grid gap-2 font-mono text-[10px] text-[#d9d3c6] sm:grid-cols-2"><div className="border border-[#d99a54]/40 bg-[#151a1f] p-3 sm:col-span-2"><p className="flex items-center gap-2 uppercase tracking-[0.1em] text-[#f2bd63]"><Activity size={12} /> Live UniSat data · synchronized before receipt</p><div className="mt-2 grid gap-2 sm:grid-cols-2"><p className="break-all"><span className="text-[#718092]">Address:</span> {address}</p><p><span className="text-[#718092]">Network:</span> {chain?.name ?? chain?.enum}</p><p><span className="text-[#718092]">Available balance:</span> {liveWallet?.available != null ? `${liveWallet.available.toLocaleString()} ${liveWallet.asset}` : "Unavailable"}</p><p><span className="text-[#718092]">Total balance:</span> {liveWallet?.total != null ? `${liveWallet.total.toLocaleString()} ${liveWallet.asset}` : "Unavailable"}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Public key:</span> {liveWallet?.publicKey || "Unavailable"}</p><p><span className="text-[#718092]">Synchronized:</span> {liveWallet ? new Date(liveWallet.refreshedAt).toLocaleTimeString() : "Unavailable"}</p></div></div><p><span className="text-[#718092]">Files:</span> {receipt.files.length} · {formatBytes(receipt.files.reduce((sum, file) => sum + file.size, 0))}</p><p><span className="text-[#718092]">Amount:</span> {receipt.amount.toLocaleString()} sats</p><p><span className="text-[#718092]">Network:</span> {chain?.name ?? chain?.enum}</p><p><span className="text-[#718092]">Fee rate:</span> {receipt.feeRate} sat/vB</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Receiver :</span> {address}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Order ID :</span> {receipt.orderId}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Payment address:</span> {receipt.payAddress}</p>{<div className="border border-[#d99a54]/40 bg-[#151a1f] p-3 sm:col-span-2"><p className="uppercase tracking-[0.1em] text-[#f2bd63]">Native UniSat payment · review before approval</p><p className="mt-1">Exact amount: {receipt.amount.toLocaleString()} sats · requested fee rate: {receipt.paymentFeeRate ?? receipt.feeRate} sat/vB</p><p>UniSat builds and broadcasts the transaction; verify the address, amount, and fees in its confirmation window.</p></div>}{txid && <p className="break-all sm:col-span-2"><span className="text-[#718092]">Payment TXID:</span> {txid}</p>}</div>}</div>}
+      {finalReceipt && <div className="mt-4 border border-[#d99a54]/70 bg-[#10151a] p-4 font-mono text-[10px] leading-5" aria-label="Live final receipt"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live final receipt · Mempool payment confirmation</p><p><span className="text-[#718092]">Status:</span> {finalReceipt.message}</p><p><span className="text-[#718092]">Network:</span> {finalReceipt.network}</p><p className="break-all"><span className="text-[#718092]">Payment TXID:</span> {finalReceipt.txid}</p>{finalReceipt.blockHeight !== null && <p><span className="text-[#718092]">Block:</span> {finalReceipt.blockHeight}</p>}<p><span className="text-[#718092]">Verified:</span> {new Date(finalReceipt.checkedAt).toLocaleString()}</p>{finalReceipt.explorerUrl && <a className="inline-flex items-center gap-1 text-[#d99a54] underline" href={finalReceipt.explorerUrl} target="_blank" rel="noreferrer">Open in Mempool <ExternalLink size={11} /></a>}</div>}
+      {orderFiles.length > 0 && <div className="mt-4 border border-[#3b434d] bg-[#10151a] p-4"><div className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#f2bd63]"><Activity size={14} /> Live results · {totalInscribed} / {orderFiles.length} created</div><div className="mt-3 grid gap-2 sm:grid-cols-2">{orderFiles.map((file, index) => <div key={`${file.inscriptionId ?? file.filename ?? index}`} className="border border-[#2c323a] p-2 font-mono text-[9px]"><p className="truncate text-[#d9d3c6]">{file.filename ?? `File ${index + 1}`}</p><p className="mt-1 break-all text-[#718092]">{file.inscriptionId ?? describeStatus(file.status ?? status)}</p></div>)}</div></div>}
+      {inscriptionHistory.length > 0 && <div className="mt-4 border border-[#3b434d] bg-[#10151a] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#f2bd63]"><CheckCircle2 size={14} /> Wallet history · retained for 2 months</div><div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 font-mono text-[9px] uppercase text-[#9ea7b3]">Sort by<select value={historySortKey} onChange={event => setHistorySortKey(event.target.value as HistorySortKey)} className="border border-[#3b434d] bg-[#10151a] px-2 py-1 text-[#d9d3c6]"><option value="date">Date</option><option value="filename">Filename</option><option value="inscriptionId">Inscription ID</option><option value="transactionId">Transaction ID</option><option value="orderId">Order ID</option><option value="network">Network</option></select></label><button type="button" onClick={() => setHistorySortDirection(direction => direction === "asc" ? "desc" : "asc")} className="border border-[#3b434d] px-2 py-1 font-mono text-[9px] uppercase text-[#d9d3c6]">{historySortDirection === "asc" ? "Ascending ↑" : "Descending ↓"}</button><button type="button" disabled={!selectedHistoryBatches.length} onClick={downloadSelectedHistoryBatches} className="border border-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#d99a54] disabled:opacity-40">Download selected batch · separate TXT</button><button type="button" onClick={() => { try { if (historyStorageKey) localStorage.removeItem(historyStorageKey); setInscriptionHistory([]); setHistoryPage(0); setSelectedHistoryItem(null); setSelectedHistoryBatches([]); setMessage("This wallet/network history was cleared from this browser."); } catch { setMessage("This browser could not clear the local history."); } }} className="font-mono text-[9px] uppercase text-[#a45e54]">Clear this history</button></div></div><div className="mt-3 max-h-72 overflow-x-auto overflow-y-auto border border-[#2c323a]"><div className="min-w-[1080px] font-mono text-[9px]"><div className="grid grid-cols-[150px_minmax(180px,1fr)_minmax(260px,1.5fr)_minmax(260px,1.5fr)_minmax(180px,1fr)_150px] border-b border-[#3b434d] bg-[#151a1f] px-3 py-2 uppercase tracking-[0.08em] text-[#f2bd63]"><span>Date</span><span>Filename</span><span>Inscription ID</span><span>Transaction ID</span><span>Order ID</span><span>Network</span></div>{visibleHistoryGroups.map(group => <section key={`batch-${group.orderId}`} className="border-b border-[#3b434d] last:border-b-0"><div className="sticky left-0 flex flex-wrap items-center gap-3 border-b border-[#2c323a] bg-[#151a1f] px-3 py-2 text-[9px] uppercase tracking-[0.08em] text-[#f2bd63]"><label className="flex cursor-pointer items-center gap-2"><input type="checkbox" checked={selectedHistoryBatches.includes(group.orderId)} onChange={event => setSelectedHistoryBatches(event.target.checked ? [group.orderId] : [])} aria-label={`Select batch ${group.orderId}`} /><span>Select this batch · {group.items.length} transaction(s)</span></label><span className="break-all normal-case">Order ID: {group.orderId}</span></div>{group.items.map(item => <button type="button" key={`${item.inscriptionId}-${item.transactionId}`} onClick={() => setSelectedHistoryItem(item)} className={`grid w-full grid-cols-[150px_minmax(180px,1fr)_minmax(260px,1.5fr)_minmax(260px,1.5fr)_minmax(180px,1fr)_150px] border-b border-[#2c323a] px-3 py-2 text-left last:border-b-0 hover:bg-[#d99a54]/10 ${selectedHistoryItem?.inscriptionId === item.inscriptionId && selectedHistoryItem?.transactionId === item.transactionId ? "bg-[#d99a54]/10" : ""}`} aria-label={`Open transaction ${item.transactionId}`}><span className="text-[#718092]">{new Date(item.createdAt).toLocaleString()}</span><span className="truncate pr-3 text-[#d9d3c6]" title={item.filename}>{item.filename}</span><span className="break-all pr-3 text-[#718092]">{item.inscriptionId || item.status || "Order pending"}</span><span className="break-all pr-3 text-[#718092]">{item.transactionId}</span><span className="break-all pr-3 text-[#718092]">{item.orderId}</span><span className="truncate text-[#718092]" title={item.network}>{item.network}</span></button>)}</section>)}</div></div>{selectedHistoryItem && <div className="mt-3 border border-[#d99a54]/60 bg-[#151a1f] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#f2bd63]">Selected transaction · details</p><div className="flex gap-3"><button type="button" onClick={() => downloadHistoryItemTxt(selectedHistoryItem)} className="font-mono text-[9px] uppercase text-[#d99a54]">Download this transaction</button><button type="button" onClick={() => setSelectedHistoryItem(null)} className="font-mono text-[9px] uppercase text-[#718092]">Close details</button></div></div><div className="mt-3 grid gap-2 font-mono text-[10px] text-[#d9d3c6] sm:grid-cols-2"><p><span className="text-[#718092]">Date :</span> {new Date(selectedHistoryItem.createdAt).toLocaleString()}</p><p className="break-all"><span className="text-[#718092]">Filename :</span> {selectedHistoryItem.filename}</p><p className="break-all"><span className="text-[#718092]">Inscription ID :</span> {selectedHistoryItem.inscriptionId}</p><p className="break-all"><span className="text-[#718092]">Transaction ID :</span> {selectedHistoryItem.transactionId}</p><p className="break-all"><span className="text-[#718092]">Payment TXID:</span> {selectedHistoryItem.paymentTxid || "Unavailable"}</p><p className="break-all"><span className="text-[#718092]">Order ID :</span> {selectedHistoryItem.orderId}</p><p><span className="text-[#718092]">Network :</span> {selectedHistoryItem.network}</p>{selectedHistoryItem.status && <p><span className="text-[#718092]">Order status:</span> {selectedHistoryItem.status}</p>}{selectedHistoryItem.amountSats != null && <p><span className="text-[#718092]">Order amount:</span> {selectedHistoryItem.amountSats.toLocaleString()} sats · {selectedHistoryItem.fileCount ?? 0} file(s)</p>}</div></div>}<div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#2c323a] pt-3"><span className="font-mono text-[9px] text-[#718092]">Page {historyPage + 1} / {historyPageCount} · {historyGroups.length} lot(s) · {inscriptionHistory.length} transaction(s)</span><div className="flex gap-2"><button type="button" onClick={() => setHistoryPage(page => Math.max(0, page - 1))} disabled={historyPage === 0} className="border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] disabled:opacity-40">Previous</button><button type="button" onClick={() => setHistoryPage(page => Math.min(historyPageCount - 1, page + 1))} disabled={historyPage >= historyPageCount - 1} className="border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] disabled:opacity-40">Next</button></div></div></div>}
 
       {address && chain?.enum && inscriptionHistory.length === 0 && <div className="mt-4 border border-[#3b434d] bg-[#10151a] p-4 font-mono text-[10px] leading-5 text-[#9ea7b3]"><div className="flex items-center gap-2 uppercase text-[#f2bd63]"><CheckCircle2 size={14} /> Wallet history · retained for 2 months</div><p className="mt-2">No Inscribe orders or completed inscriptions are saved for this wallet on {chain.name ?? chain.enum}. New order and payment states will appear here.</p></div>}
       {(!address || !chain?.enum) && <p className="mt-4 border border-[#3b434d] bg-[#10151a] p-4 font-mono text-[10px] leading-5 text-[#9ea7b3]">Connect UniSat and select Bitcoin or Fractal mainnet to view this wallet’s Inscribe history.</p>}
       {message && <p className="mt-3 break-words font-mono text-[10px] leading-5 text-[#f2bd63]" role="status">{message}</p>}
-      <div className="mt-5 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end"><button type="button" onClick={() => setOpen(false)} className="min-h-11 w-full border border-[#3b434d] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#9ea7b3] sm:w-auto">Close</button>{!receipt && <button type="button" onClick={() => savedMobileOrderAccessible ? reviewSavedMobileOrder() : void prepareOrder()} disabled={!savedMobileOrderAccessible && (!canPrepareOrder || busy || creationUncertain || Boolean(savedMobileOrder && !receipt) || Boolean(hasUnresolvedPreparedOrders && !receipt))} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:opacity-40 sm:w-auto">{savedMobileOrderAccessible ? "Review saved receipt" : stage === "preparing" ? "Preparing receipts…" : mode === "files" && unpreparedBatches.length > 1 ? `Prepare receipts · ${unpreparedBatches.length} batches` : "Prepare receipts"}</button>}{receipt && receiptAccessible && stage === "awaiting-approval" && canApprovePayment && (!mobileDevice || typeof window.unisat?.sendBitcoin === "function") && <button type="button" onClick={() => void approvePayment()} disabled={busy} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:opacity-40 sm:w-auto">{preparedOrdersForCurrentWallet.length > 1 ? `Approve receipt ${activePreparedIndex + 1}/${preparedOrdersForCurrentWallet.length} in UniSat` : "Approve in UniSat"}</button>}{receipt && receiptAccessible && stage === "tracking" && !txid && <button type="button" onClick={restoreMobileApprovalAfterCheck} className="min-h-11 w-full border border-[#a45e54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.08em] text-[#f3efe5] sm:w-auto">I checked UniSat: no payment sent — restore approval</button>}{receipt && receiptAccessible && stage === "tracking" && txid && <button type="button" onClick={() => void resumeOrderTracking()} className="min-h-11 w-full border border-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63] sm:w-auto">Resume tracking — do not pay again</button>}{receipt && receiptAccessible && stage === "completed" && <button type="button" onClick={() => unpreparedFileIndexes.length ? prepareNextBatch() : startNewInscribeOrder()} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] sm:w-auto">Prepare receipts</button>}</div>
-      {receipt && receiptAccessible && <a className="mt-4 inline-flex items-center gap-1 font-mono text-[10px] text-[#d99a54] underline" href={`https://uniscan.cc/${chain?.enum === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : "bitcoin"}/address/${encodeURIComponent(address)}`} target="_blank" rel="noreferrer">View wallet activity on UniScan <ExternalLink size={11} /></a>}
+      <div className="mt-5 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end"><button type="button" onClick={() => setOpen(false)} className="min-h-11 w-full border border-[#3b434d] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#9ea7b3] sm:w-auto">Close</button>{!receipt && <button type="button" onClick={() => void prepareOrder()} disabled={!canPrepareOrder || busy || creationUncertain || Boolean(savedMobileOrder && !receipt) || Boolean(hasUnresolvedPreparedOrders && !receipt)} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:opacity-40 sm:w-auto">{stage === "preparing" ? "Preparing all receipts…" : mode === "files" && unpreparedBatches.length > 1 ? `Prepare all receipts · ${unpreparedBatches.length} batches` : mode === "files" ? "Prepare all receipts" : "Prepare receipt"}</button>}{receipt && stage === "awaiting-approval" && <button type="button" onClick={() => void cancelUnpaidOrder()} disabled={busy} className="min-h-11 w-full border border-[#a45e54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.08em] text-[#e08b7d] disabled:opacity-40 sm:w-auto">Cancel this unpaid receipt</button>}{receipt && stage === "awaiting-approval" && canApprovePayment && (!mobileDevice || typeof window.unisat?.sendBitcoin === "function") && <button type="button" onClick={() => void approvePayment()} disabled={busy} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:opacity-40 sm:w-auto">{preparedOrders.length > 1 ? `Approve receipt ${activePreparedIndex + 1}/${preparedOrders.length} in UniSat` : "Approve payment in UniSat"}</button>}{receipt && stage === "tracking" && !txid && <button type="button" onClick={restoreMobileApprovalAfterCheck} className="min-h-11 w-full border border-[#a45e54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.08em] text-[#f3efe5] sm:w-auto">I checked UniSat and Mempool: no payment sent — restore approval</button>}{receipt && stage === "tracking" && txid && <button type="button" onClick={() => void resumeOrderTracking()} className="min-h-11 w-full border border-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63] sm:w-auto">Resume tracking — do not pay again</button>}{receipt && stage === "completed" && preparedOrders.some(order => order.fileIndexes.length > 0) && unpreparedFileIndexes.length > 0 && <button type="button" onClick={prepareNextBatch} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] sm:w-auto">Prepare remaining receipts ({unpreparedFileIndexes.length} files)</button>}{receipt && stage === "completed" && (!preparedOrders.some(order => order.fileIndexes.length > 0) || unpreparedFileIndexes.length === 0) && <button type="button" onClick={startNewInscribeOrder} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] sm:w-auto">Start new Inscribe order</button>}</div>
+      {receipt && <a className="mt-4 inline-flex items-center gap-1 font-mono text-[10px] text-[#d99a54] underline" href={`https://uniscan.cc/${chain?.enum === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : "bitcoin"}/address/${encodeURIComponent(address)}`} target="_blank" rel="noreferrer">View wallet activity on UniScan <ExternalLink size={11} /></a>}
     </div></div>}
   </>;
 }
