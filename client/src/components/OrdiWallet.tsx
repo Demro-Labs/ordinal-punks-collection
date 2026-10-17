@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Eye, EyeOff, LockKeyhole, RefreshCw, ShieldCheck, Wallet, X } from "lucide-react";
+import { UniSatWalletConnect } from "@/components/UniSatWalletConnect";
 import {
   ADDRESS_SPECS, createMnemonic, decryptOrdiWallet, deriveOrdiWallet, encryptOrdiWallet,
   fetchAddressBalance, formatSats, readOrdiVault, type AddressType, type OrdiNetwork, type OrdiWalletRecord,
@@ -17,8 +18,9 @@ type Balance = { confirmed: number; unconfirmed: number; total: number } | null;
 function copy(value: string) { void navigator.clipboard?.writeText(value); }
 function short(value: string) { return `${value.slice(0, 12)}…${value.slice(-10)}`; }
 
-export function OrdiWallet() {
+export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } = {}) {
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"vault" | "connect">("vault");
   const [wallet, setWallet] = useState<OrdiWalletRecord | null>(null);
   const [vaultExists, setVaultExists] = useState(false);
   const [mode, setMode] = useState<"create" | "import" | "unlock">("create");
@@ -96,6 +98,11 @@ export function OrdiWallet() {
           <div className="flex items-center gap-3"><img src={`${BASE}assets/brand/ordi-wallet.png`} alt="Ordi Wallet" className="h-9 w-9 object-contain" /><div><p className="font-display text-lg font-semibold text-[#f3efe5]">Ordi Wallet</p><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#718092]">Bitcoin · Fractal · local non-custodial</p></div></div>
           <button type="button" onClick={() => setOpen(false)} className="p-2 text-[#9ea7b3] hover:text-[#f3efe5]" aria-label="Fermer"><X size={18} /></button>
         </div>
+        <div className="flex gap-1 border-b border-[#2c323a] px-4 pt-3 sm:px-7">
+          <button type="button" onClick={() => setView("vault")} className={`border-b-2 px-3 py-2 font-mono text-[10px] uppercase tracking-[.12em] ${view === "vault" ? "border-[#d99a54] text-[#f2bd63]" : "border-transparent text-[#718092] hover:text-[#d9d3c6]"}`}>Coffre local</button>
+          <button type="button" onClick={() => setView("connect")} className={`border-b-2 px-3 py-2 font-mono text-[10px] uppercase tracking-[.12em] ${view === "connect" ? "border-[#70c7a0] text-[#9fe0bd]" : "border-transparent text-[#718092] hover:text-[#d9d3c6]"}`}>Connect Wallet</button>
+        </div>
+        {view === "connect" ? <div className="p-3 sm:p-6"><UniSatWalletConnect site={site} /></div> : <>
         {!wallet ? <div className="grid gap-5 p-4 sm:p-7 lg:grid-cols-[1.1fr_.9fr]">
           <div className="border border-[#2c323a] bg-[#12171d] p-4 sm:p-6"><div className="mb-5 flex items-center gap-2 text-[#70c7a0]"><ShieldCheck size={18} /><span className="font-mono text-[10px] uppercase tracking-[.15em]">Clés générées localement</span></div>
             {vaultExists && <div className="mb-5 flex gap-1 border-b border-[#2c323a] pb-3"><button onClick={() => setMode("unlock")} className={`px-2 py-2 font-mono text-[10px] uppercase ${mode === "unlock" ? "text-[#f2bd63]" : "text-[#718092]"}`}>Déverrouiller</button><button onClick={() => setMode("create")} className={`px-2 py-2 font-mono text-[10px] uppercase ${mode === "create" ? "text-[#f2bd63]" : "text-[#718092]"}`}>Nouveau</button><button onClick={() => setMode("import")} className={`px-2 py-2 font-mono text-[10px] uppercase ${mode === "import" ? "text-[#f2bd63]" : "text-[#718092]"}`}>Importer</button></div>}
@@ -116,6 +123,7 @@ export function OrdiWallet() {
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{addresses.map(item => <article key={item.type} className="border border-[#2c323a] bg-[#12171d] p-4"><div className="flex items-start justify-between gap-2"><div><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#f2bd63]">{item.label}</p><p className="mt-2 break-all font-mono text-[10px] text-[#d9d3c6]">{short(item.address)}</p></div><button onClick={() => copy(item.address)} className="text-[#9ea7b3] hover:text-[#f2bd63]" aria-label="Copier l’adresse"><Copy size={13} /></button></div><p className="mt-4 font-display text-xl text-[#f3efe5]">{formatSats(balances[item.type]?.total ?? null)}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">Confirmé {formatSats(balances[item.type]?.confirmed ?? null)}</p><details className="mt-4 border-t border-[#2c323a] pt-3"><summary className="cursor-pointer font-mono text-[9px] uppercase text-[#718092]">Clés avancées</summary><p className="mt-2 break-all font-mono text-[9px] text-[#718092]">Path: {item.path}</p><button onClick={() => setReveal(value => ({ ...value, [item.type]: !value[item.type] }))} className="mt-2 inline-flex items-center gap-1 font-mono text-[9px] uppercase text-[#e6a69b]">{reveal[item.type] ? <EyeOff size={12} /> : <Eye size={12} />}{reveal[item.type] ? "Masquer la clé privée" : "Afficher la clé privée"}</button>{reveal[item.type] && <><p className="mt-2 break-all border border-[#a45e54]/50 bg-[#a45e54]/10 p-2 font-mono text-[9px] text-[#e6a69b]">{item.privateKey}</p><button onClick={() => copy(item.privateKey)} className="mt-2 font-mono text-[9px] uppercase text-[#f2bd63]">Copier la clé privée</button></>}</details></article>)}</div>
           <div className="mt-5 grid gap-3 lg:grid-cols-2"><div className="border border-[#2c323a] bg-[#12171d] p-4"><p className="font-mono text-[9px] uppercase tracking-[.14em] text-[#718092]">Phrase de récupération</p><p className="mt-2 break-words font-mono text-xs leading-6 text-[#d9d3c6]">{reveal.mnemonic ? wallet.mnemonic : "•••••••• •••••••• •••••••• ••••••••"}</p><button onClick={() => setReveal(value => ({ ...value, mnemonic: !value.mnemonic }))} className="mt-3 inline-flex items-center gap-1 font-mono text-[9px] uppercase text-[#f2bd63]">{reveal.mnemonic ? <EyeOff size={12} /> : <Eye size={12} />} {reveal.mnemonic ? "Masquer" : "Afficher"}</button>{reveal.mnemonic && <button onClick={() => copy(wallet.mnemonic)} className="ml-3 font-mono text-[9px] uppercase text-[#f2bd63]">Copier</button>}</div><div className="border border-[#70c7a0]/30 bg-[#70c7a0]/5 p-4 font-mono text-[10px] leading-5 text-[#9fe0bd]">Lecture des soldes via les endpoints publics Mempool. Les signatures et les broadcasts restent soumis à une confirmation explicite ; Ordi Wallet ne délègue jamais une clé privée à un serveur.</div></div>
         </div>}
+        </>}
       </section>
     </div>, document.body)}
   </>;
