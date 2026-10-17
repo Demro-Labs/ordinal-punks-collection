@@ -420,7 +420,7 @@ test('routes live classic BRC-20 summaries to the selected Bitcoin or Fractal Un
   globalThis.fetch = async (input, init = {}) => {
     const source = sources.find(item => String(input).startsWith(item.base));
     assert.ok(source, `Unexpected upstream URL: ${String(input)}`);
-    assert.equal(String(input), `${source.base}/v1/indexer/address/${address}/brc20/summary?start=0&limit=100&tick_filter=56&exclude_zero=true`);
+    assert.equal(String(input), `${source.base}/v1/indexer/address/${address}/brc20/summary?start=0&limit=100&exclude_zero=true`);
     assert.equal(new Headers(init.headers).get('Authorization'), `Bearer ${source.key}`);
     return Response.json({ code: 0, data: { detail: rows } });
   };
