@@ -1193,7 +1193,7 @@ export default {
       const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
       try {
         const path = isBrc20
-          ? `/v1/indexer/address/${encodeURIComponent(address)}/brc20/summary?start=0&limit=100&tick_filter=56&exclude_zero=true`
+          ? `/v1/indexer/address/${encodeURIComponent(address)}/brc20/summary?start=0&limit=100&exclude_zero=true`
           : `/v1/indexer/address/${encodeURIComponent(address)}/alkanes/token-list?start=0&limit=100`;
         const source = await uniNetwork(base, path, env, { signal: AbortSignal.timeout(8000) });
         if (isBrc20 && !Array.isArray(source?.detail)) throw new Error('Invalid BRC-20 summary response');
