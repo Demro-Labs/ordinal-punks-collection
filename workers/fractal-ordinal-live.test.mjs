@@ -411,7 +411,7 @@ test('uses the separate Bitcoin UniSat secret for Bitcoin fees without exposing 
 test('routes live classic BRC-20 summaries to the selected Bitcoin or Fractal UniSat indexer', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
-  const tickers = ['ABCD', 'ABCDE', 'ABCDEF'];
+  const tickers = ['ABCD', 'ABCDE', 'ABCDEF', 'ABCD123'];
   const rows = tickers.map(ticker => ({ ticker, overallBalance: '100', transferableBalance: '25', availableBalance: '75' }));
   const sources = [
     { chain: 'BITCOIN_MAINNET', base: 'https://open-api.unisat.io', key: 'bitcoin-test-only', ip: '192.0.2.90' },
