@@ -43,7 +43,7 @@ describe("fetchProtocolBalances", () => {
     })) as typeof fetch);
 
     await expect(fetchProtocolBalances(ADDRESS, "BITCOIN_MAINNET"))
-      .rejects.toThrow(/autre réseau\/wallet/i);
+      .rejects.toThrow(/different network or wallet/i);
   });
 
   it("rejects a malformed summary instead of rendering a false zero balance", async () => {
@@ -54,7 +54,7 @@ describe("fetchProtocolBalances", () => {
     })) as typeof fetch);
 
     await expect(fetchProtocolBalances(ADDRESS, "BITCOIN_MAINNET"))
-      .rejects.toThrow(/réponse incomplète/i);
+      .rejects.toThrow(/incomplete response/i);
   });
 
   it("rejects malformed rows rather than silently hiding a live token", async () => {
@@ -65,6 +65,6 @@ describe("fetchProtocolBalances", () => {
     })) as typeof fetch);
 
     await expect(fetchProtocolBalances(ADDRESS, "BITCOIN_MAINNET"))
-      .rejects.toThrow(/ligne du solde/i);
+      .rejects.toThrow(/balance row/i);
   });
 });

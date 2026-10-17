@@ -44,7 +44,7 @@ export function createMnemonic(words: 12 | 24) {
 
 export function deriveOrdiWallet(mnemonic: string, passphrase = ""): OrdiWalletRecord {
   const normalized = mnemonic.trim().toLowerCase().replace(/\s+/g, " ");
-  if (!validateMnemonic(normalized, wordlist)) throw new Error("La phrase BIP39 est invalide.");
+  if (!validateMnemonic(normalized, wordlist)) throw new Error("The BIP39 recovery phrase is invalid.");
   const root = HDKey.fromMasterSeed(mnemonicToSeedSync(normalized, passphrase));
   const addresses = {} as Record<AddressType, OrdiAddress>;
   for (const spec of ADDRESS_SPECS) {
@@ -52,7 +52,7 @@ export function deriveOrdiWallet(mnemonic: string, passphrase = ""): OrdiWalletR
     // between Bitcoin mainnet and Fractal mainnet; the network is selected at use time.
     const path = `m/${spec.purpose}'/0'/0'/0/0`;
     const child = root.derive(path);
-    if (!child.privateKey || !child.publicKey) throw new Error("Impossible de dériver la clé du wallet.");
+    if (!child.privateKey || !child.publicKey) throw new Error("Unable to derive the wallet key.");
     const network = bitcoin.networks.bitcoin;
     const publicKey = child.publicKey;
     const payment = spec.type === "legacy"
@@ -62,7 +62,7 @@ export function deriveOrdiWallet(mnemonic: string, passphrase = ""): OrdiWalletR
         : spec.type === "native-segwit"
           ? bitcoin.payments.p2wpkh({ pubkey: publicKey, network })
           : bitcoin.payments.p2tr({ internalPubkey: ecc.xOnlyPointFromPoint(publicKey), network });
-    if (!payment.address) throw new Error(`Impossible de dériver l’adresse ${spec.label}.`);
+    if (!payment.address) throw new Error(`Unable to derive the ${spec.label} address.`);
     addresses[spec.type] = { type: spec.type, label: spec.label, path, address: payment.address, publicKey: hex(publicKey), privateKey: hex(child.privateKey) };
   }
   return { mnemonic: normalized, passphrase, createdAt: new Date().toISOString(), addresses };
@@ -74,7 +74,7 @@ async function vaultKey(password: string, salt: Uint8Array) {
 }
 
 export async function encryptOrdiWallet(wallet: OrdiWalletRecord, password: string): Promise<OrdiVault> {
-  if (password.length < 10) throw new Error("Le mot de passe du coffre doit contenir au moins 10 caractères.");
+  if (password.length < 10) throw new Error("The vault password must be at least 10 characters long.");
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await vaultKey(password, salt);
@@ -97,7 +97,7 @@ export function readOrdiVault(): OrdiVault | null {
 }
 
 export function formatSats(value: number | null) {
-  return value === null ? "—" : `${value.toLocaleString("fr-FR")} sats`;
+  return value === null ? "—" : `${value.toLocaleString("en-US")} sats`;
 }
 
 export async function fetchAddressBalance(network: OrdiNetwork, address: string) {
