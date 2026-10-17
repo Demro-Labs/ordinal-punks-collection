@@ -1,5 +1,4 @@
 import { getSpendableUtxos } from "@/lib/mempool";
-import { isMobileUniSatDevice } from "@/lib/mobile-context";
 export type UniSatTxResult = string | { txid?: string };
 
 type UniSatBalance = { confirmed?: number; unconfirmed?: number; total?: number };
@@ -202,11 +201,8 @@ export function sendNativeUniSatBitcoinPayment(
   if (!toAddress || !Number.isSafeInteger(satoshis) || satoshis <= 0 || !Number.isFinite(feeRate) || feeRate <= 0) {
     return Promise.reject(new Error("Invalid native UniSat payment parameters; no payment was sent."));
   }
-  // Desktop/extension uses the positional API. UniSat Mobile uses the native
-  // request object; invoke it synchronously inside the tap handler so the
-  // wallet approval sheet is allowed to open.
-  const payment = isMobileUniSatDevice()
-    ? (provider.sendBitcoin as unknown as (request: { toAddress: string; satoshis: number; feeRate: number }) => Promise<UniSatTxResult>)({ toAddress, satoshis, feeRate })
-    : provider.sendBitcoin(toAddress, satoshis, { feeRate });
-  return payment.then(tx => requireTxid(tx, "Bitcoin payment"));
+  // Use UniSat's documented positional signature on every platform. Invoke it
+  // synchronously inside the tap handler so mobile can open its approval UI.
+  return provider.sendBitcoin(toAddress, satoshis, { feeRate })
+    .then(tx => requireTxid(tx, "Bitcoin payment"));
 }

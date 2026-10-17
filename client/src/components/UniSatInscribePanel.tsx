@@ -169,6 +169,8 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("");
   const [receipt, setReceipt] = useState<InscribeReceipt | null>(null);
+  const [mobilePaymentPreflight, setMobilePaymentPreflight] = useState<{ key: string; checkedAt: number } | null>(null);
+  const [mobilePreflightBusy, setMobilePreflightBusy] = useState(false);
   const [txid, setTxid] = useState("");
   const [inscriptionIds, setInscriptionIds] = useState<string[]>([]);
   const [orderFiles, setOrderFiles] = useState<OrderFile[]>([]);
@@ -186,6 +188,15 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   const fileBatches = useMemo(() => splitInscribeFilesIntoBatches(files), [files]);
   const currentBatchFiles = fileBatches[0] ?? [];
   const totalInscribed = orderFiles.filter(file => file.inscriptionId).length;
+  const mobileDevice = isMobileUniSatDevice();
+  const paymentPreflightKeyFor = (activeReceipt: InscribeReceipt) => JSON.stringify([
+    activeReceipt.orderId, activeReceipt.walletAddress, activeReceipt.chain,
+    activeReceipt.amount, activeReceipt.payAddress, activeReceipt.paymentFeeRate ?? activeReceipt.feeRate,
+  ]);
+  const isMobilePaymentPreflightFresh = (activeReceipt: InscribeReceipt) => Boolean(mobilePaymentPreflight &&
+    mobilePaymentPreflight.key === paymentPreflightKeyFor(activeReceipt) &&
+    Date.now() - mobilePaymentPreflight.checkedAt < 2 * 60 * 1000);
+  const hasFreshMobilePaymentPreflight = Boolean(receipt && isMobilePaymentPreflightFresh(receipt));
   const historyGroups = useMemo(() => {
     const groups = new Map<string, InscriptionHistoryItem[]>();
     for (const item of inscriptionHistory) { const group = groups.get(item.orderId) ?? []; group.push(item); groups.set(item.orderId, group); }
@@ -386,7 +397,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     if (saved) {
       return setMessage("A saved Inscribe order exists. Review its receipt before resuming; no new order was created.");
     }
-    let createdReceipt: InscribeReceipt | null = null; setMessage(""); setStatus(""); setReceipt(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]);
+    let createdReceipt: InscribeReceipt | null = null; setMessage(""); setStatus(""); setReceipt(null); setMobilePaymentPreflight(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]);
     if (!provider?.getPublicKey) return setMessage(mobileUniSat
       ? "No compatible mobile wallet was detected. Open this page in the updated UniSat in-app browser; no order was created."
       : "UniSat must be connected and support getPublicKey.");
@@ -466,14 +477,17 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       const feeSourceLabel = describeFeeSources(created.feeStrategy ?? feeEstimate.strategy, created.feeSources ?? feeEstimate.sources);
       const receiptFiles = submissionFiles.length ? submissionFiles.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })) : [{ filename: mode === "brc20" ? `brc20-${brc20Operation}-${ticker}.json` : mode === "runes-etch" ? "runes-etch.json" : mode === "runes-mint" ? "runes-mint.json" : mode === "alkanes-deploy" ? "alkanes-deploy-payload" : "alkanes-mint.json", size: 0, type: "Protocol inscription" }];
       createdReceipt = { orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: receiptFiles, feeRate: Number(created.feeRate), paymentFeeRate: liveFeeRate, feeSourceLabel, chain: activeChainEnum, walletAddress: activeAddress, createdAt: new Date().toISOString() };
-      if (mobileUniSat) await ensureNativePaymentBalance(activeChainEnum, activeAddress, createdReceipt.amount, liveFeeRate, "inscribe-payment", { mobile: true });
+      if (mobileUniSat) {
+        await ensureNativePaymentBalance(activeChainEnum, activeAddress, createdReceipt.amount, liveFeeRate, "inscribe-payment", { mobile: true });
+        setMobilePaymentPreflight({ key: paymentPreflightKeyFor(createdReceipt), checkedAt: Date.now() });
+      }
       setReceipt(createdReceipt);
       saveActiveMobileOrder(createdReceipt);
       recordOrderHistory(createdReceipt, "awaiting-payment");
       setStage("awaiting-approval");
       setMessage(`Order ${createdReceipt.orderId} is ready${fileBatches.length > 1 ? ` (batch 1 of ${fileBatches.length})` : ""}. Click “Approve payment in UniSat” to review ${createdReceipt.amount.toLocaleString()} sats to ${createdReceipt.payAddress}; verify the fees and transaction in the wallet before approval.${fileBatches.length > 1 ? " Each following batch requires its own receipt and wallet approval." : ""}`);
     } catch (error) {
-      if (createdReceipt) { setReceipt(createdReceipt); saveActiveMobileOrder(createdReceipt); recordOrderHistory(createdReceipt, "awaiting-payment"); setStage("awaiting-approval"); setMessage(`La commande ${createdReceipt.orderId} existe déjà. Ne la recréez pas. Vous pouvez ouvrir son paiement dans UniSat après vérification. Details: ${error instanceof Error ? error.message : "erreur inconnue"}`); }
+      if (createdReceipt) { setMobilePaymentPreflight(null); setReceipt(createdReceipt); saveActiveMobileOrder(createdReceipt); recordOrderHistory(createdReceipt, "awaiting-payment"); setStage("awaiting-approval"); setMessage(`Order ${createdReceipt.orderId} exists and has been saved. No payment was started. Do not create another order. Correct the balance issue, then use “Verify safe balance” on this receipt. Details: ${error instanceof Error ? error.message : "Unknown error"}`); }
       else { setStage("idle"); setMessage(error instanceof Error ? error.message : "Unable to prepare the inscription."); }
     }
   };
@@ -533,6 +547,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     } catch (error) {
       const canceled = isWalletCancellation(error);
       const detail = walletErrorMessage(error);
+      if (!paymentReturned && isMobileUniSatDevice()) setMobilePaymentPreflight(null);
       if (paymentReturned) {
         recordOrderHistory(activeReceipt, "payment-sent", returnedPaymentTxid);
         setStage("tracking");
@@ -561,11 +576,38 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
         : `UniSat approval was canceled. No payment was confirmed. UniSat detail : ${detail}`);
     }
   };
+  const verifyMobilePaymentBalance = async () => {
+    const activeReceipt = receipt;
+    if (!activeReceipt || !mobileDevice) return;
+    setMobilePaymentPreflight(null);
+    setMobilePreflightBusy(true);
+    setMessage("Verifying the active UniSat account, network, and safe payment UTXOs…");
+    try {
+      const provider = window.unisat;
+      if (!provider?.getAccounts || !provider.getChain) throw new Error("This UniSat mobile version must provide getAccounts and getChain for a safe payment check.");
+      const [accounts, currentChain] = await Promise.all([provider.getAccounts(), provider.getChain()]);
+      if (currentChain.enum !== activeReceipt.chain || !accounts.includes(activeReceipt.walletAddress)) {
+        throw new Error("The active UniSat account or network does not match this saved receipt. Switch back to the same account and network.");
+      }
+      const feeRate = activeReceipt.paymentFeeRate ?? activeReceipt.feeRate;
+      await ensureNativePaymentBalance(activeReceipt.chain, activeReceipt.walletAddress, activeReceipt.amount, feeRate, "inscribe-payment", { mobile: true });
+      setMobilePaymentPreflight({ key: paymentPreflightKeyFor(activeReceipt), checkedAt: Date.now() });
+      setMessage("Safe payment UTXOs verified for this receipt. Approve it in UniSat within two minutes; fees and destination will still be shown by the wallet.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Safe payment UTXOs could not be verified. No payment was started.");
+    } finally {
+      setMobilePreflightBusy(false);
+    }
+  };
   const approvePayment = () => {
     const provider = window.unisat;
     if (!receipt) return setMessage("Aucune commande d’inscription n’est en attente d’approbation.");
     if (!provider?.sendBitcoin) return setMessage("This UniSat version does not provide sendBitcoin; no payment was started.");
     if (chain?.enum !== receipt.chain || address !== receipt.walletAddress) return setMessage("The UniSat account or network changed after the receipt was created; no payment was started.");
+    if (mobileDevice && !isMobilePaymentPreflightFresh(receipt)) {
+      setMobilePaymentPreflight(null);
+      return setMessage("Safe-balance verification is missing or expired. Tap “Verify safe balance” again; no payment was started.");
+    }
     const feeRate = receipt.paymentFeeRate ?? receipt.feeRate;
     if (!Number.isSafeInteger(receipt.amount) || receipt.amount <= 0 || !Number.isFinite(feeRate) || feeRate <= 0 || !receipt.payAddress) return setMessage("The receipt does not contain a valid amount, address, or fee; no payment was started.");
     setStage("paying");
@@ -577,6 +619,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       // Invoke UniSat synchronously in the click handler so both extension and in-app wallet can show approval.
       paymentPromise = sendNativeUniSatBitcoinPayment(provider, receipt.payAddress, receipt.amount, feeRate);
     } catch (error) {
+      if (mobileDevice) setMobilePaymentPreflight(null);
       saveActiveMobileOrder(receipt, "", false);
       recordOrderHistory(receipt, isWalletCancellation(error) ? "approval-cancelled" : "awaiting-payment");
       setStage("awaiting-approval");
@@ -604,6 +647,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       setMessage("The saved receipt does not match or already has a TXID. Do not send again.");
       return;
     }
+    setMobilePaymentPreflight(null);
     saveActiveMobileOrder(receipt, "", false);
     setStage("awaiting-approval");
     setMessage("Approval is available again for this same receipt. Tap Approve payment in UniSat only after confirming no payment was sent.");
@@ -629,6 +673,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       if (!response.ok || result.cancelled !== true) throw new Error(result.error || "UniSat n’a pas confirmé l’annulation.");
       recordOrderHistory(receipt, "cancelled");
       clearActiveMobileOrder();
+      setMobilePaymentPreflight(null);
       setReceipt(null); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("idle");
       setMessage("Commande annulée dans UniSat. Aucun paiement n’a été envoyé; le reçu local a été supprimé. Vous pouvez préparer un nouveau lot.");
     } catch (error) {
@@ -639,6 +684,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   const reviewSavedMobileOrder = () => {
     const saved = readActiveMobileOrder();
     if (!saved) return setMessage("No saved Inscribe receipt is available.");
+    setMobilePaymentPreflight(null);
     setReceipt(saved.receipt); setTxid(saved.txid); setStage(saved.txid || saved.paymentStarted ? "tracking" : "awaiting-approval");
     setMessage(saved.txid ? "Saved receipt displayed. Resume tracking without restarting payment." : saved.paymentStarted ? "Receipt displayed. Verify UniSat activity before any other action; no second payment will be sent." : "Saved receipt displayed. No payment is recorded as started.");
   };
@@ -655,6 +701,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       return;
     }
     if (receiptToClear) recordOrderHistory(receiptToClear, "local-receipt-cleared");
+    setMobilePaymentPreflight(null);
     setReceipt(null); setTxid(""); setStatus(""); setStage("idle"); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]);
     setMessage(`Unpaid receipt cleared from this device only. The UniSat order may still exist; ${files.length ? `${files.length} fichier(s) choisi(s) conservé(s).` : "vous pouvez maintenant choisir des fichiers."}`);
   };
@@ -683,8 +730,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = item.inscriptionId ? `inscription-${item.inscriptionId}.txt` : `inscription-order-${item.orderId.replace(/[^a-zA-Z0-9_-]/g, "_")}.txt`; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
   const canApprovePayment = Boolean(receipt && (receipt.paymentFeeRate ?? receipt.feeRate) > 0 && receipt.amount > 0 && receipt.payAddress);
-  const busy = ["preparing", "paying"].includes(stage);
-  const mobileDevice = isMobileUniSatDevice();
+  const busy = ["preparing", "paying"].includes(stage) || mobilePreflightBusy;
   const savedMobileOrder = readActiveMobileOrder();
   const canClearUnpaidMobileReceipt = Boolean(!busy && !txid && (savedMobileOrder ? (!savedMobileOrder.txid && !savedMobileOrder.paymentStarted && (!receipt || savedMobileOrder.receipt.orderId === receipt.orderId)) : (receipt && stage === "awaiting-approval")));
   const fileSelectionLocked = busy || Boolean(savedMobileOrder && !receipt) || (!mobileDevice && Boolean(receipt) && stage !== "completed");

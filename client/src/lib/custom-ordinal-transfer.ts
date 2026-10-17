@@ -503,13 +503,13 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(
-      `BROADCAST_OUTCOME_UNCLEAR: ${detail}. Check the Fractal Mempool for ${expectedTxid} before retrying.`
+      `BROADCAST_OUTCOME_UNCLEAR: ${detail}. Check the ${mempool.label} Mempool for ${expectedTxid} before retrying.`
     );
   }
   const returnedTxid = broadcastResult.replace(/^\"|\"$/g, "").toLowerCase();
   if (returnedTxid !== expectedTxid) {
     throw new Error(
-      `BROADCAST_OUTCOME_UNCLEAR: Mempool did not confirm expected transaction ${expectedTxid}; check Fractal Mempool before retrying.`
+      `BROADCAST_OUTCOME_UNCLEAR: Mempool did not confirm expected transaction ${expectedTxid}; check ${mempool.label} Mempool before retrying.`
     );
   }
   return { txid: returnedTxid, plan };
