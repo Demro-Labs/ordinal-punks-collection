@@ -1145,6 +1145,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
           <p><span className="text-[#718092]">Network:</span> {localVaultSession.network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin mainnet"}</p>
           <p><span className="text-[#718092]">Mode:</span> read-only dashboard + reviewed local PSBT</p>
         </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">{Object.values(localVaultSession.addresses).map(item => <div key={item.type} className={`border p-2 ${item.type === localVaultSession.activeAddressType ? "border-[#70c7a0] bg-[#70c7a0]/10" : "border-[#2c323a]"}`}><p className="font-mono text-[9px] uppercase text-[#f2bd63]">{item.label}{item.type === localVaultSession.activeAddressType ? " · active" : ""}</p><p className="mt-1 break-all font-mono text-[9px] text-[#d9d3c6]">{item.address}</p></div>)}</div>
         <p className="mt-2 font-mono text-[10px] leading-5 text-[#9fe0bd]">The local vault is available on this {isMobileUniSatDevice() ? "mobile page" : "desktop page"}. UniSat remains a separate provider for wallet approvals, inscriptions, and native transfers.</p>
       </section>}
       <nav className="transaction-shortcut-nav sticky top-0 z-30 -mx-4 -mt-4 mb-1 flex gap-2 overflow-x-auto border-b border-[#2c323a] bg-[#14191f]/95 px-3 py-2 backdrop-blur sm:static sm:top-auto sm:z-auto sm:mx-0 sm:mt-0 sm:mb-3 sm:flex-wrap sm:overflow-visible sm:rounded-sm sm:border sm:border-[#3b434d] sm:bg-[#10151a] sm:px-4 sm:py-3" aria-label="Wallet and transaction actions">
