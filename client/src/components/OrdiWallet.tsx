@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Copy, Eye, EyeOff, LockKeyhole, RefreshCw, ShieldCheck, Wallet, X } from "lucide-react";
 import {
   ADDRESS_SPECS, createMnemonic, decryptOrdiWallet, deriveOrdiWallet, encryptOrdiWallet,
@@ -33,6 +34,17 @@ export function OrdiWallet() {
   const [reveal, setReveal] = useState<Record<string, boolean>>({});
 
   useEffect(() => { setVaultExists(Boolean(readOrdiVault())); }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
   const addresses = useMemo(() => wallet ? ADDRESS_SPECS.map(spec => wallet.addresses[spec.type]) : [], [wallet]);
 
   async function saveWallet(record: OrdiWalletRecord) {
@@ -78,8 +90,8 @@ export function OrdiWallet() {
     <button type="button" onClick={() => setOpen(true)} className="inline-flex min-h-10 items-center gap-2 border border-[#d99a54]/70 bg-[#d99a54]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f2bd63] transition hover:bg-[#d99a54]/20" aria-label="Ouvrir Ordi Wallet">
       <Wallet size={15} /> <span>Ordi Wallet</span>{vaultExists && <span className="rounded-full bg-[#70c7a0]/15 px-1.5 py-0.5 text-[8px] text-[#70c7a0]">COFFRE</span>}
     </button>
-    {open && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050608]/85 p-3 backdrop-blur-sm" onMouseDown={event => event.target === event.currentTarget && setOpen(false)}>
-      <section className="max-h-[min(900px,calc(100vh-1.5rem))] w-full max-w-6xl overflow-auto border border-[#3b434d] bg-[#0e1217] shadow-[0_24px_100px_rgba(0,0,0,.65)]" role="dialog" aria-modal="true" aria-label="Ordi Wallet">
+    {open && createPortal(<div className="fixed inset-0 z-[100] flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-[#050608]/85 p-3 backdrop-blur-sm sm:p-6" onMouseDown={event => event.target === event.currentTarget && setOpen(false)}>
+      <section className="my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-6xl overflow-auto border border-[#3b434d] bg-[#0e1217] shadow-[0_24px_100px_rgba(0,0,0,.65)] sm:max-h-[min(900px,calc(100dvh-3rem))]" role="dialog" aria-modal="true" aria-label="Ordi Wallet">
         <div className="flex items-center justify-between border-b border-[#2c323a] px-4 py-3 sm:px-7">
           <div className="flex items-center gap-3"><img src={`${BASE}assets/brand/ordi-wallet.png`} alt="Ordi Wallet" className="h-9 w-9 object-contain" /><div><p className="font-display text-lg font-semibold text-[#f3efe5]">Ordi Wallet</p><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#718092]">Bitcoin · Fractal · local non-custodial</p></div></div>
           <button type="button" onClick={() => setOpen(false)} className="p-2 text-[#9ea7b3] hover:text-[#f3efe5]" aria-label="Fermer"><X size={18} /></button>
@@ -105,6 +117,6 @@ export function OrdiWallet() {
           <div className="mt-5 grid gap-3 lg:grid-cols-2"><div className="border border-[#2c323a] bg-[#12171d] p-4"><p className="font-mono text-[9px] uppercase tracking-[.14em] text-[#718092]">Phrase de récupération</p><p className="mt-2 break-words font-mono text-xs leading-6 text-[#d9d3c6]">{reveal.mnemonic ? wallet.mnemonic : "•••••••• •••••••• •••••••• ••••••••"}</p><button onClick={() => setReveal(value => ({ ...value, mnemonic: !value.mnemonic }))} className="mt-3 inline-flex items-center gap-1 font-mono text-[9px] uppercase text-[#f2bd63]">{reveal.mnemonic ? <EyeOff size={12} /> : <Eye size={12} />} {reveal.mnemonic ? "Masquer" : "Afficher"}</button>{reveal.mnemonic && <button onClick={() => copy(wallet.mnemonic)} className="ml-3 font-mono text-[9px] uppercase text-[#f2bd63]">Copier</button>}</div><div className="border border-[#70c7a0]/30 bg-[#70c7a0]/5 p-4 font-mono text-[10px] leading-5 text-[#9fe0bd]">Lecture des soldes via les endpoints publics Mempool. Les signatures et les broadcasts restent soumis à une confirmation explicite ; Ordi Wallet ne délègue jamais une clé privée à un serveur.</div></div>
         </div>}
       </section>
-    </div>}
+    </div>, document.body)}
   </>;
 }
