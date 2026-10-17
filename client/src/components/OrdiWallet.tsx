@@ -78,9 +78,9 @@ export function OrdiWallet() {
     <button type="button" onClick={() => setOpen(true)} className="inline-flex min-h-10 items-center gap-2 border border-[#d99a54]/70 bg-[#d99a54]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f2bd63] transition hover:bg-[#d99a54]/20" aria-label="Ouvrir Ordi Wallet">
       <Wallet size={15} /> <span>Ordi Wallet</span>{vaultExists && <span className="rounded-full bg-[#70c7a0]/15 px-1.5 py-0.5 text-[8px] text-[#70c7a0]">COFFRE</span>}
     </button>
-    {open && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050608]/85 p-3 backdrop-blur-sm" onMouseDown={event => event.target === event.currentTarget && setOpen(false)}>
-      <section className="max-h-[min(900px,calc(100vh-1.5rem))] w-full max-w-6xl overflow-auto border border-[#3b434d] bg-[#0e1217] shadow-[0_24px_100px_rgba(0,0,0,.65)]" role="dialog" aria-modal="true" aria-label="Ordi Wallet">
-        <div className="flex items-center justify-between border-b border-[#2c323a] px-4 py-3 sm:px-7">
+    {open && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050608]/90 p-2 backdrop-blur-sm sm:p-4 lg:p-6" onMouseDown={event => event.target === event.currentTarget && setOpen(false)}>
+      <section className="relative max-h-[calc(100dvh-1rem)] w-full max-w-[1180px] overflow-auto border-2 border-[#d99a54]/55 bg-[#0b0d10] shadow-[0_0_0_1px_rgba(243,239,229,.12)_inset,0_24px_100px_rgba(0,0,0,.72)] sm:max-h-[calc(100dvh-2rem)] lg:max-h-[calc(100dvh-3rem)]" role="dialog" aria-modal="true" aria-label="Ordi Wallet">
+        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-[#d99a54]/35 bg-[#0b0d10]/98 px-3 py-3 backdrop-blur-md sm:px-7">
           <div className="flex items-center gap-3"><img src={`${BASE}assets/brand/ordi-wallet.png`} alt="Ordi Wallet" className="h-9 w-9 object-contain" /><div><p className="font-display text-lg font-semibold text-[#f3efe5]">Ordi Wallet</p><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#718092]">Bitcoin · Fractal · local non-custodial</p></div></div>
           <button type="button" onClick={() => setOpen(false)} className="p-2 text-[#9ea7b3] hover:text-[#f3efe5]" aria-label="Fermer"><X size={18} /></button>
         </div>
