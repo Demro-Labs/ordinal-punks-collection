@@ -15,7 +15,7 @@ type Provider = {
   sendBitcoin?: (address: string, satoshis: number, options?: { feeRate?: number }) => Promise<string | { txid?: string }>;
   getAccounts?: () => Promise<string[]>;
   getChain?: () => Promise<Chain>;
-  switchChain?: (chain: "FRACTAL_BITCOIN_MAINNET") => Promise<Chain>;
+  switchChain?: (chain: "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET") => Promise<Chain>;
   signMessage?: (message: string, type: "bip322-simple") => Promise<string>;
 };
 function storageKey(address: string, network: NativeNetwork) { return getNativeFbReceiptStorageKey(address, network); }

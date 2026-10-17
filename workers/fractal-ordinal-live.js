@@ -388,6 +388,24 @@ function normalizeRuneBalance(value) {
   };
 }
 
+function normalizeAddressTransaction(value) {
+  if (!value || typeof value !== 'object') return null;
+  const txid = typeof value.txid === 'string' ? value.txid.toLowerCase() : '';
+  const number = key => Number.isSafeInteger(Number(value[key])) ? Number(value[key]) : null;
+  const nIn = number('nIn');
+  const nOut = number('nOut');
+  const inSatoshi = number('inSatoshi');
+  const outSatoshi = number('outSatoshi');
+  const size = number('size');
+  const height = number('height');
+  const idx = number('idx');
+  const confirmations = number('confirmations');
+  const timestamp = number('timestamp');
+  const blkid = typeof value.blkid === 'string' && /^[a-f0-9]{64}$/i.test(value.blkid) ? value.blkid.toLowerCase() : '';
+  if (!/^[a-f0-9]{64}$/.test(txid) || [nIn, nOut, inSatoshi, outSatoshi, size, confirmations, timestamp].some(item => item === null || item < 0) || height === null || height < -1 || idx === null || idx < -1) return null;
+  return { txid, nIn, nOut, inSatoshi, outSatoshi, size, height, idx, blkid, confirmations, timestamp };
+}
+
 function normalizeBrc20Balance(value) {
   if (!value || typeof value.ticker !== 'string' || !/^[a-z0-9]{4,6}$/i.test(value.ticker)) return null;
   const amounts = ['overallBalance', 'transferableBalance', 'availableBalance'];
@@ -1032,6 +1050,30 @@ export default {
         });
       } catch {
         return Response.json({ error: 'Le solde Fractal est temporairement indisponible.' }, { status: 503, headers: noStore });
+      }
+    }
+    if (request.method === 'GET' && url.pathname === '/api/transactions/history') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const address = url.searchParams.get('address') || '';
+      const chain = url.searchParams.get('chain') || '';
+      const cursorRaw = url.searchParams.get('cursor');
+      const sizeRaw = url.searchParams.get('size');
+      const cursor = cursorRaw === null ? 0 : /^\d+$/.test(cursorRaw) ? Number(cursorRaw) : null;
+      const size = sizeRaw === null ? 10 : /^\d+$/.test(sizeRaw) ? Number(sizeRaw) : null;
+      if (!validWalletAddress(address) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain) || !Number.isSafeInteger(cursor) || cursor < 0 || cursor > 10000 || !Number.isSafeInteger(size) || size < 1 || size > MAX_PAGE_SIZE) {
+        return Response.json({ error: 'Adresse, réseau ou pagination de l’historique invalide.' }, { status: 400, headers: noStore });
+      }
+      const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
+      try {
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/history?cursor=${cursor}&size=${size}`, env, { signal: AbortSignal.timeout(8000) });
+        const total = Number(source?.total);
+        if (!Number.isSafeInteger(Number(source?.start)) || Number(source.start) !== cursor || !Number.isSafeInteger(total) || total < 0 || !Array.isArray(source?.detail) || source.detail.length > size) throw new Error('Invalid UniSat address history response');
+        const detail = source.detail.map(normalizeAddressTransaction);
+        if (detail.some(item => item === null)) throw new Error('Invalid UniSat address transaction');
+        return Response.json({ network: chain, address, start: cursor, total, detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
+      } catch {
+        return Response.json({ error: 'L’historique des transactions est temporairement indisponible pour ce réseau.' }, { status: 503, headers: noStore });
       }
     }
     if (request.method === 'GET' && url.pathname === '/api/fees/recommended') {
