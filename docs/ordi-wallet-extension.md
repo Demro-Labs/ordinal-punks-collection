@@ -1,6 +1,6 @@
 # Ordi Wallet browser extension preview
 
-This repository can build an unpacked desktop WebExtension popup that reuses the site's encrypted local vault, live balance views, protocol-asset panel, and reviewed Native SegWit local PSBT signer.
+This repository can build an unpacked desktop WebExtension popup with an Import wallet option available before any website wallet connection, live balance views, protocol-asset panel, and reviewed Native SegWit local PSBT signer.
 
 ## Build
 

@@ -309,7 +309,9 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     confirmed: number | null; unconfirmed: number | null; total: number | null;
     available: number | null; unavailable: number | null; publicKey: string | null;
     utxoCount: number; utxoSats: number; refreshedAt: string;
+    address: string; network: string;
   } | null>(null);
+  const walletDashboardRequestRef = useRef(0);
   const ownershipContextKey = selectedInscriptionId && destination.trim()
     ? JSON.stringify(["ordinal-transfer", site, address, chain?.enum, selectedInscriptionId, destination.trim()])
     : "";
@@ -368,7 +370,13 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
 
   const refreshWalletDashboard = async () => {
     const provider = window.unisat;
-    if (!provider || !address) return;
+    const requestAddress = address;
+    const requestNetwork = chain?.enum;
+    const requestId = ++walletDashboardRequestRef.current;
+    if (!provider || !requestAddress || !isSupportedMainnet(requestNetwork)) {
+      setWalletDashboard(null);
+      return;
+    }
     const results = await Promise.allSettled([
       provider.getBalance ? provider.getBalance() : Promise.resolve(null),
       provider.getBalanceV2 ? provider.getBalanceV2() : Promise.resolve(null),
@@ -385,7 +393,9 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       const value = Number((item as { value?: unknown; satoshis?: unknown; amount?: unknown }).value ?? (item as { satoshis?: unknown }).satoshis ?? (item as { amount?: unknown }).amount ?? 0);
       return Number.isFinite(value) ? sum + value : sum;
     }, 0);
+    if (requestId !== walletDashboardRequestRef.current) return;
     setWalletDashboard({
+      address: requestAddress, network: requestNetwork!,
       confirmed: balance ? Number(balance.confirmed ?? 0) : null,
       unconfirmed: balance ? Number(balance.unconfirmed ?? 0) : null,
       total: balance ? Number(balance.total ?? 0) : null,
@@ -457,6 +467,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   };
   const clearOwnedInscriptions = () => {
     stopLoadingInscriptions();
+    walletDashboardRequestRef.current += 1;
     setWalletDashboard(null);
     setMempoolFeeRate(null);
     setInscriptions([]);
@@ -478,6 +489,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       const accounts = args[0];
       const nextAddress = Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : null;
       setAddress(nextAddress);
+      setChain(null);
       setDestination("");
       setTransferError("");
       clearOwnedInscriptions();
@@ -488,17 +500,13 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       }
     };
     const handleChain = () => {
+      setChain(null);
+      setDestination("");
+      setTransferError("");
+      clearOwnedInscriptions();
       void provider.getChain?.().then(nextChain => {
         setChain(nextChain);
-        setDestination("");
-        setTransferError("");
-        clearOwnedInscriptions();
-      }).catch(() => {
-        setChain(null);
-        setDestination("");
-        setTransferError("");
-        clearOwnedInscriptions();
-      });
+      }).catch(() => setChain(null));
     };
 
     provider.on?.("accountsChanged", handleAccounts);
@@ -692,10 +700,17 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   };
 
   useEffect(() => {
-    if (!address || !isSupportedMainnet(chain?.enum)) { setWalletDashboard(null); return; }
+    if (!address || !isSupportedMainnet(chain?.enum)) {
+      walletDashboardRequestRef.current += 1;
+      setWalletDashboard(null);
+      return;
+    }
     void refreshWalletDashboard();
     const timer = window.setInterval(() => void refreshWalletDashboard(), 15_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      walletDashboardRequestRef.current += 1;
+    };
   }, [address, chain?.enum, inscriptions.length, inscriptionTotal]);
 
   const refreshConfirmedLiveData = async (transactionId: string, inscriptionId: string, networkEnum: string, run: number) => {
@@ -1078,6 +1093,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   };
 
   const connectedToFractal = Boolean(address && isSupportedMainnet(chain?.enum));
+  const currentWalletDashboard = connectedToFractal && walletDashboard?.address === address && walletDashboard?.network === chain?.enum ? walletDashboard : null;
   const currentNetwork = getMempoolConfig(chain?.enum);
   const nativeInscriptionTransfer = Boolean(window.unisat?.sendInscription) && !(isMobileUniSatDevice() && chain?.enum === FRACTAL_MAINNET);
   const verifiedOrdinalTransfer =
@@ -1285,24 +1301,34 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       {connectedToFractal && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-dashboard-title">
           <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#d99a54]">Live wallet data</p><h2 id="wallet-dashboard-title" className="mt-1 font-display text-xl text-[#f3efe5]">Wallet dashboard</h2></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => void refreshWalletDashboard()} disabled={busy} className="inline-flex items-center gap-1 border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#9ea7b3] hover:border-[#d99a54] disabled:opacity-40"><RefreshCw size={12} /> Refresh live data</button><a href={uniScanUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 border border-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#f2bd63] hover:bg-[#d99a54]/10">Open UniScan <ExternalLink size={12} /></a></div></div>
-          <div className="mt-3 grid grid-cols-2 gap-px border border-[#2c323a] bg-[#2c323a] sm:grid-cols-3 lg:grid-cols-6"><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Network</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{currentNetwork?.label}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">{chain?.enum === BITCOIN_MAINNET ? "BTC total" : "FB total"}</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{formatSats(walletDashboard?.total)}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Available</p><p className="mt-2 font-mono text-[10px] text-[#70c7a0]">{formatSats(walletDashboard?.available)}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Inscriptions</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{inscriptions.length} / {inscriptionTotal}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">UTXOs</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{walletDashboard?.utxoCount ?? "—"}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">UTXO value</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{formatSats(walletDashboard?.utxoSats)}</p></div></div>
-          <div className="mt-3 grid gap-2 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] text-[#9ea7b3] sm:grid-cols-2"><p className="break-all sm:col-span-2"><span className="text-[#718092]">Connected address:</span> {address}</p><p><span className="text-[#718092]">Confirmed:</span> {formatSats(walletDashboard?.confirmed)}</p><p><span className="text-[#718092]">Unconfirmed:</span> {formatSats(walletDashboard?.unconfirmed)}</p><p><span className="text-[#718092]">Unavailable:</span> {formatSats(walletDashboard?.unavailable)}</p><p><span className="text-[#718092]">Last refresh:</span> {walletDashboard ? new Date(walletDashboard.refreshedAt).toLocaleTimeString() : "Loading…"}</p>{walletDashboard?.publicKey && <p className="break-all sm:col-span-2"><span className="text-[#718092]">Public key:</span> {walletDashboard.publicKey}</p>}</div>
+          <div className="mt-3 grid grid-cols-2 gap-px border border-[#2c323a] bg-[#2c323a] sm:grid-cols-3 lg:grid-cols-6"><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Network</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{currentNetwork?.label}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">{chain?.enum === BITCOIN_MAINNET ? "BTC total" : "FB total"}</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{formatSats(currentWalletDashboard?.total)}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Available</p><p className="mt-2 font-mono text-[10px] text-[#70c7a0]">{formatSats(currentWalletDashboard?.available)}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Inscriptions</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{inscriptions.length} / {inscriptionTotal}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">UTXOs</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{currentWalletDashboard?.utxoCount ?? "—"}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">UTXO value</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{formatSats(currentWalletDashboard?.utxoSats)}</p></div></div>
+          <div className="mt-3 grid gap-2 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] text-[#9ea7b3] sm:grid-cols-2"><p className="break-all sm:col-span-2"><span className="text-[#718092]">Connected address:</span> {address}</p><p><span className="text-[#718092]">Confirmed:</span> {formatSats(currentWalletDashboard?.confirmed)}</p><p><span className="text-[#718092]">Unconfirmed:</span> {formatSats(currentWalletDashboard?.unconfirmed)}</p><p><span className="text-[#718092]">Unavailable:</span> {formatSats(currentWalletDashboard?.unavailable)}</p><p><span className="text-[#718092]">Last refresh:</span> {currentWalletDashboard ? new Date(currentWalletDashboard.refreshedAt).toLocaleTimeString() : "Loading…"}</p>{currentWalletDashboard?.publicKey && <p className="break-all sm:col-span-2"><span className="text-[#718092]">Public key:</span> {currentWalletDashboard.publicKey}</p>}</div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Live inscription and transfer activity">
+            <article className="min-w-0 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">
+              <p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live inscription data</p>
+              {(selectedInscription ?? inscriptions[0]) ? <><p className="mt-2 break-all">{(selectedInscription ?? inscriptions[0])!.inscriptionId}</p><p className="break-all"><span className="text-[#718092]">Location:</span> {(selectedInscription ?? inscriptions[0])!.location ?? "Unavailable"}</p><p><span className="text-[#718092]">Loaded from:</span> {inscriptionsLoaded ? "connected UniSat wallet" : "not loaded yet"}</p></> : <p className="mt-2">Load inscriptions from this eligible wallet to show live Ordinal data here.</p>}
+            </article>
+            <article className="min-w-0 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">
+              <p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live transfer data</p>
+              {finalReceipt ? <><p className="mt-2">{finalReceipt.message}</p><p className="break-all"><span className="text-[#718092]">TXID:</span> {finalReceipt.txid}</p><p><span className="text-[#718092]">Network:</span> {finalReceipt.network}</p></> : txid ? <><p className="mt-2">{mempoolMessage || mempoolStatus}</p><p className="break-all"><span className="text-[#718092]">TXID:</span> {txid}</p><p><span className="text-[#718092]">Network:</span> {mempoolNetwork || currentNetwork?.label}</p></> : selectedInscriptionId ? <p className="mt-2">Selected inscription {selectedInscriptionId}; transfer status: {mempoolMessage || mempoolStatus}. No TXID has been recorded.</p> : <p className="mt-2">No transfer is active for this eligible wallet.</p>}
+            </article>
+          </div>
         </section>
       )}
       {connectedToFractal && (
         <UniSatWalletAuth key={`${address ?? ""}:${chain?.enum ?? ""}`} site="punks" address={address ?? ""} network={chain?.enum ?? ""} provider={window.unisat} />
       )}
       {connectedToFractal && (
-        <UniSatFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} site={site} />
+        <UniSatFbSendPanel key={`${address ?? ""}:${chain?.enum ?? ""}`} provider={window.unisat} address={address ?? ""} chain={chain} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} site={site} />
       )}
       {connectedToFractal && isSupportedMainnet(chain?.enum) && (
-        <UniSatRunesSendPanel site={site} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} />
+        <UniSatRunesSendPanel key={`${address ?? ""}:${chain?.enum ?? ""}`} site={site} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} />
       )}
       {address && isSupportedMainnet(chain?.enum) && (
-        <ProtocolAssetsPanel address={address} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} site={site} />
+        <ProtocolAssetsPanel key={`${address}:${chain!.enum}`} address={address} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} site={site} />
       )}
       {address && isSupportedMainnet(chain?.enum) && (
-        <TransactionHistoryPanel address={address} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} />
+        <TransactionHistoryPanel key={`${address}:${chain!.enum}`} address={address} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} />
       )}
       {connectedToFractal && inscriptions.length > 0 && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-gallery-title">
@@ -1371,7 +1397,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
             <div className="mt-3 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">
               <p><span className="text-[#718092]">Asset:</span> {selectedInscription.inscriptionId}</p>
               <p className="break-all"><span className="text-[#718092]">Recipient:</span> {destination.trim()}</p>
-              <div className="mt-3 border border-[#d99a54]/60 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]" aria-label="Transfer pre-confirmation receipt"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live pre-confirmation receipt</p><p><span className="text-[#718092]">Network:</span> {currentNetwork?.label}</p><p className="break-all"><span className="text-[#718092]">Wallet:</span> {address}</p>{isMobileBrowser() && <div className="mt-2 border-t border-[#2c323a] pt-2"><p className="uppercase text-[#f2bd63]">Live connected wallet data</p><p><span className="text-[#718092]">Available:</span> {formatSats(walletDashboard?.available)}</p><p><span className="text-[#718092]">Confirmed:</span> {formatSats(walletDashboard?.confirmed)}</p><p><span className="text-[#718092]">Total:</span> {formatSats(walletDashboard?.total)}</p><p><span className="text-[#718092]">Unavailable:</span> {formatSats(walletDashboard?.unavailable)}</p><p><span className="text-[#718092]">UTXOs:</span> {walletDashboard?.utxoCount ?? "Unavailable"} · {formatSats(walletDashboard?.utxoSats)}</p><p><span className="text-[#718092]">Wallet refresh:</span> {walletDashboard ? new Date(walletDashboard.refreshedAt).toLocaleTimeString() : "Loading…"}</p>{walletDashboard?.publicKey && <p className="break-all"><span className="text-[#718092]">Public key:</span> {walletDashboard.publicKey}</p>}</div>}<p className="break-all"><span className="text-[#718092]">Inscription:</span> {selectedInscription.inscriptionId}</p><p className="break-all"><span className="text-[#718092]">Location:</span> {selectedInscription.location ?? "Not provided by UniSat"}</p><p className="break-all"><span className="text-[#718092]">Recipient:</span> {destination.trim()}</p><p><span className="text-[#718092]">Fee estimate:</span> {mempoolFeeRate ? `${feeSourceLabel || "Live fee source"}: ${mempoolFeeRate} sat/vB · refreshed before signing` : "Live fee source estimate refreshed immediately before wallet approval"}</p>{transferLiveLoading && <p><span className="text-[#718092]">Live inscription data:</span> synchronizing…</p>}{transferLiveData && <><p><span className="text-[#718092]">Current owner:</span> {transferLiveData.owner ?? "Unavailable"}</p><p><span className="text-[#718092]">Listing:</span> {transferLiveData.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Live refresh:</span> {new Date(transferLiveData.refreshedAt).toLocaleString()}</p></>}{transferLiveError && <p className="text-[#e08b7d]"><span className="text-[#718092]">Live data:</span> {transferLiveError}</p>}<p className="mt-1 text-[#a45e54]">{nativeInscriptionTransfer ? "UniSat sendInscription constructs and broadcasts the ordinal transfer after its native approval; verify the recipient and inscription in the wallet." : "Cloudflare provides protocol-checked fee UTXOs; the site reviews the exact transaction, UniSat signs after approval, and the selected network Mempool validates and broadcasts it."}</p></div>
+              <div className="mt-3 border border-[#d99a54]/60 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]" aria-label="Transfer pre-confirmation receipt"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live pre-confirmation receipt</p><p><span className="text-[#718092]">Network:</span> {currentNetwork?.label}</p><p className="break-all"><span className="text-[#718092]">Wallet:</span> {address}</p>{isMobileBrowser() && <div className="mt-2 border-t border-[#2c323a] pt-2"><p className="uppercase text-[#f2bd63]">Live connected wallet data</p><p><span className="text-[#718092]">Available:</span> {formatSats(currentWalletDashboard?.available)}</p><p><span className="text-[#718092]">Confirmed:</span> {formatSats(currentWalletDashboard?.confirmed)}</p><p><span className="text-[#718092]">Total:</span> {formatSats(currentWalletDashboard?.total)}</p><p><span className="text-[#718092]">Unavailable:</span> {formatSats(currentWalletDashboard?.unavailable)}</p><p><span className="text-[#718092]">UTXOs:</span> {currentWalletDashboard?.utxoCount ?? "Unavailable"} · {formatSats(currentWalletDashboard?.utxoSats)}</p><p><span className="text-[#718092]">Wallet refresh:</span> {currentWalletDashboard ? new Date(currentWalletDashboard.refreshedAt).toLocaleTimeString() : "Loading…"}</p>{currentWalletDashboard?.publicKey && <p className="break-all"><span className="text-[#718092]">Public key:</span> {currentWalletDashboard.publicKey}</p>}</div>}<p className="break-all"><span className="text-[#718092]">Inscription:</span> {selectedInscription.inscriptionId}</p><p className="break-all"><span className="text-[#718092]">Location:</span> {selectedInscription.location ?? "Not provided by UniSat"}</p><p className="break-all"><span className="text-[#718092]">Recipient:</span> {destination.trim()}</p><p><span className="text-[#718092]">Fee estimate:</span> {mempoolFeeRate ? `${feeSourceLabel || "Live fee source"}: ${mempoolFeeRate} sat/vB · refreshed before signing` : "Live fee source estimate refreshed immediately before wallet approval"}</p>{transferLiveLoading && <p><span className="text-[#718092]">Live inscription data:</span> synchronizing…</p>}{transferLiveData && <><p><span className="text-[#718092]">Current owner:</span> {transferLiveData.owner ?? "Unavailable"}</p><p><span className="text-[#718092]">Listing:</span> {transferLiveData.listing.listed ? "Listed" : "Not listed"}</p><p><span className="text-[#718092]">Live refresh:</span> {new Date(transferLiveData.refreshedAt).toLocaleString()}</p></>}{transferLiveError && <p className="text-[#e08b7d]"><span className="text-[#718092]">Live data:</span> {transferLiveError}</p>}<p className="mt-1 text-[#a45e54]">{nativeInscriptionTransfer ? "UniSat sendInscription constructs and broadcasts the ordinal transfer after its native approval; verify the recipient and inscription in the wallet." : "Cloudflare provides protocol-checked fee UTXOs; the site reviews the exact transaction, UniSat signs after approval, and the selected network Mempool validates and broadcasts it."}</p></div>
               <label className="mt-3 flex cursor-pointer items-start gap-2 text-[#d9d3c6]">
                 <input
                   type="checkbox"

@@ -1204,7 +1204,7 @@ test('cancels an unpaid V5 order through cancel2 on the selected network', async
     assert.deepEqual(cancelBody, { orderId: 'order-cancel-123' });
   } finally { globalThis.fetch = previousFetch; }
 });
-test('preserves the 1000-file Inscribe limit and rejects file 1001 before upstream access', async () => {
+test('enforces the 100-file Inscribe limit and rejects file 101 before upstream access', async () => {
   const previousFetch = globalThis.fetch;
   let acceptedFileCount = 0;
   let orderCalls = 0;
@@ -1216,7 +1216,7 @@ test('preserves the 1000-file Inscribe limit and rejects file 1001 before upstre
     if (url.endsWith('/v5/inscribe/order/create')) {
       orderCalls += 1;
       acceptedFileCount = JSON.parse(init.body).files.length;
-      return Response.json({ code: 0, data: { orderId: 'order-1000-test', status: 'pending', payAddress: 'bc1qtestaddress0000000000000000000000000', amount: 12345 } });
+      return Response.json({ code: 0, data: { orderId: 'order-100-test', status: 'pending', payAddress: 'bc1qtestaddress0000000000000000000000000', amount: 12345 } });
     }
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
@@ -1231,12 +1231,12 @@ test('preserves the 1000-file Inscribe limit and rejects file 1001 before upstre
   };
   try {
     const files = count => Array.from({ length: count }, (_, index) => ({ filename: `file-${index}.txt`, dataURL: 'data:text/plain;base64,QQ==' }));
-    const accepted = await worker.fetch(makeRequest('/api/inscribe/order', { method: 'POST', ip: '192.0.2.229', body: JSON.stringify({ ...common, files: files(1000) }) }), { UNISAT_API_KEY: 'test-only' });
+    const accepted = await worker.fetch(makeRequest('/api/inscribe/order', { method: 'POST', ip: '192.0.2.229', body: JSON.stringify({ ...common, files: files(100) }) }), { UNISAT_API_KEY: 'test-only' });
     assert.equal(accepted.status, 200);
-    assert.equal(acceptedFileCount, 1000);
-    const rejected = await worker.fetch(makeRequest('/api/inscribe/order', { method: 'POST', ip: '192.0.2.228', body: JSON.stringify({ ...common, files: files(1001) }) }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(acceptedFileCount, 100);
+    const rejected = await worker.fetch(makeRequest('/api/inscribe/order', { method: 'POST', ip: '192.0.2.228', body: JSON.stringify({ ...common, files: files(101) }) }), { UNISAT_API_KEY: 'test-only' });
     assert.equal(rejected.status, 400);
-    assert.match((await rejected.json()).error, /1 à 1000 fichiers/i);
+    assert.match((await rejected.json()).error, /1 à 100 fichiers/i);
     assert.equal(orderCalls, 1);
   } finally { globalThis.fetch = previousFetch; }
 });
