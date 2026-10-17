@@ -9,6 +9,7 @@
     "start": "NODE_ENV=production node dist/index.js",
     "preview": "vite preview --host",
     "check": "tsc --noEmit",
+    "build:extension": "vite build --config vite.extension.config.ts && cp extension/manifest.json dist/extension/manifest.json && mkdir -p client/public/downloads && cd dist/extension && zip -qr ../../client/public/downloads/ordi-wallet-extension.zip .",
     "format": "prettier --write ."
   },
   "dependencies": {

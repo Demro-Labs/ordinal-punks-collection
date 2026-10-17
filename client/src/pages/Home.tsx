@@ -30,6 +30,7 @@ import { COLLECTION_DATA_URL, COLLECTION_GENERATED_AT, INSCRIPTION_BASE_URL } fr
 import { cacheCollectionResponse, readCachedCollection } from "@/lib/collection-cache";
 import { requestUniSatTransfer } from "@/components/UniSatWalletConnect";
 import { OrdiWallet } from "@/components/OrdiWallet";
+import { LocalVaultPagePanel } from "@/components/LocalVaultSiteDashboard";
 
 const BUILD_META = import.meta.env as ImportMetaEnv & {
   readonly VITE_GITHUB_SHA?: string;
@@ -592,6 +593,7 @@ export default function Home() {
           </div>
         </div>
       </header>
+      <LocalVaultPagePanel site="punks" />
       <SiteOverviewPanel
         id="ordinal-punks-overview"
         eyebrow="Collection overview"
