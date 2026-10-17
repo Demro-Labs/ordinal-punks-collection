@@ -407,7 +407,7 @@ function normalizeAddressTransaction(value) {
 }
 
 function normalizeBrc20Balance(value) {
-  if (!value || typeof value.ticker !== 'string' || !/^[a-z0-9]{4,6}$/i.test(value.ticker)) return null;
+  if (!value || typeof value.ticker !== 'string' || !/^[a-z0-9]{4,32}$/i.test(value.ticker)) return null;
   const amounts = ['overallBalance', 'transferableBalance', 'availableBalance'];
   if (amounts.some(key => typeof value[key] !== 'string' || !/^\d+(\.\d+)?$/.test(value[key]))) return null;
   return { ticker: value.ticker, overallBalance: value.overallBalance, transferableBalance: value.transferableBalance, availableBalance: value.availableBalance };
