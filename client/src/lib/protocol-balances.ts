@@ -52,24 +52,24 @@ function normalizeAlkane(value: unknown): AlkaneBalance | null {
 async function readList<T>(path: string, address: string, network: ProtocolNetwork, signal: AbortSignal | undefined, normalize: (value: unknown) => T | null, label: string): Promise<T[]> {
   const result = await request<{ network?: string; address?: string; detail?: unknown }>(path, signal);
   if (result.network !== network || result.address !== address || !Array.isArray(result.detail)) {
-    throw new Error(`L’indexeur ${label} a renvoyé une réponse incomplète ou liée à un autre réseau/wallet.`);
+    throw new Error(`The ${label} indexer returned an incomplete response or data for a different network or wallet.`);
   }
   const rows = result.detail.map(normalize);
-  if (rows.some(row => row === null)) throw new Error(`Une ligne du solde ${label} est invalide.`);
+  if (rows.some(row => row === null)) throw new Error(`A ${label} balance row is invalid.`);
   return rows as T[];
 }
 
 export async function fetchProtocolBalances(address: string, network: ProtocolNetwork, signal?: AbortSignal): Promise<ProtocolBalances> {
-  if (!/^[A-Za-z0-9]{14,100}$/.test(address)) throw new Error("Adresse wallet invalide.");
+  if (!/^[A-Za-z0-9]{14,100}$/.test(address)) throw new Error("Invalid wallet address.");
   const query = new URLSearchParams({ address, chain: network });
-  const brc20 = await readList<Brc20Balance>(`/api/brc20/balances?${query}`, address, network, signal, normalizeBrc20, "BRC-20 classique");
+  const brc20 = await readList<Brc20Balance>(`/api/brc20/balances?${query}`, address, network, signal, normalizeBrc20, "Classic BRC-20");
   const errors: ProtocolBalances["errors"] = {};
   const optional = async <T,>(label: keyof ProtocolBalances["errors"], path: string, normalize: (value: unknown) => T | null): Promise<T[]> => {
     try {
       return await readList<T>(path, address, network, signal, normalize, label);
     } catch (cause) {
       if (signal?.aborted) return [];
-      errors[label] = cause instanceof Error ? cause.message : "Données temporairement indisponibles.";
+      errors[label] = cause instanceof Error ? cause.message : "Data is temporarily unavailable.";
       return [];
     }
   };
