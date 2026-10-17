@@ -275,9 +275,10 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
               {!wallet ? <div className="grid gap-4 p-3 sm:gap-5 sm:p-7 lg:grid-cols-[1.1fr_.9fr]">
                 <div className="min-w-0 border border-[#2c323a] bg-[#12171d] p-4 sm:p-6">
                   <div className="mb-5 flex items-center gap-2 text-[#70c7a0]"><ShieldCheck size={18} /><span className="font-mono text-[10px] uppercase tracking-[.15em]">Keys generated locally</span></div>
-                  {vaultExists && <div className="mb-5 flex gap-1 overflow-x-auto border-b border-[#2c323a] pb-3">
-                    {(["unlock", "create", "import"] as const).map(item => <button key={item} type="button" onClick={() => { setMode(item); setError(""); setMessage(""); }} className={`min-h-11 shrink-0 px-3 py-2 font-mono text-[10px] uppercase ${mode === item ? "text-[#f2bd63]" : "text-[#718092]"}`}>{item === "unlock" ? "Unlock" : item === "create" ? "New wallet" : "Import"}</button>)}
-                  </div>}
+                  <div className="mb-5 flex gap-1 overflow-x-auto border-b border-[#2c323a] pb-3" aria-label="Local wallet options">
+                    {vaultExists && <button type="button" onClick={() => { setMode("unlock"); setError(""); setMessage(""); }} className={`min-h-11 shrink-0 px-3 py-2 font-mono text-[10px] uppercase ${mode === "unlock" ? "text-[#f2bd63]" : "text-[#718092]"}`}>Unlock</button>}
+                    {(["create", "import"] as const).map(item => <button key={item} type="button" onClick={() => { setMode(item); setError(""); setMessage(""); }} className={`min-h-11 shrink-0 px-3 py-2 font-mono text-[10px] uppercase ${mode === item ? "text-[#f2bd63]" : "text-[#718092]"}`}>{item === "create" ? "New wallet" : "Import wallet"}</button>)}
+                  </div>
                   {mode === "unlock" ? <>
                     <p className="mb-3 text-sm leading-6 text-[#d9d3c6]">This encrypted vault is stored locally in this browser and site origin.</p>
                     <input className={inputClass} type="password" autoComplete="current-password" placeholder="Vault password" value={password} onChange={event => setPassword(event.target.value)} onKeyDown={event => event.key === "Enter" && void unlock()} />
