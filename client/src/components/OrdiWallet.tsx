@@ -20,7 +20,7 @@ function short(value: string) { return `${value.slice(0, 12)}…${value.slice(-1
 
 export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } = {}) {
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<"vault" | "connect">("vault");
+  const [view, setView] = useState<"vault" | "connect">("connect");
   const [wallet, setWallet] = useState<OrdiWalletRecord | null>(null);
   const [vaultExists, setVaultExists] = useState(false);
   const [mode, setMode] = useState<"create" | "import" | "unlock">("create");
@@ -89,7 +89,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
   useEffect(() => { if (wallet) void refresh(); }, [wallet, network]);
 
   return <>
-    <button type="button" onClick={() => setOpen(true)} className="inline-flex min-h-10 items-center gap-2 border border-[#d99a54]/70 bg-[#d99a54]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f2bd63] transition hover:bg-[#d99a54]/20" aria-label="Ouvrir Ordi Wallet">
+    <button type="button" onClick={() => { setView("connect"); setOpen(true); }} className="inline-flex min-h-10 items-center gap-2 border border-[#d99a54]/70 bg-[#d99a54]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f2bd63] transition hover:bg-[#d99a54]/20" aria-label="Connecter UniSat au site">
       <Wallet size={15} /> <span>Ordi Wallet</span>{vaultExists && <span className="rounded-full bg-[#70c7a0]/15 px-1.5 py-0.5 text-[8px] text-[#70c7a0]">COFFRE</span>}
     </button>
     {open && createPortal(<div className="fixed inset-0 z-[100] flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-[#050608]/85 p-3 backdrop-blur-sm sm:p-6" onMouseDown={event => event.target === event.currentTarget && setOpen(false)}>
@@ -100,7 +100,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
         </div>
         <div className="flex gap-1 border-b border-[#2c323a] px-4 pt-3 sm:px-7">
           <button type="button" onClick={() => setView("vault")} className={`border-b-2 px-3 py-2 font-mono text-[10px] uppercase tracking-[.12em] ${view === "vault" ? "border-[#d99a54] text-[#f2bd63]" : "border-transparent text-[#718092] hover:text-[#d9d3c6]"}`}>Coffre local</button>
-          <button type="button" onClick={() => setView("connect")} className={`border-b-2 px-3 py-2 font-mono text-[10px] uppercase tracking-[.12em] ${view === "connect" ? "border-[#70c7a0] text-[#9fe0bd]" : "border-transparent text-[#718092] hover:text-[#d9d3c6]"}`}>Connect Wallet</button>
+          <button type="button" onClick={() => setView("connect")} className={`border-b-2 px-3 py-2 font-mono text-[10px] uppercase tracking-[.12em] ${view === "connect" ? "border-[#70c7a0] text-[#9fe0bd]" : "border-transparent text-[#718092] hover:text-[#d9d3c6]"}`}>UniSat / Site</button>
         </div>
         {view === "connect" ? <div className="p-3 sm:p-6"><UniSatWalletConnect site={site} /></div> : <>
         {!wallet ? <div className="grid gap-5 p-4 sm:p-7 lg:grid-cols-[1.1fr_.9fr]">
