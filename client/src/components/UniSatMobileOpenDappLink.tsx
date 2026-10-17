@@ -16,14 +16,14 @@ export function UniSatMobileOpenDappLink({
   try {
     href = buildUniSatOpenDappUrl(window.location.href, site);
   } catch {
-    return <p className="mt-3 border border-[#d99a54]/40 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#f2bd63]" role="status">Ouvrez ce site dans le navigateur intégré UniSat Mobile pour utiliser {methodLabel}.</p>;
+    return <p className="mt-3 border border-[#d99a54]/40 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#f2bd63]" role="status">Open this site in the UniSat Mobile in-app browser to use {methodLabel}.</p>;
   }
 
   return (
     <div className="mt-3 border border-[#d99a54]/40 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#f2bd63]" role="note">
-      <p>Le provider UniSat Mobile ({methodLabel}) n’est pas disponible dans ce navigateur.</p>
+      <p>The UniSat Mobile provider ({methodLabel}) is not available in this browser.</p>
       <a className="mt-2 inline-flex min-h-10 items-center border border-[#d99a54] px-3 py-2 text-[#f3efe5] underline" href={href}>
-        Ouvrir ce site dans UniSat Mobile
+        Open this site in UniSat Mobile
       </a>
     </div>
   );

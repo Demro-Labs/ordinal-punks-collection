@@ -53,11 +53,11 @@ describe("native UniSat wallet actions", () => {
     expect(sendBitcoin).toHaveBeenCalledWith("fb1qpayment", 12_345, { feeRate: 4 });
   });
 
-  it("uses UniSat Mobile's native object sendBitcoin request", async () => {
+  it("uses UniSat's documented positional sendBitcoin request on mobile", async () => {
     const sendBitcoin = vi.fn().mockResolvedValue({ txid: TXID });
     vi.stubGlobal("navigator", { userAgent: "UniSat Mobile", platform: "Android", maxTouchPoints: 5 });
     await expect(sendNativeUniSatBitcoinPayment({ sendBitcoin }, "fb1qpayment", 12_345, 4)).resolves.toBe(TXID);
-    expect(sendBitcoin).toHaveBeenCalledWith({ toAddress: "fb1qpayment", satoshis: 12_345, feeRate: 4 });
+    expect(sendBitcoin).toHaveBeenCalledWith("fb1qpayment", 12_345, { feeRate: 4 });
     vi.unstubAllGlobals();
   });
 
