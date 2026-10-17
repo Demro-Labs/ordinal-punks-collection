@@ -5,7 +5,8 @@ import { isMobileUniSatDevice } from "@/lib/mobile-context";
 import { ensureNativePaymentBalance, getMobileUtxoErrorGuidance, sendNativeUniSatBitcoinPayment } from "@/lib/native-unisat-actions";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 import { estimateInscribeRequestBytes, splitInscribeFilesIntoBatches } from "@/lib/inscribe-file-batches";
-import { canRemoveInscribeQueueFile, getRemainingInscribeFiles, mergeSelectedInscribeFiles } from "@/lib/inscribe-queue-state";
+import { canRemoveInscribeQueueFile, mergeSelectedInscribeFiles } from "@/lib/inscribe-queue-state";
+import { getInscribeOrderTotalSats, getUnpreparedInscribeFileIndexes } from "@/lib/inscribe-order-queue";
 
 const API_BASE = "https://fractal-ordinal-live.servostar23.workers.dev";
 const MAX_FILE_BYTES = 365 * 1024;
@@ -20,9 +21,14 @@ type OrderFile = { inscriptionId?: string; filename?: string; status?: string; t
 type LiveWalletData = { publicKey: string; available: number | null; confirmed: number | null; total: number | null; safeAvailableSats: number | null; asset: string; refreshedAt: string };
 type InscriptionHistoryItem = { inscriptionId: string; transactionId: string; paymentTxid?: string; finalPaymentReceipt?: MempoolReceipt; filename: string; orderId: string; network: string; walletAddress: string; createdAt: string; status?: string; amountSats?: number; fileCount?: number };
 type PersistedMobileOrder = { receipt: InscribeReceipt; txid: string; paymentStarted?: boolean; savedAt: string };
+type PreparedOrderStatus = "awaiting-payment" | "payment-review" | "payment-sent" | "completed" | "cancelled";
+type PreparedOrder = { receipt: InscribeReceipt; fileIndexes: number[]; status: PreparedOrderStatus };
+type PersistedPreparedOrders = { orders: PreparedOrder[]; activeIndex: number; savedAt: string };
 const HISTORY_RETENTION_MONTHS = 2;
 const HISTORY_PAGE_SIZE = 10;
 const ACTIVE_MOBILE_ORDER_STORAGE_KEY = "ordinal-punks:active-mobile-inscribe-order:v1";
+const PREPARED_ORDERS_STORAGE_KEY = "ordinal-punks:prepared-inscribe-orders:v1";
+const INSCRIBE_CREATION_UNCERTAIN_KEY = "ordinal-punks:inscribe-order-creation-uncertain:v1";
 type HistorySortKey = "date" | "filename" | "inscriptionId" | "transactionId" | "orderId" | "network";
 
 function isInscribeReceipt(value: unknown): value is InscribeReceipt {
@@ -32,6 +38,25 @@ function isInscribeReceipt(value: unknown): value is InscribeReceipt {
     Number.isSafeInteger(receipt.amount) && Number(receipt.amount) > 0 && Number.isSafeInteger(receipt.feeRate) && Number(receipt.feeRate) > 0 &&
     typeof receipt.feeSourceLabel === "string" && typeof receipt.chain === "string" && typeof receipt.walletAddress === "string" && typeof receipt.createdAt === "string" &&
     Array.isArray(receipt.files) && receipt.files.every(file => Boolean(file) && typeof file === "object" && typeof (file as InscribeFile).filename === "string");
+}
+
+function readPreparedOrders(): PersistedPreparedOrders | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(PREPARED_ORDERS_STORAGE_KEY) ?? "null") as Partial<PersistedPreparedOrders> | null;
+    if (!value || !Array.isArray(value.orders) || !Number.isSafeInteger(value.activeIndex) || Number(value.activeIndex) < 0 || typeof value.savedAt !== "string") return null;
+    const validStatuses = ["awaiting-payment", "payment-review", "payment-sent", "completed", "cancelled"];
+    const orders = value.orders.filter((order): order is PreparedOrder => Boolean(order) && isInscribeReceipt(order.receipt) &&
+      Array.isArray(order.fileIndexes) && order.fileIndexes.every(index => Number.isSafeInteger(index) && index >= 0) && validStatuses.includes(order.status));
+    if (!orders.length || Number(value.activeIndex) >= orders.length) return null;
+    return { orders, activeIndex: Number(value.activeIndex), savedAt: value.savedAt };
+  } catch { return null; }
+}
+
+function persistPreparedOrders(orders: PreparedOrder[], activeIndex: number) {
+  try {
+    if (!orders.length) localStorage.removeItem(PREPARED_ORDERS_STORAGE_KEY);
+    else localStorage.setItem(PREPARED_ORDERS_STORAGE_KEY, JSON.stringify({ orders, activeIndex, savedAt: new Date().toISOString() } satisfies PersistedPreparedOrders));
+  } catch { /* private mode or storage quota */ }
 }
 
 function readActiveMobileOrder(): PersistedMobileOrder | null {
@@ -169,6 +194,9 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("");
   const [receipt, setReceipt] = useState<InscribeReceipt | null>(null);
+  const [preparedOrders, setPreparedOrders] = useState<PreparedOrder[]>(() => readPreparedOrders()?.orders ?? []);
+  const [activePreparedIndex, setActivePreparedIndex] = useState(() => readPreparedOrders()?.activeIndex ?? 0);
+  const [creationUncertain, setCreationUncertain] = useState(() => { try { return localStorage.getItem(INSCRIBE_CREATION_UNCERTAIN_KEY) === "true"; } catch { return false; } });
   const [mobilePaymentPreflight, setMobilePaymentPreflight] = useState<{ key: string; checkedAt: number } | null>(null);
   const [mobilePreflightBusy, setMobilePreflightBusy] = useState(false);
   const [txid, setTxid] = useState("");
@@ -186,7 +214,10 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   const paymentReceiptRef = useRef<{ historyKey: string; orderId: string; receipt: MempoolReceipt } | null>(null);
   const totalBytes = useMemo(() => files.reduce((sum, file) => sum + file.size, 0), [files]);
   const fileBatches = useMemo(() => splitInscribeFilesIntoBatches(files), [files]);
-  const currentBatchFiles = fileBatches[0] ?? [];
+  const unpreparedFileIndexes = getUnpreparedInscribeFileIndexes(files.length, preparedOrders.map(order => ({ ...order, amount: order.receipt.amount })));
+  const unpreparedFiles = unpreparedFileIndexes.map(index => files[index]);
+  const unpreparedBatches = useMemo(() => splitInscribeFilesIntoBatches(unpreparedFiles), [unpreparedFiles]);
+  const outstandingOrderTotal = getInscribeOrderTotalSats(preparedOrders.filter(order => !["completed", "cancelled"].includes(order.status)).map(order => order.receipt));
   const totalInscribed = orderFiles.filter(file => file.inscriptionId).length;
   const mobileDevice = isMobileUniSatDevice();
   const paymentPreflightKeyFor = (activeReceipt: InscribeReceipt) => JSON.stringify([
@@ -217,6 +248,21 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   const historyPageCount = Math.max(1, Math.ceil(historyGroups.length / HISTORY_PAGE_SIZE));
   const visibleHistoryGroups = historyGroups.slice(historyPage * HISTORY_PAGE_SIZE, (historyPage + 1) * HISTORY_PAGE_SIZE);
   const historyStorageKey = address && chain?.enum ? historyStorageKeyFor(chain.enum, address) : "";
+  const storePreparedOrders = (orders: PreparedOrder[], activeIndex: number) => {
+    setPreparedOrders(orders);
+    setActivePreparedIndex(activeIndex);
+    persistPreparedOrders(orders, activeIndex);
+  };
+  const updatePreparedOrderStatus = (orderId: string, nextStatus: PreparedOrderStatus) => {
+    const updated = preparedOrders.map(order => order.receipt.orderId === orderId ? { ...order, status: nextStatus } : order);
+    storePreparedOrders(updated, activePreparedIndex);
+    return updated;
+  };
+  const acknowledgeNoUnknownUniSatOrder = () => {
+    try { localStorage.removeItem(INSCRIBE_CREATION_UNCERTAIN_KEY); } catch { /* unavailable storage */ }
+    setCreationUncertain(false);
+    setMessage("Untracked order check acknowledged. You may prepare only after confirming UniSat has no additional receipt for the interrupted batch.");
+  };
   const recordOrderHistory = (activeReceipt: InscribeReceipt, orderStatus: string, paymentTxid = "") => {
     const activeHistoryKey = historyStorageKeyFor(activeReceipt.chain, activeReceipt.walletAddress);
     const networkLabel = activeReceipt.chain === "BITCOIN_MAINNET" ? "Bitcoin" : activeReceipt.chain === "FRACTAL_BITCOIN_MAINNET" ? "Fractal Bitcoin" : activeReceipt.chain;
@@ -363,6 +409,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     const batchNotice = plannedBatches.length > 1 ? ` ${combined.length} fichiers répartis automatiquement en ${plannedBatches.length} lots; chaque lot aura son propre reçu et son approbation UniSat.` : "";
     if (receipt && stage === "completed" && replaceCompletedReceipt) {
       setFiles(combined); setReceipt(null); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("idle");
+      setPreparedOrders([]); setActivePreparedIndex(0); persistPreparedOrders([], 0); clearActiveMobileOrder();
       setMessage(`Le reçu précédent est terminé et conservé dans l’historique. Nouvelle file prête.${batchNotice}`); return;
     }
     if (receipt && stage === "completed") { setFiles(combined); setMessage(batchNotice || "Les fichiers terminés restent dans l’historique; les nouveaux fichiers sont ajoutés à la file du prochain reçu."); return; }
@@ -381,13 +428,16 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   };
   const clearFileQueue = () => {
     if (["preparing", "paying"].includes(stage) || (receipt && stage !== "completed")) return;
+    if (preparedOrders.some(order => !["completed", "cancelled"].includes(order.status))) return setMessage("A UniSat receipt is still pending. Review or cancel the order before clearing the local file queue.");
     setFiles([]);
     if (receipt && stage === "completed") { setReceipt(null); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("idle"); }
+    setPreparedOrders([]); setActivePreparedIndex(0); persistPreparedOrders([], 0); clearActiveMobileOrder();
     setMessage("File queue cleared. Completed inscriptions remain in wallet history.");
   };
   const startNewInscribeOrder = () => {
     if (!receipt || stage !== "completed") return;
     setFiles([]); setReceipt(null); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("idle");
+    setPreparedOrders([]); setActivePreparedIndex(0); persistPreparedOrders([], 0); clearActiveMobileOrder();
     setMessage("Previous Inscribe order remains in history. Choose files to start a new order.");
   };
   const prepareOrder = async () => {
@@ -397,14 +447,17 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     if (saved) {
       return setMessage("A saved Inscribe order exists. Review its receipt before resuming; no new order was created.");
     }
-    let createdReceipt: InscribeReceipt | null = null; setMessage(""); setStatus(""); setReceipt(null); setMobilePaymentPreflight(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]);
+    if (creationUncertain) return setMessage("UniSat may have created an order whose response was interrupted. Check UniSat orders before retrying; no new request was sent.");
+    setMessage(""); setStatus(""); setReceipt(null); setMobilePaymentPreflight(null); setTxid(""); setInscriptionIds([]); setOrderFiles([]);
     if (!provider?.getPublicKey) return setMessage(mobileUniSat
       ? "No compatible mobile wallet was detected. Open this page in the updated UniSat in-app browser; no order was created."
       : "UniSat must be connected and support getPublicKey.");
-    const uploadedFiles = mode === "files" || mode === "runes-etch" || mode === "alkanes-deploy" ? files : [];
-    const submissionFiles = mode === "files" ? currentBatchFiles : uploadedFiles;
+    const fileBackedMode = mode === "files" || mode === "runes-etch" || mode === "alkanes-deploy";
+    const targetFileIndexes = mode === "files" ? unpreparedFileIndexes : fileBackedMode ? files.map((_, index) => index) : [];
+    const submissionFiles = targetFileIndexes.map(index => files[index]);
     if (mode === "files" && !submissionFiles.length) return setMessage("Add at least one valid file to inscribe.");
-    if ((mode === "alkanes-deploy") && !uploadedFiles.length) return setMessage("Add at least one file to inscribe.");
+    if (mode === "alkanes-deploy" && !submissionFiles.length) return setMessage("Add at least one file to inscribe.");
+    const submissionBatches = submissionFiles.length ? splitInscribeFilesIntoBatches(submissionFiles) : [[] as File[]];
     let protocol: Record<string, unknown> | undefined;
     if (mode === "brc20") {
       if (!/^[A-Za-z0-9]{1,32}$/.test(ticker)) return setMessage("Enter a valid BRC-20 ticker.");
@@ -429,6 +482,10 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     } else if (mode === "alkanes-deploy") {
       protocol = { type: "alkanes-deploy" };
     }
+    const startingOrderIndex = preparedOrders.length;
+    let ordersBeingPrepared = [...preparedOrders];
+    let batchFileCursor = 0;
+    let requestMayHaveCreatedUntrackedOrder = false;
     setStage("preparing");
     try {
       const [accounts, currentChain] = await Promise.all([
@@ -446,48 +503,84 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
         return setMessage("Unsupported UniSat network. Select Bitcoin mainnet or Fractal Bitcoin mainnet in the wallet.");
       }
       await validateMempoolAddress(activeChainEnum, activeAddress);
-      setFileLoadProgress({ completed: 0, total: submissionFiles.length });
-      const encodedFiles: Array<{ filename: string; dataURL: string }> = [];
-      const readConcurrency = 8;
-      for (let start = 0; start < submissionFiles.length; start += readConcurrency) {
-        const batch = submissionFiles.slice(start, start + readConcurrency);
-        const encodedBatch = await Promise.all(batch.map(async file => ({ filename: file.name, dataURL: await readAsDataUrl(file) })));
-        encodedFiles.push(...encodedBatch);
-        const completed = start + batch.length;
-        setFileLoadProgress({ completed, total: submissionFiles.length });
-        setMessage(`Chargement des fichiers du reçu ${completed} / ${submissionFiles.length}…`);
-      }
       const publicKey = await provider.getPublicKey();
       const feeEstimate = await getRecommendedFeeEstimate(activeChainEnum);
       const liveFeeRate = feeEstimate.feeRate;
       await loadLiveWalletData(activeChainEnum, activeAddress, publicKey);
-      let response: Response;
-      try {
-        response = await fetch(`${API_BASE}/api/inscribe/order`, {
-          mode: "cors",
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ receiver: activeAddress, refundAddress: activeAddress, userAddress: activeAddress, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: activeChainEnum, files: encodedFiles, ...(protocol ? { protocol } : {}) }),
-        });
-      } catch {
-        throw new Error("The UniSat inscription service is unavailable. Check the network connection, then try again without closing the wallet.");
+      setFileLoadProgress({ completed: 0, total: submissionFiles.length });
+      for (let batchIndex = 0; batchIndex < submissionBatches.length; batchIndex += 1) {
+        const batchFiles = submissionBatches[batchIndex];
+        const batchFileIndexes = targetFileIndexes.slice(batchFileCursor, batchFileCursor + batchFiles.length);
+        const encodedFiles: Array<{ filename: string; dataURL: string }> = [];
+        const readConcurrency = 8;
+        for (let start = 0; start < batchFiles.length; start += readConcurrency) {
+          const readBatch = batchFiles.slice(start, start + readConcurrency);
+          const encodedBatch = await Promise.all(readBatch.map(async file => ({ filename: file.name, dataURL: await readAsDataUrl(file) })));
+          encodedFiles.push(...encodedBatch);
+          const completed = batchFileCursor + start + readBatch.length;
+          setFileLoadProgress({ completed, total: submissionFiles.length });
+          setMessage(`Uploading selected files to UniSat · receipt ${batchIndex + 1}/${submissionBatches.length} · ${completed}/${submissionFiles.length} files…`);
+        }
+        let response: Response;
+        try {
+          response = await fetch(`${API_BASE}/api/inscribe/order`, {
+            mode: "cors",
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ receiver: activeAddress, refundAddress: activeAddress, userAddress: activeAddress, userPubkey: publicKey, feeRate: liveFeeRate, outputValue: 546, chain: activeChainEnum, files: encodedFiles, ...(protocol ? { protocol } : {}) }),
+          });
+        } catch {
+          requestMayHaveCreatedUntrackedOrder = true;
+          throw new Error(`The UniSat service could not prepare receipt ${batchIndex + 1}/${submissionBatches.length}. Already-created receipts are saved; no payment was started.`);
+        }
+        let created: { orderId?: string; payAddress?: string; amount?: number; quoteAmount?: number; feeRate?: number; feeSources?: FeeEstimate["sources"]; feeStrategy?: FeeEstimate["strategy"]; error?: string };
+        try { created = await response.json(); }
+        catch { requestMayHaveCreatedUntrackedOrder = response.ok || response.status >= 500; throw new Error(`UniSat returned no readable response for receipt ${batchIndex + 1}/${submissionBatches.length}. Check UniSat before retrying.`); }
+        if (!response.ok || !created.orderId || !created.payAddress || !Number.isSafeInteger(created.amount) || !Number.isSafeInteger(created.feeRate) || Number(created.feeRate) < 1) {
+          requestMayHaveCreatedUntrackedOrder = response.status >= 500;
+          throw new Error(created.error || `UniSat did not verify receipt ${batchIndex + 1}/${submissionBatches.length}.`);
+        }
+        const feeSourceLabel = describeFeeSources(created.feeStrategy ?? feeEstimate.strategy, created.feeSources ?? feeEstimate.sources);
+        const receiptFiles = batchFiles.length ? batchFiles.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })) : [{ filename: mode === "brc20" ? `brc20-${brc20Operation}-${ticker}.json` : mode === "runes-etch" ? "runes-etch.json" : mode === "runes-mint" ? "runes-mint.json" : mode === "alkanes-deploy" ? "alkanes-deploy-payload" : "alkanes-mint.json", size: 0, type: "Protocol inscription" }];
+        const newReceipt: InscribeReceipt = { orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: receiptFiles, feeRate: Number(created.feeRate), paymentFeeRate: liveFeeRate, feeSourceLabel, chain: activeChainEnum, walletAddress: activeAddress, createdAt: new Date().toISOString() };
+        requestMayHaveCreatedUntrackedOrder = false;
+        ordersBeingPrepared = [...ordersBeingPrepared, { receipt: newReceipt, fileIndexes: batchFileIndexes, status: "awaiting-payment" }];
+        storePreparedOrders(ordersBeingPrepared, startingOrderIndex);
+        recordOrderHistory(newReceipt, "awaiting-payment");
+        batchFileCursor += batchFiles.length;
       }
-      const created = await response.json() as { orderId?: string; payAddress?: string; amount?: number; quoteAmount?: number; feeRate?: number; feeSources?: FeeEstimate["sources"]; feeStrategy?: FeeEstimate["strategy"]; error?: string };
-      if (!response.ok || !created.orderId || !created.payAddress || !Number.isSafeInteger(created.amount) || !Number.isSafeInteger(created.feeRate) || Number(created.feeRate) < 1) throw new Error(created.error || "UniSat did not create the order with a verifiable fee rate.");
-      const feeSourceLabel = describeFeeSources(created.feeStrategy ?? feeEstimate.strategy, created.feeSources ?? feeEstimate.sources);
-      const receiptFiles = submissionFiles.length ? submissionFiles.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })) : [{ filename: mode === "brc20" ? `brc20-${brc20Operation}-${ticker}.json` : mode === "runes-etch" ? "runes-etch.json" : mode === "runes-mint" ? "runes-mint.json" : mode === "alkanes-deploy" ? "alkanes-deploy-payload" : "alkanes-mint.json", size: 0, type: "Protocol inscription" }];
-      createdReceipt = { orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: receiptFiles, feeRate: Number(created.feeRate), paymentFeeRate: liveFeeRate, feeSourceLabel, chain: activeChainEnum, walletAddress: activeAddress, createdAt: new Date().toISOString() };
+      const firstNewOrder = ordersBeingPrepared[startingOrderIndex];
+      const createdOrders = ordersBeingPrepared.slice(startingOrderIndex);
+      const queueTotalSats = getInscribeOrderTotalSats(createdOrders.map(order => order.receipt));
       if (mobileUniSat) {
-        await ensureNativePaymentBalance(activeChainEnum, activeAddress, createdReceipt.amount, liveFeeRate, "inscribe-payment", { mobile: true });
-        setMobilePaymentPreflight({ key: paymentPreflightKeyFor(createdReceipt), checkedAt: Date.now() });
+        await ensureNativePaymentBalance(activeChainEnum, activeAddress, firstNewOrder.receipt.amount, liveFeeRate, "inscribe-payment", { mobile: true });
+        setMobilePaymentPreflight({ key: paymentPreflightKeyFor(firstNewOrder.receipt), checkedAt: Date.now() });
       }
-      setReceipt(createdReceipt);
-      saveActiveMobileOrder(createdReceipt);
-      recordOrderHistory(createdReceipt, "awaiting-payment");
+      setReceipt(firstNewOrder.receipt);
+      saveActiveMobileOrder(firstNewOrder.receipt);
+      setTxid("");
+      setInscriptionIds([]);
+      setOrderFiles([]);
       setStage("awaiting-approval");
-      setMessage(`Order ${createdReceipt.orderId} is ready${fileBatches.length > 1 ? ` (batch 1 of ${fileBatches.length})` : ""}. Click “Approve payment in UniSat” to review ${createdReceipt.amount.toLocaleString()} sats to ${createdReceipt.payAddress}; verify the fees and transaction in the wallet before approval.${fileBatches.length > 1 ? " Each following batch requires its own receipt and wallet approval." : ""}`);
+      const createdFileCount = createdOrders.reduce((sum, order) => sum + order.fileIndexes.length, 0);
+      setMessage(`${createdOrders.length} UniSat receipt(s) prepared for ${createdFileCount || firstNewOrder.receipt.files.length} file(s). Quoted order amount total: ${queueTotalSats.toLocaleString()} sats, plus wallet network fees. No payment has been sent. Approve each receipt separately in UniSat; review its destination, amount, and fees before confirming.`);
     } catch (error) {
-      if (createdReceipt) { setMobilePaymentPreflight(null); setReceipt(createdReceipt); saveActiveMobileOrder(createdReceipt); recordOrderHistory(createdReceipt, "awaiting-payment"); setStage("awaiting-approval"); setMessage(`Order ${createdReceipt.orderId} exists and has been saved. No payment was started. Do not create another order. Correct the balance issue, then use “Verify safe balance” on this receipt. Details: ${error instanceof Error ? error.message : "Unknown error"}`); }
+      if (requestMayHaveCreatedUntrackedOrder) {
+        setCreationUncertain(true);
+        try { localStorage.setItem(INSCRIBE_CREATION_UNCERTAIN_KEY, "true"); } catch { /* unavailable storage */ }
+      }
+      const newlyCreated = ordersBeingPrepared.slice(startingOrderIndex);
+      if (newlyCreated.length) {
+        const firstNewOrder = newlyCreated[0];
+        setMobilePaymentPreflight(null);
+        setReceipt(firstNewOrder.receipt);
+        setActivePreparedIndex(startingOrderIndex);
+        persistPreparedOrders(ordersBeingPrepared, startingOrderIndex);
+        saveActiveMobileOrder(firstNewOrder.receipt);
+        setTxid("");
+        setStage("awaiting-approval");
+        setMessage(`${newlyCreated.length} receipt(s) created before preparation stopped. The created receipts are saved and no payment was started. ${requestMayHaveCreatedUntrackedOrder ? "The interrupted batch may also have created an order; check UniSat before retrying it." : ""} Approve or cancel these orders first; then prepare the still-unreceipted files. Details: ${error instanceof Error ? error.message : "Unknown error"}`);
+      }
       else { setStage("idle"); setMessage(error instanceof Error ? error.message : "Unable to prepare the inscription."); }
     }
   };
@@ -508,9 +601,28 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       if (["minted", "completed", "success"].includes(nextStatus)) {
         saveCompletedHistory(data.files ?? [], activeReceipt, paymentTxid);
         clearActiveMobileOrder();
+        const updatedOrders = updatePreparedOrderStatus(activeReceipt.orderId, "completed");
+        const completedIndex = updatedOrders.findIndex(order => order.receipt.orderId === activeReceipt.orderId);
+        const nextIndex = updatedOrders.findIndex((order, index) => index > completedIndex && order.status === "awaiting-payment");
+        if (nextIndex >= 0) {
+          const nextOrder = updatedOrders[nextIndex];
+          setActivePreparedIndex(nextIndex);
+          persistPreparedOrders(updatedOrders, nextIndex);
+          setReceipt(nextOrder.receipt);
+          setTxid("");
+          setStatus("");
+          setFinalReceipt(null);
+          setOrderFiles([]);
+          setInscriptionIds([]);
+          saveActiveMobileOrder(nextOrder.receipt);
+          setStage("awaiting-approval");
+          setMessage(`Receipt ${completedIndex + 1}/${updatedOrders.length} is complete. Receipt ${nextIndex + 1}/${updatedOrders.length} is ready for separate approval: ${nextOrder.receipt.amount.toLocaleString()} sats to ${nextOrder.receipt.payAddress}, plus UniSat wallet fees. No next payment has been sent.`);
+          return;
+        }
         setStage("completed");
-        const remainingFiles = Math.max(0, files.length - activeReceipt.files.length);
-        setMessage(remainingFiles ? `Lot terminé. ${remainingFiles} fichier(s) restent dans la file; préparez le reçu suivant puis approuvez-le dans UniSat.` : "Toutes les inscriptions créées sont visibles dans le reçu final live et l’historique du wallet."); return;
+        const hasFileOrders = updatedOrders.some(order => order.fileIndexes.length > 0);
+        const remainingFiles = hasFileOrders ? getUnpreparedInscribeFileIndexes(files.length, updatedOrders.map(order => ({ ...order, amount: order.receipt.amount }))).length : 0;
+        setMessage(remainingFiles ? `All prepared orders are complete. ${remainingFiles} selected file(s) still need receipts; click “Prepare remaining receipts” to continue.` : "All prepared inscriptions are visible in the live receipt and wallet history."); return;
       }
       if (["failed", "cancelled", "payment_notenough", "payment_overpay"].includes(nextStatus)) { recordOrderHistory(activeReceipt, nextStatus, paymentTxid); throw new Error(`The UniSat order is in state ${nextStatus}.`); }
       await new Promise(resolve => window.setTimeout(resolve, 10000));
@@ -537,6 +649,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       const normalizedTxid = returnedTxid.toLowerCase();
       returnedPaymentTxid = normalizedTxid;
       setTxid(normalizedTxid);
+      updatePreparedOrderStatus(activeReceipt.orderId, "payment-sent");
       saveActiveMobileOrder(activeReceipt, normalizedTxid);
       recordOrderHistory(activeReceipt, "payment-sent", normalizedTxid);
       const initialPaymentReceipt: MempoolReceipt = { txid: normalizedTxid, network: activeReceipt.chain === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin", status: "checking", message: "Payment approved. Searching Mempool…", blockHeight: null, explorerUrl: "", checkedAt: new Date().toISOString() };
@@ -549,6 +662,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       const detail = walletErrorMessage(error);
       if (!paymentReturned && isMobileUniSatDevice()) setMobilePaymentPreflight(null);
       if (paymentReturned) {
+        updatePreparedOrderStatus(activeReceipt.orderId, "payment-sent");
         recordOrderHistory(activeReceipt, "payment-sent", returnedPaymentTxid);
         setStage("tracking");
         setMessage(`Payment was already broadcast under TXID ${returnedPaymentTxid}. Do not pay again. Inscription tracking error: ${detail}`);
@@ -557,19 +671,21 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       const mobileUtxoGuidance = isMobileUniSatDevice() ? getMobileUtxoErrorGuidance(error, "inscribe-payment") : null;
       if (mobileUtxoGuidance && !canceled) {
         if (mobileUtxoGuidance.definitelyNotBroadcast) {
+          updatePreparedOrderStatus(activeReceipt.orderId, "awaiting-payment");
           saveActiveMobileOrder(activeReceipt, "", false);
           recordOrderHistory(activeReceipt, "awaiting-payment");
           setStage("awaiting-approval");
         } else {
+          updatePreparedOrderStatus(activeReceipt.orderId, "payment-sent");
           recordOrderHistory(activeReceipt, "payment-uncertain");
           setStage("tracking");
         }
         setMessage(`${mobileUtxoGuidance.message} UniSat detail : ${detail}`);
         return;
       }
-      if (canceled) { saveActiveMobileOrder(activeReceipt, "", false); recordOrderHistory(activeReceipt, "approval-cancelled"); }
+      if (canceled) { updatePreparedOrderStatus(activeReceipt.orderId, "awaiting-payment"); saveActiveMobileOrder(activeReceipt, "", false); recordOrderHistory(activeReceipt, "approval-cancelled"); }
       const mayHaveBeenSent = paymentReturned || !canceled;
-      if (mayHaveBeenSent) recordOrderHistory(activeReceipt, "payment-uncertain");
+      if (mayHaveBeenSent) { updatePreparedOrderStatus(activeReceipt.orderId, "payment-sent"); recordOrderHistory(activeReceipt, "payment-uncertain"); }
       setStage(mayHaveBeenSent ? "tracking" : "awaiting-approval");
       setMessage(mayHaveBeenSent
         ? `Payment may have been sent. Do not click again until you check UniSat activity and Mempool. No TXID was recovered. UniSat detail : ${detail}`
@@ -612,6 +728,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     if (!Number.isSafeInteger(receipt.amount) || receipt.amount <= 0 || !Number.isFinite(feeRate) || feeRate <= 0 || !receipt.payAddress) return setMessage("The receipt does not contain a valid amount, address, or fee; no payment was started.");
     setStage("paying");
     setMessage(`Opening sendBitcoin in UniSat. Verify ${receipt.amount.toLocaleString()} sats to ${receipt.payAddress} and the fees displayed by the wallet before approving.`);
+    updatePreparedOrderStatus(receipt.orderId, "payment-review");
     saveActiveMobileOrder(receipt, "", true);
     recordOrderHistory(receipt, "payment-review");
     let paymentPromise: Promise<string>;
@@ -620,6 +737,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       paymentPromise = sendNativeUniSatBitcoinPayment(provider, receipt.payAddress, receipt.amount, feeRate);
     } catch (error) {
       if (mobileDevice) setMobilePaymentPreflight(null);
+      updatePreparedOrderStatus(receipt.orderId, isWalletCancellation(error) ? "awaiting-payment" : "payment-sent");
       saveActiveMobileOrder(receipt, "", false);
       recordOrderHistory(receipt, isWalletCancellation(error) ? "approval-cancelled" : "awaiting-payment");
       setStage("awaiting-approval");
@@ -648,6 +766,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       return;
     }
     setMobilePaymentPreflight(null);
+    updatePreparedOrderStatus(receipt.orderId, "awaiting-payment");
     saveActiveMobileOrder(receipt, "", false);
     setStage("awaiting-approval");
     setMessage("Approval is available again for this same receipt. Tap Approve payment in UniSat only after confirming no payment was sent.");
@@ -674,8 +793,21 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       recordOrderHistory(receipt, "cancelled");
       clearActiveMobileOrder();
       setMobilePaymentPreflight(null);
-      setReceipt(null); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("idle");
-      setMessage("Commande annulée dans UniSat. Aucun paiement n’a été envoyé; le reçu local a été supprimé. Vous pouvez préparer un nouveau lot.");
+      const updatedOrders = updatePreparedOrderStatus(receipt.orderId, "cancelled");
+      const cancelledIndex = updatedOrders.findIndex(order => order.receipt.orderId === receipt.orderId);
+      const nextIndex = updatedOrders.findIndex((order, index) => index > cancelledIndex && order.status === "awaiting-payment");
+      if (nextIndex >= 0) {
+        const nextOrder = updatedOrders[nextIndex];
+        setActivePreparedIndex(nextIndex);
+        persistPreparedOrders(updatedOrders, nextIndex);
+        setReceipt(nextOrder.receipt); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("awaiting-approval");
+        saveActiveMobileOrder(nextOrder.receipt);
+        setMessage(`The current unpaid UniSat order was canceled. Receipt ${nextIndex + 1}/${updatedOrders.length} remains ready; review and approve it separately, or cancel it in UniSat.`);
+      } else {
+        setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("completed");
+        const retryCount = getUnpreparedInscribeFileIndexes(files.length, updatedOrders.map(order => ({ ...order, amount: order.receipt.amount }))).length;
+        setMessage(`The current unpaid UniSat order was canceled; no payment was sent. ${retryCount} selected file(s) now need a new receipt. Click “Prepare remaining receipts” to retry them.`);
+      }
     } catch (error) {
       setStage("awaiting-approval");
       setMessage(`Annulation non confirmée. Le reçu est conservé et aucun nouvel ordre n’a été créé. ${error instanceof Error ? error.message : "Vérifiez UniSat avant toute nouvelle action."}`);
@@ -683,10 +815,20 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   };
   const reviewSavedMobileOrder = () => {
     const saved = readActiveMobileOrder();
-    if (!saved) return setMessage("No saved Inscribe receipt is available.");
+    const savedQueue = readPreparedOrders();
+    const activeOrder = savedQueue?.orders[savedQueue.activeIndex];
+    const savedReceipt = saved?.receipt ?? activeOrder?.receipt;
+    if (!savedReceipt) return setMessage("No saved Inscribe receipt is available.");
+    if (savedQueue) {
+      setPreparedOrders(savedQueue.orders);
+      setActivePreparedIndex(savedQueue.activeIndex);
+    }
     setMobilePaymentPreflight(null);
-    setReceipt(saved.receipt); setTxid(saved.txid); setStage(saved.txid || saved.paymentStarted ? "tracking" : "awaiting-approval");
-    setMessage(saved.txid ? "Saved receipt displayed. Resume tracking without restarting payment." : saved.paymentStarted ? "Receipt displayed. Verify UniSat activity before any other action; no second payment will be sent." : "Saved receipt displayed. No payment is recorded as started.");
+    const savedTxid = saved?.receipt.orderId === savedReceipt.orderId ? saved.txid : "";
+    const savedStatus = activeOrder?.receipt.orderId === savedReceipt.orderId ? activeOrder.status : "awaiting-payment";
+    const paymentMayHaveStarted = Boolean(savedTxid || saved?.paymentStarted || ["payment-review", "payment-sent"].includes(savedStatus));
+    setReceipt(savedReceipt); setTxid(savedTxid); setStage(paymentMayHaveStarted ? "tracking" : "awaiting-approval");
+    setMessage(savedTxid ? "Saved receipt displayed. Resume tracking without restarting payment." : paymentMayHaveStarted ? "A payment may have started for this saved receipt. Verify UniSat activity before any other action; no second payment will be sent." : `Saved UniSat receipt ${savedQueue ? `${savedQueue.activeIndex + 1}/${savedQueue.orders.length}` : ""} displayed. No payment is recorded as started.`);
   };
   const clearUnpaidMobileReceipt = () => {
     const saved = readActiveMobileOrder();
@@ -706,12 +848,10 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
     setMessage(`Unpaid receipt cleared from this device only. The UniSat order may still exist; ${files.length ? `${files.length} fichier(s) choisi(s) conservé(s).` : "vous pouvez maintenant choisir des fichiers."}`);
   };
   const prepareNextBatch = () => {
-    if (stage !== "completed" || !receipt) return;
-    const remaining = getRemainingInscribeFiles(files, stage, receipt.files.length);
-    if (!remaining.length) return;
-    setFiles(remaining);
-    setReceipt(null); setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]); setStage("idle");
-    setMessage(`Le lot précédent est terminé. ${remaining.length} fichier(s) restent; préparez le reçu du prochain lot.`);
+    if (stage !== "completed" || !receipt || !unpreparedFileIndexes.length) return;
+    setMobilePaymentPreflight(null);
+    setTxid(""); setStatus(""); setFinalReceipt(null); setInscriptionIds([]); setOrderFiles([]);
+    void prepareOrder();
   };
   const downloadSelectedHistoryBatches = () => {
     const group = historyGroups.find(item => selectedHistoryBatches.includes(item.orderId));
@@ -732,21 +872,23 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   const canApprovePayment = Boolean(receipt && (receipt.paymentFeeRate ?? receipt.feeRate) > 0 && receipt.amount > 0 && receipt.payAddress);
   const busy = ["preparing", "paying"].includes(stage) || mobilePreflightBusy;
   const savedMobileOrder = readActiveMobileOrder();
+  const hasUnresolvedPreparedOrders = preparedOrders.some(order => !["completed", "cancelled"].includes(order.status));
   const canClearUnpaidMobileReceipt = Boolean(!busy && !txid && (savedMobileOrder ? (!savedMobileOrder.txid && !savedMobileOrder.paymentStarted && (!receipt || savedMobileOrder.receipt.orderId === receipt.orderId)) : (receipt && stage === "awaiting-approval")));
-  const fileSelectionLocked = busy || Boolean(savedMobileOrder && !receipt) || (!mobileDevice && Boolean(receipt) && stage !== "completed");
+  const fileSelectionLocked = busy || Boolean(savedMobileOrder && !receipt) || Boolean(hasUnresolvedPreparedOrders && !receipt) || (!mobileDevice && Boolean(receipt) && stage !== "completed");
   const fileSelectionAllowed = mode === "files" || mode === "runes-etch" || mode === "alkanes-deploy";
-  const canPrepareOrder = mode === "files" ? currentBatchFiles.length > 0 : mode === "alkanes-deploy" ? files.length > 0 : true;
+  const canPrepareOrder = mode === "files" ? unpreparedFileIndexes.length > 0 : mode === "alkanes-deploy" ? files.length > 0 : true;
   return <>
     <button id="inscribe-start" type="button" onClick={() => setOpen(true)} className="inline-flex min-h-11 scroll-mt-16 items-center gap-2 border border-[#d99a54] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63] hover:bg-[#d99a54]/10"><FilePlus2 size={13} /> Inscribe files</button>
     {open && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#07090c]/80 p-4" onClick={event => { if (event.target === event.currentTarget) setOpen(false); }} role="dialog" aria-modal="true" aria-labelledby="inscribe-modal-title" data-transaction-dialog><div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto border border-[#3b434d] bg-[#14191f] p-5 shadow-2xl">
       <div className="flex items-start justify-between gap-4"><div><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#d99a54]">{chain?.enum === "BITCOIN_MAINNET" ? "Bitcoin" : chain?.enum === "FRACTAL_BITCOIN_MAINNET" ? "Fractal Bitcoin" : "Bitcoin / Fractal Bitcoin"} Ordinals · UniSat approved</p><h2 id="inscribe-modal-title" className="mt-2 font-display text-2xl text-[#f3efe5]">Inscribe files dashboard</h2></div><button type="button" onClick={() => setOpen(false)} className="p-2 text-[#9ea7b3] hover:text-[#f3efe5]" aria-label="Close"><X size={18} /></button></div>
       <p className="mt-2 font-mono text-[10px] leading-5 text-[#7f8b99]">Images, text, HTML, JSON, SVG, audio, video, PDF, and binary files are accepted. Each file must stay within the UniSat 365 KB limit.</p>
       <div className="mt-5 grid gap-2 sm:grid-cols-4"><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Files</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{files.length} / {MAX_FILES}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">{fileBatches.length ? `${fileBatches.length} receipt batch${fileBatches.length === 1 ? "" : "es"}` : "No batch yet"}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Total size</p><p className="mt-1 font-display text-xl text-[#f3efe5]">{formatBytes(totalBytes)}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">JSON estimé: {formatBytes(estimateInscribeRequestBytes(files))}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Network</p><p className="mt-1 truncate font-mono text-xs text-[#f2bd63]">{chain?.name ?? chain?.enum}</p></div><div className="border border-[#3b434d] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Live status</p><p className="mt-1 font-mono text-xs text-[#f2bd63]">{status ? describeStatus(status) : "Ready"}</p></div></div>
-{savedMobileOrder && !receipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="status"><p>A saved Inscribe receipt exists. It will not open automatically. Review it to resume the order; if no payment was sent, you may clear only its local copy.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={reviewSavedMobileOrder} className="border border-[#e0b45f]/60 px-3 py-2 underline">Review saved receipt</button>{canClearUnpaidMobileReceipt && <button type="button" onClick={clearUnpaidMobileReceipt} className="border border-[#e0b45f]/60 px-3 py-2 underline">I verified that no payment was sent — clear local receipt</button>}</div></div>}
+{(savedMobileOrder || preparedOrders.length > 0) && !receipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="status"><p>A saved Inscribe receipt queue exists. It will not open automatically. Review it to resume the same UniSat orders; do not prepare duplicates. If a payment may have been sent, check wallet activity before continuing.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={reviewSavedMobileOrder} className="border border-[#e0b45f]/60 px-3 py-2 underline">Review saved receipt queue</button>{canClearUnpaidMobileReceipt && <button type="button" onClick={clearUnpaidMobileReceipt} className="border border-[#e0b45f]/60 px-3 py-2 underline">I verified that no payment was sent — clear local receipt</button>}</div></div>}
+      {creationUncertain && <div className="mt-4 border border-[#a45e54]/70 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#ffb8aa]" role="alert"><p>The last request to UniSat was interrupted. UniSat may have created an unpaid order even though this page did not receive its ID. Do not retry that batch until you inspect UniSat order activity.</p><button type="button" onClick={acknowledgeNoUnknownUniSatOrder} className="mt-2 border border-[#a45e54]/70 px-3 py-2 underline">I checked UniSat and confirmed no extra order exists</button></div>}
       <div role="tablist" aria-label="Inscription type" className="mt-4 flex gap-1 overflow-x-auto border-b border-[#2c323a]">
         {([
           ["files", "Files"], ["brc20", "BRC-20"], ["runes-etch", "Etch Rune"], ["runes-mint", "Mint Rune"], ["alkanes-deploy", "Deploy Alkane"], ["alkanes-mint", "Mint Alkane"],
-        ] as Array<[InscribeMode, string]>).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={mode === value} onClick={() => { setMode(value); setMessage(""); }} className={`min-h-10 shrink-0 border-b-2 px-3 font-mono text-[9px] uppercase ${mode === value ? "border-[#d99a54] text-[#f2bd63]" : "border-transparent text-[#718092] hover:text-[#d9d3c6]"}`}>{label}</button>)}
+        ] as Array<[InscribeMode, string]>).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={mode === value} disabled={hasUnresolvedPreparedOrders || (preparedOrders.some(order => order.fileIndexes.length > 0) && unpreparedFileIndexes.length > 0 && value !== "files")} onClick={() => { setMode(value); setMessage(""); }} className={`min-h-10 shrink-0 border-b-2 px-3 font-mono text-[9px] uppercase disabled:opacity-40 ${mode === value ? "border-[#d99a54] text-[#f2bd63]" : "border-transparent text-[#718092] hover:text-[#d9d3c6]"}`}>{label}</button>)}
       </div>
       {mode === "brc20" && <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <label className="font-mono text-[9px] uppercase text-[#718092]">Operation<select value={brc20Operation} onChange={event => setBrc20Operation(event.target.value as typeof brc20Operation)} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]"><option value="deploy">Deploy</option><option value="mint">Mint</option><option value="transfer">Create transfer inscription</option></select></label>
@@ -775,9 +917,10 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
 {canClearUnpaidMobileReceipt && receipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]"><p>Confirm that no payment was sent before adding new files. This clears the receipt from this device; it does not cancel the pending UniSat order.</p><button type="button" onClick={clearUnpaidMobileReceipt} className="mt-2 border border-[#e0b45f]/60 px-3 py-2 underline">I verified that no payment was sent — clear local receipt</button></div>}
 {fileSelectionAllowed ? <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); chooseFiles(Array.from(event.dataTransfer.files ?? [])); }} className={`${mobileDevice ? "relative " : ""}mt-5 flex cursor-pointer flex-col items-center justify-center border border-dashed border-[#d99a54]/70 bg-[#10151a] px-5 py-8 text-center hover:bg-[#d99a54]/5`}><Upload size={22} className="text-[#d99a54]" /><span className="mt-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#d9d3c6]">{mobileDevice ? "Tap here to choose files" : mode === "runes-etch" ? "Drop an optional Rune artwork file" : "Drop or add files to inscribe"}</span><span className="mt-2 font-mono text-[10px] text-[#718092]">Maximum {MAX_FILES} files · 365 KB per file · multiple selection</span><input ref={filePickerRef} type="file" multiple accept="*/*" className={mobileDevice ? "absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0" : "sr-only"} disabled={fileSelectionLocked} onChange={event => { const selected = Array.from(event.currentTarget.files ?? []); chooseFiles(selected); if (mobileDevice) event.currentTarget.value = ""; }} /></label> : files.length > 0 && <p className="mt-5 border border-[#3b434d] p-3 font-mono text-[10px] leading-5 text-[#718092]">The existing file queue is retained locally and will not be included in this protocol-only order.</p>}
       {fileLoadProgress.total > 0 && stage === "preparing" && <div className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3" role="status" aria-live="polite"><div className="flex items-center justify-between gap-3 font-mono text-[10px] uppercase text-[#f2bd63]"><span>Chargement des fichiers</span><span>{fileLoadProgress.completed} / {fileLoadProgress.total}</span></div><div className="mt-2 h-1.5 overflow-hidden bg-[#2c323a]"><div className="h-full bg-[#d99a54] transition-[width] duration-150" style={{ width: `${Math.round((fileLoadProgress.completed / fileLoadProgress.total) * 100)}%` }} /></div></div>}
-      {files.length > 0 && <div className="mt-4 overflow-hidden border border-[#3b434d] bg-[#10151a]"><div className="flex items-center justify-between border-b border-[#3b434d] px-3 py-2"><span className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#d9d3c6]"><Files size={13} /> File queue</span><button type="button" disabled={busy || Boolean(receipt && stage !== "completed")} onClick={clearFileQueue} className="font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">{receipt && stage === "completed" ? "Clear completed queue" : "Vider"}</button></div><div className="max-h-48 overflow-y-auto">{files.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 border-b border-[#2c323a] px-3 py-2 last:border-b-0"><div className="min-w-0"><p className="truncate font-mono text-[10px] text-[#d9d3c6]">{index + 1}. {file.name}</p><p className="font-mono text-[9px] text-[#718092]">{fileKind(file)} · {formatBytes(file.size)}</p></div><button type="button" disabled={!canRemoveInscribeQueueFile(index, stage, receipt?.files.length ?? null, busy)} onClick={() => removeFile(index)} className="shrink-0 font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">Retirer</button></div>)}</div></div>}
-      {fileBatches.length > 1 && <p className="mt-3 border border-[#d99a54]/50 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#f2bd63]" role="status">These files need {fileBatches.length} receipts because of UniSat’s request-size limit. Prepare and approve each batch separately; the next batch becomes available after the current inscriptions complete.</p>}
-      <p className="mt-3 border border-[#d99a54]/40 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#f2bd63]">Choose files, tap <strong>Prepare receipt</strong>, then tap <strong>Approve payment in UniSat</strong>. Review the address, amount and network fee in the wallet before approval.</p>
+      {files.length > 0 && <div className="mt-4 overflow-hidden border border-[#3b434d] bg-[#10151a]"><div className="flex items-center justify-between border-b border-[#3b434d] px-3 py-2"><span className="flex items-center gap-2 font-mono text-[10px] uppercase text-[#d9d3c6]"><Files size={13} /> File queue</span><button type="button" disabled={busy || Boolean(receipt && stage !== "completed") || hasUnresolvedPreparedOrders} onClick={clearFileQueue} className="font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">{receipt && stage === "completed" ? "Clear completed queue" : "Vider"}</button></div><div className="max-h-48 overflow-y-auto">{files.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 border-b border-[#2c323a] px-3 py-2 last:border-b-0"><div className="min-w-0"><p className="truncate font-mono text-[10px] text-[#d9d3c6]">{index + 1}. {file.name}</p><p className="font-mono text-[9px] text-[#718092]">{fileKind(file)} · {formatBytes(file.size)}</p></div><button type="button" disabled={!canRemoveInscribeQueueFile(index, stage, receipt?.files.length ?? null, busy)} onClick={() => removeFile(index)} className="shrink-0 font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">Retirer</button></div>)}</div></div>}
+      {fileBatches.length > 1 && <p className="mt-3 border border-[#d99a54]/50 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#f2bd63]" role="status">The selected files require {fileBatches.length} UniSat receipts because of the request-size limit. “Prepare all receipts” uploads every batch and obtains its unpaid quote first. You will then approve each receipt separately in UniSat; no payment is sent during preparation.</p>}
+      {preparedOrders.length > 0 && <section className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3" aria-label="Prepared UniSat receipt queue"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63]">UniSat receipts prepared · {preparedOrders.length}</h3><p className="font-mono text-[10px] text-[#d9d3c6]">Outstanding order amount: {outstandingOrderTotal.toLocaleString()} sats · plus wallet fees</p></div><p className="mt-1 font-mono text-[9px] leading-4 text-[#9ea7b3]">No payment is sent until you approve a receipt. Each receipt is reviewed and paid separately in UniSat.</p><div className="mt-2 max-h-40 space-y-1 overflow-y-auto">{preparedOrders.map((order, index) => <div key={order.receipt.orderId} className={`flex flex-wrap items-center justify-between gap-2 border px-2 py-1.5 font-mono text-[9px] ${index === activePreparedIndex ? "border-[#d99a54]/70 text-[#f2bd63]" : "border-[#2c323a] text-[#9ea7b3]"}`}><span>Receipt {index + 1} · {order.fileIndexes.length || order.receipt.files.length} file(s) · {order.status.replaceAll("-", " ")}</span><span>{order.receipt.amount.toLocaleString()} sats</span><span className="max-w-full truncate text-[#718092]">{order.receipt.orderId}</span></div>)}</div></section>}
+      <p className="mt-3 border border-[#d99a54]/40 bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#f2bd63]">Choose up to 1,000 files and tap <strong>Prepare all receipts</strong>. The files are uploaded to the UniSat order service and unpaid receipts are created. Then approve each receipt separately in UniSat; review the destination, exact amount, network and wallet fees before confirming. Preparation alone does not send payment.</p>
       <p className="mt-4 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">Dynamic fee rate · 30-minute target · server consensus uses the maximum of Mempool and UniSat recommendations. If estimators are unavailable, no stale manual value is used. UniSat always shows the final cost before signing.</p>
       {(receipt || busy || stage === "completed") && <div className="mt-5 border border-[#d99a54]/60 bg-[#10151a] p-4"><div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f2bd63]"><ShieldCheck size={14} /> Pre-order receipt and wallet approval</div>{receipt && mobileDevice && <UniSatMobileOpenDappLink site={site} walletMethodAvailable={typeof window.unisat?.sendBitcoin === "function"} methodLabel="sendBitcoin" />}{receipt && isMobileUniSatDevice() && <MobileReceiptWalletCard address={address} chain={chain} liveWallet={liveWallet} onRefresh={() => { void refreshLiveWalletData(); }} />}{receipt && <div className="mt-3 grid gap-2 font-mono text-[10px] text-[#d9d3c6] sm:grid-cols-2"><div className="border border-[#d99a54]/40 bg-[#151a1f] p-3 sm:col-span-2"><p className="flex items-center gap-2 uppercase tracking-[0.1em] text-[#f2bd63]"><Activity size={12} /> Live UniSat data · synchronized before receipt</p><div className="mt-2 grid gap-2 sm:grid-cols-2"><p className="break-all"><span className="text-[#718092]">Address:</span> {address}</p><p><span className="text-[#718092]">Network:</span> {chain?.name ?? chain?.enum}</p><p><span className="text-[#718092]">Available balance:</span> {liveWallet?.available != null ? `${liveWallet.available.toLocaleString()} ${liveWallet.asset}` : "Unavailable"}</p><p><span className="text-[#718092]">Total balance:</span> {liveWallet?.total != null ? `${liveWallet.total.toLocaleString()} ${liveWallet.asset}` : "Unavailable"}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Public key:</span> {liveWallet?.publicKey || "Unavailable"}</p><p><span className="text-[#718092]">Synchronized:</span> {liveWallet ? new Date(liveWallet.refreshedAt).toLocaleTimeString() : "Unavailable"}</p></div></div><p><span className="text-[#718092]">Files:</span> {receipt.files.length} · {formatBytes(receipt.files.reduce((sum, file) => sum + file.size, 0))}</p><p><span className="text-[#718092]">Amount:</span> {receipt.amount.toLocaleString()} sats</p><p><span className="text-[#718092]">Network:</span> {chain?.name ?? chain?.enum}</p><p><span className="text-[#718092]">Fee rate:</span> {receipt.feeRate} sat/vB</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Receiver :</span> {address}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Order ID :</span> {receipt.orderId}</p><p className="break-all sm:col-span-2"><span className="text-[#718092]">Payment address:</span> {receipt.payAddress}</p>{<div className="border border-[#d99a54]/40 bg-[#151a1f] p-3 sm:col-span-2"><p className="uppercase tracking-[0.1em] text-[#f2bd63]">Native UniSat payment · review before approval</p><p className="mt-1">Exact amount: {receipt.amount.toLocaleString()} sats · requested fee rate: {receipt.paymentFeeRate ?? receipt.feeRate} sat/vB</p><p>UniSat builds and broadcasts the transaction; verify the address, amount, and fees in its confirmation window.</p></div>}{txid && <p className="break-all sm:col-span-2"><span className="text-[#718092]">Payment TXID:</span> {txid}</p>}</div>}</div>}
       {finalReceipt && <div className="mt-4 border border-[#d99a54]/70 bg-[#10151a] p-4 font-mono text-[10px] leading-5" aria-label="Live final receipt"><p className="uppercase tracking-[0.12em] text-[#f2bd63]">Live final receipt · Mempool payment confirmation</p><p><span className="text-[#718092]">Status:</span> {finalReceipt.message}</p><p><span className="text-[#718092]">Network:</span> {finalReceipt.network}</p><p className="break-all"><span className="text-[#718092]">Payment TXID:</span> {finalReceipt.txid}</p>{finalReceipt.blockHeight !== null && <p><span className="text-[#718092]">Block:</span> {finalReceipt.blockHeight}</p>}<p><span className="text-[#718092]">Verified:</span> {new Date(finalReceipt.checkedAt).toLocaleString()}</p>{finalReceipt.explorerUrl && <a className="inline-flex items-center gap-1 text-[#d99a54] underline" href={finalReceipt.explorerUrl} target="_blank" rel="noreferrer">Open in Mempool <ExternalLink size={11} /></a>}</div>}
@@ -787,7 +930,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       {address && chain?.enum && inscriptionHistory.length === 0 && <div className="mt-4 border border-[#3b434d] bg-[#10151a] p-4 font-mono text-[10px] leading-5 text-[#9ea7b3]"><div className="flex items-center gap-2 uppercase text-[#f2bd63]"><CheckCircle2 size={14} /> Wallet history · retained for 2 months</div><p className="mt-2">No Inscribe orders or completed inscriptions are saved for this wallet on {chain.name ?? chain.enum}. New order and payment states will appear here.</p></div>}
       {(!address || !chain?.enum) && <p className="mt-4 border border-[#3b434d] bg-[#10151a] p-4 font-mono text-[10px] leading-5 text-[#9ea7b3]">Connect UniSat and select Bitcoin or Fractal mainnet to view this wallet’s Inscribe history.</p>}
       {message && <p className="mt-3 break-words font-mono text-[10px] leading-5 text-[#f2bd63]" role="status">{message}</p>}
-      <div className="mt-5 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end"><button type="button" onClick={() => setOpen(false)} className="min-h-11 w-full border border-[#3b434d] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#9ea7b3] sm:w-auto">Close</button>{!receipt && <button type="button" onClick={() => void prepareOrder()} disabled={!canPrepareOrder || busy} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:opacity-40 sm:w-auto">{stage === "preparing" ? "Preparing…" : mode === "files" && fileBatches.length > 1 ? `Prepare receipt · batch 1/${fileBatches.length}` : "Prepare receipt"}</button>}{receipt && stage === "awaiting-approval" && <button type="button" onClick={() => void cancelUnpaidOrder()} disabled={busy} className="min-h-11 w-full border border-[#a45e54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.08em] text-[#e08b7d] disabled:opacity-40 sm:w-auto">Cancel order and clear receipt</button>}{receipt && stage === "awaiting-approval" && canApprovePayment && (!mobileDevice || typeof window.unisat?.sendBitcoin === "function") && <button type="button" onClick={() => void approvePayment()} disabled={busy} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:opacity-40 sm:w-auto">Approve payment in UniSat</button>}{receipt && stage === "tracking" && !txid && <button type="button" onClick={restoreMobileApprovalAfterCheck} className="min-h-11 w-full border border-[#a45e54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.08em] text-[#f3efe5] sm:w-auto">I checked UniSat and Mempool: no payment sent — restore approval</button>}{receipt && stage === "tracking" && txid && <button type="button" onClick={() => void resumeOrderTracking()} className="min-h-11 w-full border border-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63] sm:w-auto">Resume tracking — do not pay again</button>}{receipt && stage === "completed" && files.length > receipt.files.length && <button type="button" onClick={prepareNextBatch} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] sm:w-auto">Prepare next receipt batch ({files.length - receipt.files.length} files left)</button>}{receipt && stage === "completed" && files.length <= receipt.files.length && <button type="button" onClick={startNewInscribeOrder} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] sm:w-auto">Start new Inscribe order</button>}</div>
+      <div className="mt-5 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end"><button type="button" onClick={() => setOpen(false)} className="min-h-11 w-full border border-[#3b434d] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#9ea7b3] sm:w-auto">Close</button>{!receipt && <button type="button" onClick={() => void prepareOrder()} disabled={!canPrepareOrder || busy || creationUncertain || Boolean(savedMobileOrder && !receipt) || Boolean(hasUnresolvedPreparedOrders && !receipt)} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:opacity-40 sm:w-auto">{stage === "preparing" ? "Preparing all receipts…" : mode === "files" && unpreparedBatches.length > 1 ? `Prepare all receipts · ${unpreparedBatches.length} batches` : mode === "files" ? "Prepare all receipts" : "Prepare receipt"}</button>}{receipt && stage === "awaiting-approval" && <button type="button" onClick={() => void cancelUnpaidOrder()} disabled={busy} className="min-h-11 w-full border border-[#a45e54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.08em] text-[#e08b7d] disabled:opacity-40 sm:w-auto">Cancel this unpaid receipt</button>}{receipt && stage === "awaiting-approval" && canApprovePayment && (!mobileDevice || typeof window.unisat?.sendBitcoin === "function") && <button type="button" onClick={() => void approvePayment()} disabled={busy} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:opacity-40 sm:w-auto">{preparedOrders.length > 1 ? `Approve receipt ${activePreparedIndex + 1}/${preparedOrders.length} in UniSat` : "Approve payment in UniSat"}</button>}{receipt && stage === "tracking" && !txid && <button type="button" onClick={restoreMobileApprovalAfterCheck} className="min-h-11 w-full border border-[#a45e54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.08em] text-[#f3efe5] sm:w-auto">I checked UniSat and Mempool: no payment sent — restore approval</button>}{receipt && stage === "tracking" && txid && <button type="button" onClick={() => void resumeOrderTracking()} className="min-h-11 w-full border border-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63] sm:w-auto">Resume tracking — do not pay again</button>}{receipt && stage === "completed" && preparedOrders.some(order => order.fileIndexes.length > 0) && unpreparedFileIndexes.length > 0 && <button type="button" onClick={prepareNextBatch} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] sm:w-auto">Prepare remaining receipts ({unpreparedFileIndexes.length} files)</button>}{receipt && stage === "completed" && (!preparedOrders.some(order => order.fileIndexes.length > 0) || unpreparedFileIndexes.length === 0) && <button type="button" onClick={startNewInscribeOrder} className="min-h-11 w-full border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] sm:w-auto">Start new Inscribe order</button>}</div>
       {receipt && <a className="mt-4 inline-flex items-center gap-1 font-mono text-[10px] text-[#d99a54] underline" href={`https://uniscan.cc/${chain?.enum === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : "bitcoin"}/address/${encodeURIComponent(address)}`} target="_blank" rel="noreferrer">View wallet activity on UniScan <ExternalLink size={11} /></a>}
     </div></div>}
   </>;
