@@ -50,6 +50,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
   const [passphrase, setPassphrase] = useState("");
   const [password, setPassword] = useState("");
   const [network, setNetwork] = useState<OrdiNetwork>("BITCOIN_MAINNET");
+  const [activeAddressType, setActiveAddressType] = useState<AddressType>("native-segwit");
   const [balances, setBalances] = useState<Record<AddressType, Balance>>({} as Record<AddressType, Balance>);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -169,15 +170,23 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
 
   useEffect(() => {
     if (!wallet || !connectedToSite) return;
+    const active = wallet.addresses[activeAddressType];
     publishLocalVaultSiteSession({
-      version: 1,
+      version: 2,
       site,
       network,
-      address: wallet.addresses["native-segwit"].address,
-      publicKey: wallet.addresses["native-segwit"].publicKey,
+      activeAddressType,
+      address: active.address,
+      publicKey: active.publicKey,
+      addresses: Object.fromEntries(ADDRESS_SPECS.map(spec => [spec.type, {
+        type: spec.type,
+        label: spec.label,
+        address: wallet.addresses[spec.type].address,
+        publicKey: wallet.addresses[spec.type].publicKey,
+      }])) as never,
       connectedAt: new Date().toISOString(),
     });
-  }, [wallet, connectedToSite, network, site]);
+  }, [wallet, connectedToSite, network, activeAddressType, site]);
 
   function toggleSiteConnection() {
     if (!wallet) {
@@ -191,12 +200,20 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
       // Browser storage may be unavailable.
     }
     if (next) {
+      const active = wallet.addresses[activeAddressType];
       publishLocalVaultSiteSession({
-        version: 1,
+        version: 2,
         site,
         network,
-        address: wallet.addresses["native-segwit"].address,
-        publicKey: wallet.addresses["native-segwit"].publicKey,
+        activeAddressType,
+        address: active.address,
+        publicKey: active.publicKey,
+        addresses: Object.fromEntries(ADDRESS_SPECS.map(spec => [spec.type, {
+          type: spec.type,
+          label: spec.label,
+          address: wallet.addresses[spec.type].address,
+          publicKey: wallet.addresses[spec.type].publicKey,
+        }])) as never,
         connectedAt: new Date().toISOString(),
       });
     } else {
@@ -266,6 +283,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
                   <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
                     <button type="button" onClick={toggleSiteConnection} className={`col-span-2 ${buttonClass} border px-3 text-[9px] tracking-[.1em] sm:col-span-1 ${connectedToSite ? "border-[#70c7a0] bg-[#70c7a0]/10 text-[#9fe0bd]" : "border-[#d99a54] text-[#f2bd63]"}`}>{connectedToSite ? "Connected to site" : "Connect local vault"}</button>
                     <select aria-label="Select network" className="min-h-11 min-w-0 border border-[#3b434d] bg-[#0b0f13] px-2 font-mono text-[10px] text-[#f3efe5] sm:px-3" value={network} onChange={event => setNetwork(event.target.value as OrdiNetwork)}>{NETWORKS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
+                    <select aria-label="Select address type" className="min-h-11 min-w-0 border border-[#3b434d] bg-[#0b0f13] px-2 font-mono text-[10px] text-[#f3efe5] sm:px-3" value={activeAddressType} onChange={event => setActiveAddressType(event.target.value as AddressType)}>{ADDRESS_SPECS.map(item => <option key={item.type} value={item.type}>{item.label}</option>)}</select>
                     <button type="button" onClick={() => void refresh()} className="flex min-h-11 items-center justify-center border border-[#3b434d] px-3 text-[#f2bd63]" aria-label="Refresh balances"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
                     <button type="button" onClick={lockWallet} className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 border border-[#a45e54]/60 px-3 font-mono text-[9px] uppercase tracking-[.1em] text-[#e6a69b] sm:col-span-1"><LogOut size={13} /> Lock wallet</button>
                   </div>
