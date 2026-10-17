@@ -17,6 +17,7 @@ import {
   type OrdiNetwork,
   type OrdiWalletRecord,
 } from "@/lib/ordi-wallet";
+import { publishLocalVaultSiteSession } from "@/lib/local-vault-bridge";
 
 const BASE = import.meta.env.BASE_URL;
 const NETWORKS: Array<{ id: OrdiNetwork; label: string }> = [
@@ -68,6 +69,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
   }, [open, site]);
 
   const lockWallet = () => {
+    publishLocalVaultSiteSession(null, site);
     setWallet(null);
     setReveal({});
     setMnemonic("");
@@ -165,12 +167,40 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
     if (wallet) void refresh();
   }, [wallet, network]);
 
+  useEffect(() => {
+    if (!wallet || !connectedToSite) return;
+    publishLocalVaultSiteSession({
+      version: 1,
+      site,
+      network,
+      address: wallet.addresses["native-segwit"].address,
+      publicKey: wallet.addresses["native-segwit"].publicKey,
+      connectedAt: new Date().toISOString(),
+    });
+  }, [wallet, connectedToSite, network, site]);
+
   function toggleSiteConnection() {
+    if (!wallet) {
+      setError("Unlock the local vault before connecting it to this site.");
+      return;
+    }
     const next = !connectedToSite;
     try {
       localStorage.setItem(`ordi-wallet-connected:${site}`, next ? "1" : "0");
     } catch {
       // Browser storage may be unavailable.
+    }
+    if (next) {
+      publishLocalVaultSiteSession({
+        version: 1,
+        site,
+        network,
+        address: wallet.addresses["native-segwit"].address,
+        publicKey: wallet.addresses["native-segwit"].publicKey,
+        connectedAt: new Date().toISOString(),
+      });
+    } else {
+      publishLocalVaultSiteSession(null, site);
     }
     setConnectedToSite(next);
     setMessage(next
@@ -234,7 +264,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
                 <div className="flex flex-col gap-4 border-b border-[#2c323a] pb-5 sm:flex-row sm:items-center sm:justify-between">
                   <div><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#70c7a0]">Vault unlocked in memory</p><h2 className="mt-1 font-display text-2xl text-[#f3efe5]">Ordi Wallet dashboard</h2><p className="mt-1 font-mono text-[9px] text-[#718092]">Active site: {site === "punks" ? "Ordinal Punks" : "Fractal Pokédex"}</p></div>
                   <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-                    <button type="button" onClick={toggleSiteConnection} className={`col-span-2 ${buttonClass} border px-3 text-[9px] tracking-[.1em] sm:col-span-1 ${connectedToSite ? "border-[#70c7a0] bg-[#70c7a0]/10 text-[#9fe0bd]" : "border-[#d99a54] text-[#f2bd63]"}`}>{connectedToSite ? "Connected to site" : "Connect to site"}</button>
+                    <button type="button" onClick={toggleSiteConnection} className={`col-span-2 ${buttonClass} border px-3 text-[9px] tracking-[.1em] sm:col-span-1 ${connectedToSite ? "border-[#70c7a0] bg-[#70c7a0]/10 text-[#9fe0bd]" : "border-[#d99a54] text-[#f2bd63]"}`}>{connectedToSite ? "Connected to site" : "Connect local vault"}</button>
                     <select aria-label="Select network" className="min-h-11 min-w-0 border border-[#3b434d] bg-[#0b0f13] px-2 font-mono text-[10px] text-[#f3efe5] sm:px-3" value={network} onChange={event => setNetwork(event.target.value as OrdiNetwork)}>{NETWORKS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
                     <button type="button" onClick={() => void refresh()} className="flex min-h-11 items-center justify-center border border-[#3b434d] px-3 text-[#f2bd63]" aria-label="Refresh balances"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
                     <button type="button" onClick={lockWallet} className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 border border-[#a45e54]/60 px-3 font-mono text-[9px] uppercase tracking-[.1em] text-[#e6a69b] sm:col-span-1"><LogOut size={13} /> Lock wallet</button>
@@ -246,7 +276,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
                   <p className="mt-3 font-display text-xl text-[#f3efe5]">{formatSats(balances[item.type]?.total ?? null)}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">Confirmed {formatSats(balances[item.type]?.confirmed ?? null)}</p>
                   <details className="mt-4 border-t border-[#2c323a] pt-3"><summary className="min-h-10 cursor-pointer py-2 font-mono text-[9px] uppercase text-[#718092]">Advanced keys</summary><p className="mt-2 break-all font-mono text-[9px] text-[#718092]">Derivation path: {item.path}</p><button type="button" onClick={() => setReveal(value => ({ ...value, [item.type]: !value[item.type] }))} className="mt-2 inline-flex min-h-10 items-center gap-1 font-mono text-[9px] uppercase text-[#e6a69b]">{reveal[item.type] ? <EyeOff size={12} /> : <Eye size={12} />}{reveal[item.type] ? "Hide private key" : "Reveal private key"}</button>{reveal[item.type] && <><p className="mt-2 break-all border border-[#a45e54]/50 bg-[#a45e54]/10 p-2 font-mono text-[9px] text-[#e6a69b]">{item.privateKey}</p><button type="button" onClick={() => copy(item.privateKey)} className="mt-2 min-h-10 font-mono text-[9px] uppercase text-[#f2bd63]">Copy private key</button></>}</details>
                 </article>)}</div>
-                {connectedToSite && <div className="mt-4 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 sm:mt-5 sm:p-4"><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#9fe0bd]">Site connection active</p><p className="mt-2 font-mono text-[10px] leading-5 text-[#d9d3c6]">The site can use the vault’s Native SegWit address to load live balances. Private keys stay in this unlocked browser session. Any local signing requires a separate transaction review and confirmation.</p><ProtocolAssetsPanel address={wallet.addresses["native-segwit"].address} network={network} site={site} /></div>}
+                {connectedToSite && <div className="mt-4 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 sm:mt-5 sm:p-4"><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#9fe0bd]">Local vault connected to this site</p><p className="mt-2 break-all font-mono text-[10px] leading-5 text-[#d9d3c6]">Native SegWit address: {wallet.addresses["native-segwit"].address}</p><p className="mt-2 font-mono text-[10px] leading-5 text-[#d9d3c6]">Desktop and UniSat Mobile use the same explicit session bridge on this page. Private keys remain in the unlocked vault; transaction signing still requires a separate review.</p><ProtocolAssetsPanel address={wallet.addresses["native-segwit"].address} network={network} site={site} /></div>}
                 {connectedToSite && <LocalPsbtSignerPanel wallet={wallet} network={network} />}
                 <div className="mt-4 grid gap-3 sm:mt-5 lg:grid-cols-2"><div className="min-w-0 border border-[#2c323a] bg-[#12171d] p-4"><p className="font-mono text-[9px] uppercase tracking-[.14em] text-[#718092]">Recovery phrase</p><p className="mt-2 break-words font-mono text-xs leading-6 text-[#d9d3c6]">{reveal.mnemonic ? wallet.mnemonic : "•••••••• •••••••• •••••••• ••••••••"}</p><button type="button" onClick={() => setReveal(value => ({ ...value, mnemonic: !value.mnemonic }))} className="mt-2 inline-flex min-h-10 items-center gap-1 font-mono text-[9px] uppercase text-[#f2bd63]">{reveal.mnemonic ? <EyeOff size={12} /> : <Eye size={12} />} {reveal.mnemonic ? "Hide" : "Reveal"}</button>{reveal.mnemonic && <button type="button" onClick={() => copy(wallet.mnemonic)} className="ml-3 min-h-10 font-mono text-[9px] uppercase text-[#f2bd63]">Copy</button>}</div><div className="border border-[#70c7a0]/30 bg-[#70c7a0]/5 p-4 font-mono text-[10px] leading-5 text-[#9fe0bd]">Balances are fetched from public Mempool endpoints. Signing happens locally after explicit review; Ordi Wallet never sends a private key to a server.</div></div>
               </div>}

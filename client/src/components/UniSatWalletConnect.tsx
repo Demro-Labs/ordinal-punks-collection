@@ -18,6 +18,7 @@ import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 import { ProtocolAssetsPanel } from "@/components/ProtocolAssetsPanel";
 import { TransactionHistoryPanel } from "@/components/TransactionHistoryPanel";
+import { LOCAL_VAULT_SESSION_EVENT, readLocalVaultSiteSession, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
 
 type UniSatChain = {
   enum?: string;
@@ -248,6 +249,7 @@ function describeWalletError(cause: unknown, fallback: string) {
 
 export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "pokedex" } = {}) {
   const [providerAvailable, setProviderAvailable] = useState(false);
+  const [localVaultSession, setLocalVaultSession] = useState<LocalVaultSiteSession | null>(() => readLocalVaultSiteSession(site));
   const [address, setAddress] = useState<string | null>(null);
   const [chain, setChain] = useState<UniSatChain | null>(null);
   const [busy, setBusy] = useState(false);
@@ -312,6 +314,22 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     ? JSON.stringify(["ordinal-transfer", site, address, chain?.enum, selectedInscriptionId, destination.trim()])
     : "";
   const mobileNativeReadyForContext = mobileNativeTransferReady?.contextKey === ownershipContextKey ? mobileNativeTransferReady : null;
+  useEffect(() => {
+    const sync = (event?: Event) => {
+      const detail = event ? (event as CustomEvent<LocalVaultSiteSession | null>).detail : undefined;
+      setLocalVaultSession(detail?.site === site ? detail : readLocalVaultSiteSession(site));
+    };
+    sync();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === `ordi-wallet-site-session:${site}`) sync();
+    };
+    window.addEventListener(LOCAL_VAULT_SESSION_EVENT, sync);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(LOCAL_VAULT_SESSION_EVENT, sync);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [site]);
   useEffect(() => {
     if (!isMobileUniSatDevice()) return;
     setOwnershipProofKey(null);
@@ -1120,6 +1138,15 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
 
   return (
     <div id="unisat-wallet-panel" className="unisat-wallet-panel flex flex-col gap-4 border border-[#2c323a] bg-[#14191f] p-4">
+      {localVaultSession && <section className="border border-[#70c7a0]/50 bg-[#70c7a0]/5 p-3" aria-labelledby="local-vault-site-connection-title">
+        <p id="local-vault-site-connection-title" className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#9fe0bd]">Ordi Wallet · Local Vault connected</p>
+        <div className="mt-2 grid gap-2 font-mono text-[10px] leading-5 text-[#d9d3c6] sm:grid-cols-2">
+          <p className="break-all sm:col-span-2"><span className="text-[#718092]">Vault address:</span> {localVaultSession.address}</p>
+          <p><span className="text-[#718092]">Network:</span> {localVaultSession.network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin mainnet"}</p>
+          <p><span className="text-[#718092]">Mode:</span> read-only dashboard + reviewed local PSBT</p>
+        </div>
+        <p className="mt-2 font-mono text-[10px] leading-5 text-[#9fe0bd]">The local vault is available on this {isMobileUniSatDevice() ? "mobile page" : "desktop page"}. UniSat remains a separate provider for wallet approvals, inscriptions, and native transfers.</p>
+      </section>}
       <nav className="transaction-shortcut-nav sticky top-0 z-30 -mx-4 -mt-4 mb-1 flex gap-2 overflow-x-auto border-b border-[#2c323a] bg-[#14191f]/95 px-3 py-2 backdrop-blur sm:static sm:top-auto sm:z-auto sm:mx-0 sm:mt-0 sm:mb-3 sm:flex-wrap sm:overflow-visible sm:rounded-sm sm:border sm:border-[#3b434d] sm:bg-[#10151a] sm:px-4 sm:py-3" aria-label="Wallet and transaction actions">
         <p className="hidden w-full font-mono text-[9px] uppercase tracking-[0.18em] text-[#718092] sm:block">Wallet &amp; transaction shortcuts</p>
         <a href="#unisat-wallet-panel" className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Wallet</a>
