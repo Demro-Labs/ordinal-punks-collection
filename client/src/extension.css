@@ -1,0 +1,9 @@
+html, body, #root { width: 420px; min-width: 360px; min-height: 620px; margin: 0; overflow-x: hidden; background: #0b0d10; }
+.extension-shell { box-sizing: border-box; width: 100%; min-height: 620px; padding: 14px; color: #f3efe5; }
+.extension-header { display: flex; align-items: center; gap: 11px; padding-bottom: 11px; border-bottom: 1px solid #2c323a; }
+.extension-header img { width: 34px; height: 34px; object-fit: contain; }
+.extension-header h1 { margin: 0; font: 600 17px/1.2 system-ui, sans-serif; }
+.extension-header p, .extension-intro, .extension-note { margin: 4px 0 0; color: #9ea7b3; font: 10px/1.55 ui-monospace, monospace; }
+.extension-intro { margin: 11px 0; }
+.extension-note { margin: 12px 2px 0; color: #718092; }
+.extension-shell > button { min-height: 42px; }

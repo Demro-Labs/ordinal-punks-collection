@@ -17,7 +17,7 @@ import {
   type OrdiNetwork,
   type OrdiWalletRecord,
 } from "@/lib/ordi-wallet";
-import { publishLocalVaultSiteSession } from "@/lib/local-vault-bridge";
+import { LOCAL_VAULT_SESSION_EVENT, publishLocalVaultSiteSession, readLocalVaultSiteSession, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
 
 const BASE = import.meta.env.BASE_URL;
 const NETWORKS: Array<{ id: OrdiNetwork; label: string }> = [
@@ -63,14 +63,29 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
 
   useEffect(() => {
     try {
-      setConnectedToSite(localStorage.getItem(`ordi-wallet-connected:${site}`) === "1");
+      setConnectedToSite(Boolean(readLocalVaultSiteSession(site)));
     } catch {
       setConnectedToSite(false);
     }
   }, [open, site]);
 
+  useEffect(() => {
+    const sync = (event?: Event) => {
+      const detail = event ? (event as CustomEvent<LocalVaultSiteSession | null>).detail : undefined;
+      setConnectedToSite(Boolean(detail?.site === site ? detail : readLocalVaultSiteSession(site)));
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === `ordi-wallet-site-session:${site}`) sync();
+    };
+    window.addEventListener(LOCAL_VAULT_SESSION_EVENT, sync);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(LOCAL_VAULT_SESSION_EVENT, sync);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [site]);
+
   const lockWallet = () => {
-    publishLocalVaultSiteSession(null, site);
     setWallet(null);
     setReveal({});
     setMnemonic("");
@@ -233,10 +248,17 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
     setOpen(true);
   }
 
+  useEffect(() => {
+    const onOpen = () => openWallet();
+    window.addEventListener("ordi-wallet:open", onOpen);
+    return () => window.removeEventListener("ordi-wallet:open", onOpen);
+  }, [site]);
+
   return <>
     <button type="button" onClick={openWallet} className="inline-flex min-h-11 items-center gap-2 border border-[#d99a54]/70 bg-[#d99a54]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f2bd63] transition hover:bg-[#d99a54]/20" aria-label="Open Ordi Wallet">
       <Wallet size={15} /> <span>Ordi Wallet</span>{vaultExists && <span className="rounded-full bg-[#70c7a0]/15 px-1.5 py-0.5 text-[8px] text-[#70c7a0]">VAULT</span>}
     </button>
+    {!window.location.protocol.includes("extension") && <a href={`${BASE}extension-install.html`} target="_blank" rel="noreferrer" className="hidden min-h-11 items-center border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] hover:border-[#d99a54] hover:text-[#f2bd63] md:inline-flex" title="Install the desktop browser extension preview">Add extension</a>}
     {open && createPortal(
       <div className="fixed inset-0 z-[100] flex min-h-[100dvh] items-stretch justify-start overflow-y-auto bg-[#050608]/90 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-6" onMouseDown={event => event.target === event.currentTarget && closeWallet()}>
         <section className="flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden border border-[#3b434d] bg-[#0e1217] shadow-[0_24px_100px_rgba(0,0,0,.65)] sm:my-auto sm:h-auto sm:max-h-[min(900px,calc(100dvh-3rem))] sm:max-w-6xl" role="dialog" aria-modal="true" aria-label="Ordi Wallet">
