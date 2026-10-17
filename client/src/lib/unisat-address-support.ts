@@ -25,9 +25,21 @@ export function getUniSatAddressType(address: string): UniSatAddressType | null 
   return null;
 }
 
-/** UniSat's BIP-322 message flow supports all four documented single-wallet formats. */
-export function supportsUniSatBip322Simple(address: string): boolean {
-  return getUniSatAddressType(address) !== null;
+export type UniSatMessageSignatureType = "ecdsa" | "bip322-simple";
+
+/** Use UniSat's compact ECDSA/BIP-137 format for Base58 addresses; BIP-322 simple is for Bech32 SegWit/Taproot. */
+export function getUniSatMessageSignatureType(address: string): UniSatMessageSignatureType | null {
+  switch (getUniSatAddressType(address)) {
+    case "legacy-p2pkh":
+    case "nested-segwit-p2sh-p2wpkh": return "ecdsa";
+    case "native-segwit-p2wpkh":
+    case "taproot-p2tr": return "bip322-simple";
+    default: return null;
+  }
+}
+
+export function supportsUniSatMessageSigning(address: string): boolean {
+  return getUniSatMessageSignatureType(address) !== null;
 }
 
 export function getUniSatAddressTypeLabel(type: UniSatAddressType): string {
