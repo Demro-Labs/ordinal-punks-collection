@@ -10,6 +10,28 @@ AUTH_HEADER="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+# The auth challenge limiter allows only six challenges per address per hour.
+# Generate a valid, fresh address so every production verification run is
+# independent from previous deployments and never reuses a rate-limited one.
+test_address="$(node --input-type=module <<'NODE'
+import { randomBytes } from "node:crypto";
+import * as bitcoin from "bitcoinjs-lib";
+import * as ecc from "@bitcoinerlab/secp256k1";
+
+bitcoin.initEccLib(ecc);
+let privateKey;
+do {
+  privateKey = randomBytes(32);
+} while (!ecc.isPrivate(privateKey));
+
+const publicKey = ecc.pointFromScalar(privateKey, true);
+const payment = bitcoin.payments.p2wpkh({ pubkey: publicKey, network: bitcoin.networks.bitcoin });
+if (!payment.address) throw new Error("Could not generate a valid smoke-test address");
+console.log(payment.address);
+NODE
+)"
+echo "Generated a fresh valid smoke-test address for this verification run."
+
 curl -fsS --max-time 20 -H "${AUTH_HEADER}" "${SCRIPT_API}/secrets" \
   | jq -e '.success == true and any(.result[]?; .name == "UNISAT_API_KEY" and .type == "secret_text") and any(.result[]?; .name == "UNISAT_BITCOIN_API" and .type == "secret_text") and any(.result[]?; .name == "ETH_API" and .type == "secret_text")' >/dev/null
 echo "Cloudflare UniSat and ETH API secret names/types verified; values were not read."
@@ -42,12 +64,20 @@ for site in punks pokedex; do
   echo "Anonymous auth session verified for ${site}."
 done
 
-test_address='bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l'
 for site in punks pokedex; do
   for network in BITCOIN_MAINNET FRACTAL_BITCOIN_MAINNET; do
     payload="$(jq -n --arg site "${site}" --arg address "${test_address}" --arg network "${network}" '{site:$site,address:$address,network:$network}')"
-    response="$(curl -fsS --retry 2 --max-time 20 -X POST "${BASE_URL}/api/auth/ownership/challenge" \
-      -H 'Origin: https://demro-labs.github.io' -H 'Content-Type: application/json' --data-binary "${payload}")"
+    headers_file="${TMP_DIR}/${site}-${network}.headers"
+    response_file="${TMP_DIR}/${site}-${network}.json"
+    status="$(curl -sS --retry 0 --max-time 20 -D "${headers_file}" -o "${response_file}" -w '%{http_code}' -X POST "${BASE_URL}/api/auth/ownership/challenge" \
+      -H 'Origin: https://demro-labs.github.io' -H 'Content-Type: application/json' --data-binary "${payload}" || true)"
+    if [[ "${status}" == "429" ]]; then
+      retry_after="$(awk 'BEGIN { IGNORECASE=1 } /^Retry-After:/ { sub(/^[^:]*:[[:space:]]*/, ""); gsub(/[[:space:]]+$/, ""); print; exit }' "${headers_file}")"
+      echo "Ownership challenge for ${site} on ${network} returned HTTP 429; not retrying${retry_after:+ (Retry-After: ${retry_after})}." >&2
+      exit 1
+    fi
+    [[ "${status}" == "200" ]] || { echo "Ownership challenge for ${site} on ${network} returned HTTP ${status}." >&2; exit 1; }
+    response="$(cat "${response_file}")"
     printf '%s' "${response}" | jq -e --arg site "${site}" --arg network "${network}" '.site == $site and .network == $network and .action == "ownership-proof-only" and (.message | contains("does not authorize, sign, or broadcast a payment or transfer"))' >/dev/null
     echo "Ownership-only challenge verified for ${site} on ${network}."
   done
@@ -55,8 +85,17 @@ done
 
 for site in punks pokedex; do
   payload="$(jq -n --arg site "${site}" --arg address "${test_address}" '{site:$site,address:$address,network:"BITCOIN_MAINNET"}')"
-  response="$(curl -fsS --retry 2 --max-time 20 -X POST "${BASE_URL}/api/auth/challenge" \
-    -H 'Origin: https://demro-labs.github.io' -H 'Content-Type: application/json' --data-binary "${payload}")"
+  headers_file="${TMP_DIR}/${site}-bitcoin-signin.headers"
+  response_file="${TMP_DIR}/${site}-bitcoin-signin.json"
+  status="$(curl -sS --retry 0 --max-time 20 -D "${headers_file}" -o "${response_file}" -w '%{http_code}' -X POST "${BASE_URL}/api/auth/challenge" \
+    -H 'Origin: https://demro-labs.github.io' -H 'Content-Type: application/json' --data-binary "${payload}" || true)"
+  if [[ "${status}" == "429" ]]; then
+    retry_after="$(awk 'BEGIN { IGNORECASE=1 } /^Retry-After:/ { sub(/^[^:]*:[[:space:]]*/, ""); gsub(/[[:space:]]+$/, ""); print; exit }' "${headers_file}")"
+    echo "Bitcoin sign-in challenge for ${site} returned HTTP 429; not retrying${retry_after:+ (Retry-After: ${retry_after})}." >&2
+    exit 1
+  fi
+  [[ "${status}" == "200" ]] || { echo "Bitcoin sign-in challenge for ${site} returned HTTP ${status}." >&2; exit 1; }
+  response="$(cat "${response_file}")"
   printf '%s' "${response}" | jq -e --arg site "${site}" '.site == $site and .network == "BITCOIN_MAINNET" and (.message | contains("Network: BITCOIN_MAINNET") and contains("No payment, transfer, or spending approval is authorized."))' >/dev/null
   echo "Bitcoin sign-in challenge verified for ${site}; no signature, session, or payment was created."
 done
