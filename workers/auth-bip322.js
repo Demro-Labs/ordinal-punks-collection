@@ -56,11 +56,19 @@ function isValidChallengeId(value) {
 }
 
 function isValidAddress(value) {
-  if (typeof value !== 'string' || value !== value.toLowerCase()) return false;
+  if (typeof value !== 'string') return false;
+  const address = value.trim();
+  if (address !== value) return false;
+  // Base58 mainnet addresses are case-sensitive; only Bech32 addresses must
+  // be lowercase for the canonical address binding used by the challenge.
+  const isBech32 = address.startsWith('bc1');
+  if (isBech32 && address !== address.toLowerCase()) return false;
   try {
-    const script = Address.convertAdressToScriptPubkey(value);
-    if (value.startsWith('bc1q')) return value.length === 42 && Address.isP2WPKH(value) && script?.byteLength === 22;
-    if (value.startsWith('bc1p')) return value.length === 62 && Address.isP2TR(value) && script?.byteLength === 34;
+    const script = Address.convertAdressToScriptPubkey(address);
+    if (Address.isP2PKH(address)) return /^1[1-9A-HJ-NP-Za-km-z]{25,34}$/.test(address) && script?.byteLength === 25;
+    if (Address.isP2SH(address)) return /^3[1-9A-HJ-NP-Za-km-z]{25,34}$/.test(address) && script?.byteLength === 23;
+    if (Address.isP2WPKH(address)) return /^bc1q[ac-hj-np-z02-9]{38}$/.test(address) && script?.byteLength === 22;
+    if (Address.isP2TR(address)) return /^bc1p[ac-hj-np-z02-9]{58}$/.test(address) && script?.byteLength === 34;
     return false;
   } catch {
     return false;
@@ -217,9 +225,9 @@ function errorResponse(error, headers) {
     AUTH_INVALID_SITE: 'The requested site is not supported.',
     AUTH_INVALID_NETWORK: 'Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat to sign in.',
     AUTH_INVALID_OWNERSHIP_NETWORK: 'Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat to prove wallet ownership.',
-    AUTH_INVALID_ADDRESS: 'Use a supported mainnet SegWit or Taproot address in UniSat.',
+    AUTH_INVALID_ADDRESS: 'Use a supported Bitcoin or Fractal mainnet address: Legacy, Nested SegWit, Native SegWit, or Taproot.',
     AUTH_INVALID_CHALLENGE: 'The challenge is invalid, expired, or already used. Request a new challenge.',
-    AUTH_INVALID_SIGNATURE: 'UniSat did not return a valid BIP-322 simple signature.',
+    AUTH_INVALID_SIGNATURE: 'UniSat did not return a valid wallet message signature.',
     AUTH_SIGNATURE_REJECTED: 'The signature does not prove control of this address.',
     AUTH_ADDRESS_RATE_LIMITED: 'Too many sign-in attempts for this address. Try again later.',
     AUTH_IP_RATE_LIMITED: 'Too many sign-in requests from this connection. Try again later.',

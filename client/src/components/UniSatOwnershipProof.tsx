@@ -71,24 +71,6 @@ export function UniSatOwnershipProof({
     }
   };
 
-  const confirmWalletContext = async () => {
-    setError("");
-    if (!contextKey || !addressType || bip322Supported) {
-      setError("This address requires a BIP-322 proof or is not a supported UniSat format.");
-      return;
-    }
-    setWorking(true);
-    try {
-      await assertWalletMatches();
-      setVerifiedContext(contextKey);
-      onVerified(contextKey);
-    } catch (cause) {
-      setError(describeOwnershipError(cause));
-    } finally {
-      setWorking(false);
-    }
-  };
-
   const requestChallenge = async () => {
     setError("");
     if (!contextKey || !address || !bip322Supported || !["BITCOIN_MAINNET", "FRACTAL_BITCOIN_MAINNET"].includes(network)) {
@@ -160,16 +142,13 @@ export function UniSatOwnershipProof({
   };
 
   return <section className="mt-3 border border-[#d99a54]/60 bg-[#151a1f] p-3 font-mono text-[10px] leading-5" aria-label="UniSat wallet ownership check">
-    <p className="flex items-center gap-2 uppercase tracking-[0.1em] text-[#f2bd63]"><ShieldCheck size={13} /> {bip322Supported ? "Ownership signature required · BIP-322" : addressType ? `${getUniSatAddressTypeLabel(addressType)} · wallet check` : "Unsupported UniSat address format"}</p>
+    <p className="flex items-center gap-2 uppercase tracking-[0.1em] text-[#f2bd63]"><ShieldCheck size={13} /> {bip322Supported ? "Ownership signature required · BIP-322" : addressType ? `${getUniSatAddressTypeLabel(addressType)} · unsupported` : "Unsupported UniSat address format"}</p>
     <p className="mt-1 text-[#9ea7b3]">{bip322Supported
       ? `This signature proves control of ${address ? `${address.slice(0, 10)}…${address.slice(-6)}` : "the connected wallet"} on ${network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"}. It does not pay anything or sign the transaction.`
-      : addressType
-        ? `The Worker’s BIP-322 verifier does not support ${getUniSatAddressTypeLabel(addressType)}. This explicit step only checks that UniSat still exposes the same account and network; it is not a cryptographic signature. The final transaction approval remains in UniSat.`
-        : "Only UniSat’s documented Legacy, Nested SegWit, Native SegWit, and Taproot account formats are supported here."}</p>
-    {verified ? <p className="mt-2 flex items-center gap-2 text-[#70c7a0]" role="status"><CheckCircle2 size={13} /> {bip322Supported ? "BIP-322 ownership verified." : "Current wallet account and network confirmed (no cryptographic proof)."} UniSat transaction approval remains a separate step.</p> : <div className="mt-2 flex flex-wrap gap-2">
+      : "Only UniSat’s documented Legacy, Nested SegWit, Native SegWit, and Taproot account formats are supported here."}</p>
+    {verified ? <p className="mt-2 flex items-center gap-2 text-[#70c7a0]" role="status"><CheckCircle2 size={13} /> BIP-322 ownership verified. UniSat transaction approval remains a separate step.</p> : <div className="mt-2 flex flex-wrap gap-2">
       {bip322Supported && <button type="button" onClick={() => void requestChallenge()} disabled={working || !contextKey || !address || !provider?.getAccounts || !provider.getChain} className="min-h-10 border border-[#3b434d] px-3 py-2 uppercase tracking-[0.06em] text-[#d9d3c6] disabled:opacity-40">{working && !activeChallenge ? <><Loader2 size={12} className="mr-1 inline animate-spin" /> Preparing…</> : "1 · Prepare proof"}</button>}
       {bip322Supported && activeChallenge && <button type="button" onClick={signOwnership} disabled={working || !provider?.signMessage} className="min-h-10 border border-[#d99a54] bg-[#d99a54] px-3 py-2 uppercase tracking-[0.06em] text-[#0b0d10] disabled:opacity-40">{working ? <><Loader2 size={12} className="mr-1 inline animate-spin" /> Verifying…</> : "2 · Sign ownership"}</button>}
-      {addressType && !bip322Supported && <button type="button" onClick={() => void confirmWalletContext()} disabled={working || !contextKey || !provider?.getAccounts || !provider.getChain} className="min-h-10 border border-[#d99a54] bg-[#d99a54] px-3 py-2 uppercase tracking-[0.06em] text-[#0b0d10] disabled:opacity-40">{working ? <><Loader2 size={12} className="mr-1 inline animate-spin" /> Checking…</> : "Confirm current UniSat account"}</button>}
     </div>}
     {activeChallenge && !verified && <p className="mt-2 text-[#718092]">Challenge valid until {new Date(activeChallenge.expiresAt).toLocaleTimeString("en-US")} · this message authorizes no payment or transfer.</p>}
     {error && <p className="mt-2 text-[#e08b7d]" role="alert">{error}</p>}

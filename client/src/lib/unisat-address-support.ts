@@ -7,7 +7,7 @@ export type UniSatAddressType =
 const BASE58_ADDRESS_CHARS = "[1-9A-HJ-NP-Za-km-z]";
 const BECH32_DATA_CHARS = "[ac-hj-np-z02-9]";
 
-/** Classify UniSat's four documented mainnet address formats. Checksum and network validation remain the Mempool's responsibility. */
+/** Classify UniSat's four documented mainnet address formats. Checksum and network validation remain the Worker/Mempool's responsibility. */
 export function getUniSatAddressType(address: string): UniSatAddressType | null {
   const value = address.trim();
   if (new RegExp(`^1${BASE58_ADDRESS_CHARS}{25,34}$`).test(value)) {
@@ -25,10 +25,9 @@ export function getUniSatAddressType(address: string): UniSatAddressType | null 
   return null;
 }
 
-/** UniSat's server-side BIP-322 verifier supports its Native SegWit and Taproot single-key address forms. */
+/** UniSat's BIP-322 message flow supports all four documented single-wallet formats. */
 export function supportsUniSatBip322Simple(address: string): boolean {
-  const type = getUniSatAddressType(address);
-  return type === "native-segwit-p2wpkh" || type === "taproot-p2tr";
+  return getUniSatAddressType(address) !== null;
 }
 
 export function getUniSatAddressTypeLabel(type: UniSatAddressType): string {
