@@ -1483,3 +1483,65 @@ test('BIP-322 routes reject other origins and fail closed without the Durable Ob
   assert.equal(missingBinding.status, 503);
   assert.equal((await missingBinding.json()).code, 'AUTH_STORAGE_UNAVAILABLE');
 });
+
+
+test('routes paginated live transaction history through the matching Bitcoin and Fractal UniSat keys', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const txid = 'a'.repeat(64);
+  const sources = [
+    { chain: 'BITCOIN_MAINNET', base: 'https://open-api.unisat.io', key: 'bitcoin-history-test-only', ip: '192.0.2.10' },
+    { chain: 'FRACTAL_BITCOIN_MAINNET', base: 'https://open-api-fractal.unisat.io', key: 'fractal-history-test-only', ip: '192.0.2.10' },
+  ];
+  const auth = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    const source = sources.find(item => item.base === url.origin);
+    assert.ok(source, `Unexpected history source: ${url.origin}`);
+    assert.equal(url.pathname, `/v1/indexer/address/${address}/history`);
+    assert.equal(url.searchParams.get('cursor'), '0');
+    assert.equal(url.searchParams.get('size'), '10');
+    auth.push(new Headers(init.headers).get('Authorization'));
+    return Response.json({ code: 0, data: { start: 0, total: 1, detail: [{ txid, nIn: 1, nOut: 2, inSatoshi: 1500, outSatoshi: 1200, size: 225, height: 900000, idx: 3, blkid: 'b'.repeat(64), confirmations: 4, timestamp: 1700000000 }] } });
+  };
+  try {
+    for (const source of sources) {
+      const response = await worker.fetch(makeRequest(`/api/transactions/history?address=${address}&chain=${source.chain}&cursor=0&size=10`, { ip: source.ip }), {
+        UNISAT_API_KEY: 'fractal-history-test-only', UNISAT_BITCOIN_API: 'bitcoin-history-test-only',
+      });
+      const data = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      assert.equal(data.network, source.chain);
+      assert.equal(data.address, address);
+      assert.equal(data.total, 1);
+      assert.equal(data.detail[0].txid, txid);
+      assert.equal(data.detail[0].inSatoshi, 1500);
+      assert.equal(data.detail[0].confirmations, 4);
+      assert.equal(JSON.stringify(data).includes('test-only'), false);
+    }
+    assert.deepEqual(auth, ['Bearer bitcoin-history-test-only', 'Bearer fractal-history-test-only']);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('rejects invalid live transaction history queries and malformed UniSat rows', async () => {
+  const previousFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => {
+    upstreamCalls += 1;
+    return Response.json({ code: 0, data: { start: 0, total: 1, detail: [{ txid: 'invalid' }] } });
+  };
+  try {
+    const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+    const badChain = await worker.fetch(makeRequest(`/api/transactions/history?address=${address}&chain=BITCOIN_TESTNET`), { UNISAT_BITCOIN_API: 'test-only' });
+    const badCursor = await worker.fetch(makeRequest(`/api/transactions/history?address=${address}&chain=BITCOIN_MAINNET&cursor=-1`), { UNISAT_BITCOIN_API: 'test-only' });
+    assert.equal(badChain.status, 400);
+    assert.equal(badCursor.status, 400);
+    assert.equal(upstreamCalls, 0);
+
+    const malformed = await worker.fetch(makeRequest(`/api/transactions/history?address=${address}&chain=BITCOIN_MAINNET`), { UNISAT_BITCOIN_API: 'test-only' });
+    assert.equal(malformed.status, 503);
+    assert.match((await malformed.json()).error, /historique.*indisponible/i);
+    assert.equal(upstreamCalls, 1);
+  } finally { globalThis.fetch = previousFetch; }
+});

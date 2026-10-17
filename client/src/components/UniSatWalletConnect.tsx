@@ -17,6 +17,7 @@ import { UniSatWalletAuth } from "@/components/UniSatWalletAuth";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 import { ProtocolAssetsPanel } from "@/components/ProtocolAssetsPanel";
+import { TransactionHistoryPanel } from "@/components/TransactionHistoryPanel";
 
 type UniSatChain = {
   enum?: string;
@@ -54,7 +55,7 @@ type UniSatProvider = {
   getBalance?: () => Promise<UniSatBalance>;
   getBalanceV2?: () => Promise<UniSatBalanceV2>;
   getBitcoinUtxos?: (cursor: number, size: number) => Promise<unknown>;
-  switchChain?: (chain: "FRACTAL_BITCOIN_MAINNET") => Promise<UniSatChain>;
+  switchChain?: (chain: "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET") => Promise<UniSatChain>;
   getInscriptions?: (cursor: number, size: number) => Promise<{
     total: number;
     list: UniSatInscription[];
@@ -566,6 +567,26 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       }
     } catch (cause) {
       setError(describeWalletError(cause, "Network switch was cancelled or failed."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const switchToBitcoin = async () => {
+    const provider = window.unisat;
+    if (!provider?.switchChain) {
+      setError("Mettez à jour UniSat Wallet pour activer le changement de réseau Bitcoin mainnet.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const selectedChain = await provider.switchChain(BITCOIN_MAINNET);
+      setChain(selectedChain);
+      clearOwnedInscriptions();
+      if (selectedChain.enum !== BITCOIN_MAINNET) setError("UniSat n’a pas confirmé Bitcoin mainnet.");
+    } catch (cause) {
+      setError(describeWalletError(cause, "Le changement vers Bitcoin mainnet a été annulé ou a échoué."));
     } finally {
       setBusy(false);
     }
@@ -1104,7 +1125,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         <a href="#unisat-wallet-panel" className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Wallet</a>
         {connectedToFractal && <a href={inscriptions.length > 0 ? "#wallet-transfer-form" : "#unisat-wallet-panel"} className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Ordinals</a>}
         {connectedToFractal && <a href="#fb-send-title" className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">{chain?.enum === BITCOIN_MAINNET ? "Send BTC" : "Send FB"}</a>}
-        {connectedToFractal && chain?.enum === FRACTAL_MAINNET && <a href="#runes-send-title" className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Runes</a>}
+        {connectedToFractal && <a href="#runes-send-title" className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#d9d3c6] transition-colors hover:border-[#d99a54] hover:bg-[#d99a54]/10 hover:text-[#f2bd63] sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Runes</a>}
         <button type="button" onClick={() => document.getElementById("inscribe-start")?.click()} className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap border border-[#d99a54] px-3 font-mono text-[9px] uppercase tracking-[0.08em] text-[#f2bd63] transition-colors hover:bg-[#d99a54]/10 sm:min-w-[140px] sm:flex-1 sm:shrink sm:px-4 sm:text-[10px]">Inscribe</button>
       </nav>
       {psbtReview && (
@@ -1165,6 +1186,8 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
               >
                 {loadingInscriptions ? "Loading wallet…" : "Load my inscriptions"}
               </button>
+              <button type="button" onClick={() => void switchToBitcoin()} disabled={busy || chain?.enum === BITCOIN_MAINNET} className="border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] disabled:opacity-40">Bitcoin mainnet</button>
+              <button type="button" onClick={() => void switchToFractal()} disabled={busy || chain?.enum === FRACTAL_MAINNET} className="border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] disabled:opacity-40">Fractal mainnet</button>
               {loadingInscriptions && (
                 <button type="button" onClick={stopLoadingInscriptions} disabled={transferBusy} className="border border-[#a45e54] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#e08b7d] hover:bg-[#a45e54]/10 disabled:opacity-50">
                   Stop loading
@@ -1188,14 +1211,10 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
               </button>
             </>
           ) : address ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void switchToFractal()}
-              className="border border-[#d99a54] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63] disabled:opacity-50"
-            >
-              {busy ? "Waiting for UniSat…" : "Switch to Fractal"}
-            </button>
+            <>
+              <button type="button" disabled={busy} onClick={() => void switchToBitcoin()} className="border border-[#d99a54] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63] disabled:opacity-50">Switch to Bitcoin</button>
+              <button type="button" disabled={busy} onClick={() => void switchToFractal()} className="border border-[#d99a54] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63] disabled:opacity-50">{busy ? "Waiting for UniSat…" : "Switch to Fractal"}</button>
+            </>
           ) : (
             <button
               type="button"
@@ -1238,7 +1257,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       {connectedToFractal && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-dashboard-title">
           <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#d99a54]">Live wallet data</p><h2 id="wallet-dashboard-title" className="mt-1 font-display text-xl text-[#f3efe5]">Wallet dashboard</h2></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => void refreshWalletDashboard()} disabled={busy} className="inline-flex items-center gap-1 border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#9ea7b3] hover:border-[#d99a54] disabled:opacity-40"><RefreshCw size={12} /> Refresh live data</button><a href={uniScanUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 border border-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#f2bd63] hover:bg-[#d99a54]/10">Open UniScan <ExternalLink size={12} /></a></div></div>
-          <div className="mt-3 grid grid-cols-2 gap-px border border-[#2c323a] bg-[#2c323a] sm:grid-cols-3 lg:grid-cols-6"><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Network</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{currentNetwork?.label}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">FB total</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{formatSats(walletDashboard?.total)}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Available</p><p className="mt-2 font-mono text-[10px] text-[#70c7a0]">{formatSats(walletDashboard?.available)}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Inscriptions</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{inscriptions.length} / {inscriptionTotal}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">UTXOs</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{walletDashboard?.utxoCount ?? "—"}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">UTXO value</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{formatSats(walletDashboard?.utxoSats)}</p></div></div>
+          <div className="mt-3 grid grid-cols-2 gap-px border border-[#2c323a] bg-[#2c323a] sm:grid-cols-3 lg:grid-cols-6"><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Network</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{currentNetwork?.label}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">{chain?.enum === BITCOIN_MAINNET ? "BTC total" : "FB total"}</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{formatSats(walletDashboard?.total)}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Available</p><p className="mt-2 font-mono text-[10px] text-[#70c7a0]">{formatSats(walletDashboard?.available)}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">Inscriptions</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{inscriptions.length} / {inscriptionTotal}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">UTXOs</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{walletDashboard?.utxoCount ?? "—"}</p></div><div className="bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase text-[#718092]">UTXO value</p><p className="mt-2 font-mono text-[10px] text-[#f2bd63]">{formatSats(walletDashboard?.utxoSats)}</p></div></div>
           <div className="mt-3 grid gap-2 border border-[#3b434d] bg-[#10151a] p-3 font-mono text-[10px] text-[#9ea7b3] sm:grid-cols-2"><p className="break-all sm:col-span-2"><span className="text-[#718092]">Connected address:</span> {address}</p><p><span className="text-[#718092]">Confirmed:</span> {formatSats(walletDashboard?.confirmed)}</p><p><span className="text-[#718092]">Unconfirmed:</span> {formatSats(walletDashboard?.unconfirmed)}</p><p><span className="text-[#718092]">Unavailable:</span> {formatSats(walletDashboard?.unavailable)}</p><p><span className="text-[#718092]">Last refresh:</span> {walletDashboard ? new Date(walletDashboard.refreshedAt).toLocaleTimeString() : "Loading…"}</p>{walletDashboard?.publicKey && <p className="break-all sm:col-span-2"><span className="text-[#718092]">Public key:</span> {walletDashboard.publicKey}</p>}</div>
         </section>
       )}
@@ -1248,11 +1267,14 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       {connectedToFractal && (
         <UniSatFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} site={site} />
       )}
-      {connectedToFractal && chain?.enum === FRACTAL_MAINNET && (
+      {connectedToFractal && isSupportedMainnet(chain?.enum) && (
         <UniSatRunesSendPanel site={site} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} />
       )}
       {address && isSupportedMainnet(chain?.enum) && (
         <ProtocolAssetsPanel address={address} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} site={site} />
+      )}
+      {address && isSupportedMainnet(chain?.enum) && (
+        <TransactionHistoryPanel address={address} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} />
       )}
       {connectedToFractal && inscriptions.length > 0 && (
         <section className="border-t border-[#2c323a] pt-4" aria-labelledby="wallet-gallery-title">

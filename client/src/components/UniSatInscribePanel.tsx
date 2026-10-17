@@ -15,7 +15,7 @@ type Chain = { enum?: string; name?: string };
 type InscribeFile = { filename: string; size: number; type: string; dataURL?: string };
 type InscribeReceipt = { orderId: string; payAddress: string; amount: number; files: InscribeFile[]; feeRate: number; paymentFeeRate?: number; feeSourceLabel: string; chain: string; walletAddress: string; createdAt: string };
 type InscribeStage = "idle" | "preparing" | "awaiting-approval" | "paying" | "tracking" | "completed";
-type InscribeMode = "files" | "brc20" | "runes-etch" | "alkanes-deploy" | "alkanes-mint";
+type InscribeMode = "files" | "brc20" | "runes-etch" | "runes-mint" | "alkanes-deploy" | "alkanes-mint";
 type OrderFile = { inscriptionId?: string; filename?: string; status?: string; txid?: string; inscriptionTxid?: string };
 type LiveWalletData = { publicKey: string; available: number | null; confirmed: number | null; total: number | null; safeAvailableSats: number | null; asset: string; refreshedAt: string };
 type InscriptionHistoryItem = { inscriptionId: string; transactionId: string; paymentTxid?: string; finalPaymentReceipt?: MempoolReceipt; filename: string; orderId: string; network: string; walletAddress: string; createdAt: string; status?: string; amountSats?: number; fileCount?: number };
@@ -158,6 +158,8 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
   const [runePremine, setRunePremine] = useState("0");
   const [runeMintAmount, setRuneMintAmount] = useState("1");
   const [runeMintCap, setRuneMintCap] = useState("1");
+  const [runeMintId, setRuneMintId] = useState("");
+  const [runeMintCount, setRuneMintCount] = useState("1");
   const [runeHeightStart, setRuneHeightStart] = useState("");
   const [runeHeightEnd, setRuneHeightEnd] = useState("");
   const [alkaneid, setAlkaneid] = useState("");
@@ -407,6 +409,9 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       if ((runeHeightStart && !/^\d+$/.test(runeHeightStart)) || (runeHeightEnd && !/^\d+$/.test(runeHeightEnd)) || Boolean(runeHeightStart) !== Boolean(runeHeightEnd)) return setMessage("Enter both Rune height bounds or leave both empty.");
       const terms = { amount: runeMintAmount, cap: runeMintCap, ...(runeHeightStart && runeHeightEnd ? { height: [Number(runeHeightStart), Number(runeHeightEnd)] } : {}) };
       protocol = { type: "runes-etch", spacedRune: spacedRune.toUpperCase(), symbol: runeSymbol, divisibility: Number(runeDivisibility), premine: runePremine, terms };
+    } else if (mode === "runes-mint") {
+      if (!/^\d{1,20}:\d{1,20}$/.test(runeMintId) || !/^\d+$/.test(runeMintCount) || Number(runeMintCount) < 1 || Number(runeMintCount) > 1000) return setMessage("Enter a valid Rune ID and mint count (1–1000).");
+      protocol = { type: "runes-mint", runeid: runeMintId, count: Number(runeMintCount) };
     } else if (mode === "alkanes-mint") {
       if (!/^\d{1,20}:\d{1,20}$/.test(alkaneid) || !/^\d+$/.test(mintCount) || Number(mintCount) < 1 || Number(mintCount) > 1000) return setMessage("Enter a valid Alkane ID and mint count (1–1000).");
       protocol = { type: "alkanes-mint", alkaneid, count: Number(mintCount) };
@@ -459,7 +464,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
       const created = await response.json() as { orderId?: string; payAddress?: string; amount?: number; quoteAmount?: number; feeRate?: number; feeSources?: FeeEstimate["sources"]; feeStrategy?: FeeEstimate["strategy"]; error?: string };
       if (!response.ok || !created.orderId || !created.payAddress || !Number.isSafeInteger(created.amount) || !Number.isSafeInteger(created.feeRate) || Number(created.feeRate) < 1) throw new Error(created.error || "UniSat did not create the order with a verifiable fee rate.");
       const feeSourceLabel = describeFeeSources(created.feeStrategy ?? feeEstimate.strategy, created.feeSources ?? feeEstimate.sources);
-      const receiptFiles = submissionFiles.length ? submissionFiles.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })) : [{ filename: mode === "brc20" ? `brc20-${brc20Operation}-${ticker}.json` : mode === "runes-etch" ? "runes-etch.json" : mode === "alkanes-deploy" ? "alkanes-deploy-payload" : "alkanes-mint.json", size: 0, type: "Protocol inscription" }];
+      const receiptFiles = submissionFiles.length ? submissionFiles.map(file => ({ filename: file.name, size: file.size, type: fileKind(file) })) : [{ filename: mode === "brc20" ? `brc20-${brc20Operation}-${ticker}.json` : mode === "runes-etch" ? "runes-etch.json" : mode === "runes-mint" ? "runes-mint.json" : mode === "alkanes-deploy" ? "alkanes-deploy-payload" : "alkanes-mint.json", size: 0, type: "Protocol inscription" }];
       createdReceipt = { orderId: created.orderId, payAddress: created.payAddress, amount: Number(created.amount), files: receiptFiles, feeRate: Number(created.feeRate), paymentFeeRate: liveFeeRate, feeSourceLabel, chain: activeChainEnum, walletAddress: activeAddress, createdAt: new Date().toISOString() };
       if (mobileUniSat) await ensureNativePaymentBalance(activeChainEnum, activeAddress, createdReceipt.amount, liveFeeRate, "inscribe-payment", { mobile: true });
       setReceipt(createdReceipt);
@@ -694,7 +699,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
 {savedMobileOrder && !receipt && <div className="mt-4 border border-[#e0b45f]/50 bg-[#e0b45f]/5 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="status"><p>A saved Inscribe receipt exists. It will not open automatically. Review it to resume the order; if no payment was sent, you may clear only its local copy.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={reviewSavedMobileOrder} className="border border-[#e0b45f]/60 px-3 py-2 underline">Review saved receipt</button>{canClearUnpaidMobileReceipt && <button type="button" onClick={clearUnpaidMobileReceipt} className="border border-[#e0b45f]/60 px-3 py-2 underline">I verified that no payment was sent — clear local receipt</button>}</div></div>}
       <div role="tablist" aria-label="Inscription type" className="mt-4 flex gap-1 overflow-x-auto border-b border-[#2c323a]">
         {([
-          ["files", "Files"], ["brc20", "BRC-20"], ["runes-etch", "Etch Rune"], ["alkanes-deploy", "Deploy Alkane"], ["alkanes-mint", "Mint Alkane"],
+          ["files", "Files"], ["brc20", "BRC-20"], ["runes-etch", "Etch Rune"], ["runes-mint", "Mint Rune"], ["alkanes-deploy", "Deploy Alkane"], ["alkanes-mint", "Mint Alkane"],
         ] as Array<[InscribeMode, string]>).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={mode === value} onClick={() => { setMode(value); setMessage(""); }} className={`min-h-10 shrink-0 border-b-2 px-3 font-mono text-[9px] uppercase ${mode === value ? "border-[#d99a54] text-[#f2bd63]" : "border-transparent text-[#718092] hover:text-[#d9d3c6]"}`}>{label}</button>)}
       </div>
       {mode === "brc20" && <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -717,6 +722,7 @@ export function UniSatInscribePanel({ site = "punks" }: { site?: "punks" | "poke
         <label className="font-mono text-[9px] uppercase text-[#718092]">Start height (optional)<input value={runeHeightStart} onChange={event => setRuneHeightStart(event.target.value)} inputMode="numeric" className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]" /></label>
         <label className="font-mono text-[9px] uppercase text-[#718092]">End height (optional)<input value={runeHeightEnd} onChange={event => setRuneHeightEnd(event.target.value)} inputMode="numeric" className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]" /></label>
       </div>}
+      {mode === "runes-mint" && <div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="font-mono text-[9px] uppercase text-[#718092]">Rune ID<input value={runeMintId} onChange={event => setRuneMintId(event.target.value.trim())} maxLength={42} placeholder="840000:3" className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]" /></label><label className="font-mono text-[9px] uppercase text-[#718092]">Mint count<input value={runeMintCount} onChange={event => setRuneMintCount(event.target.value)} inputMode="numeric" type="number" min={1} max={1000} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]" /></label><p className="font-mono text-[10px] leading-5 text-[#9ea7b3] sm:col-span-2">UniSat quotes the live Bitcoin or Fractal mint order before any wallet payment approval. Confirm the Rune ID, batch count, network and amount in the receipt.</p></div>}
       {mode === "alkanes-deploy" && <p className="mt-4 border border-[#3b434d] p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]">Upload the Alkanes deployment payload file below. UniSat V5 quotes and creates the order; review the exact payload and amount before approving payment.</p>}
       {mode === "alkanes-mint" && <div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="font-mono text-[9px] uppercase text-[#718092]">Alkane ID<input value={alkaneid} onChange={event => setAlkaneid(event.target.value)} maxLength={42} placeholder="block:tx" className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]" /></label><label className="font-mono text-[9px] uppercase text-[#718092]">Mint count<input value={mintCount} onChange={event => setMintCount(event.target.value)} inputMode="numeric" type="number" min={1} max={1000} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0f1317] px-3 font-mono text-[10px] text-[#f3efe5]" /></label></div>}
 

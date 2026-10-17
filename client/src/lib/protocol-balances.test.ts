@@ -17,10 +17,10 @@ describe("fetchProtocolBalances", () => {
     async (network: ProtocolNetwork) => {
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const url = new URL(String(input));
-        expect(url.pathname).toBe("/api/brc20/balances");
+        expect(["/api/brc20/balances", "/api/brc20-prog/balances", "/api/runes/balance-list", "/api/alkanes/balances"]).toContain(url.pathname);
         expect(url.searchParams.get("address")).toBe(ADDRESS);
         expect(url.searchParams.get("chain")).toBe(network);
-        return Response.json({ network, address: ADDRESS, detail: [SIX_CHAR_BALANCE] });
+        return Response.json({ network, address: ADDRESS, detail: url.pathname === "/api/brc20/balances" ? [SIX_CHAR_BALANCE] : [] });
       });
       vi.stubGlobal("fetch", fetchMock as typeof fetch);
 
@@ -29,7 +29,9 @@ describe("fetchProtocolBalances", () => {
       expect(result.network).toBe(network);
       expect(result.address).toBe(ADDRESS);
       expect(result.brc20).toEqual([SIX_CHAR_BALANCE]);
-      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      const paths = fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname);
+      expect(new Set(paths)).toEqual(new Set(["/api/brc20/balances", "/api/brc20-prog/balances", "/api/runes/balance-list", "/api/alkanes/balances"]));
     },
   );
 
