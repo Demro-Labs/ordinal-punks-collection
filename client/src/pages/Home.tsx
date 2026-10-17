@@ -579,7 +579,7 @@ export default function Home() {
             </span>
           </a>
           <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.14em] text-[#9ea7b3] sm:gap-6">
-            <OrdiWallet />
+            <OrdiWallet site="punks" />
             <span className="hidden sm:inline">Fractal Bitcoin</span>
             <a
               className="inline-flex items-center gap-1.5 text-[#f3efe5] underline decoration-[#d99a54] underline-offset-4 transition-colors hover:text-[#d99a54]"
