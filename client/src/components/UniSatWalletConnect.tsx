@@ -63,7 +63,7 @@ type UniSatProvider = {
   sendBitcoin?: (address: string, satoshis: number, options?: { feeRate?: number }) => Promise<string | { txid?: string }>;
   sendInscription?: (address: string, inscriptionId: string, options?: { feeRate?: number }) => Promise<{ txid?: string }>;
   getPublicKey?: () => Promise<string>;
-  signMessage?: (message: string, type: "bip322-simple") => Promise<string>;
+  signMessage?: (message: string, type: "ecdsa" | "bip322-simple") => Promise<string>;
   signPsbt?: (psbtHex: string, options?: {
     autoFinalized?: boolean;
     toSignInputs?: Array<{ index: number; address?: string; publicKey?: string; useTweakedSigner?: boolean }>;

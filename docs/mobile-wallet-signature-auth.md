@@ -2,7 +2,7 @@
 
 ## Statut et portée
 
-Le dashboard UniSat d’Ordinal Punks expose maintenant le même parcours d’authentification sur mobile et desktop. Le composant `UniSatWalletAuth` demande explicitement une signature `bip322-simple`; aucune signature n’est déclenchée au chargement de la page.
+Le dashboard UniSat d’Ordinal Punks expose le même parcours d’authentification sur mobile et desktop. Le client choisit le type de signature selon l’adresse : `ecdsa` pour Legacy et Nested SegWit, `bip322-simple` pour Native SegWit et Taproot. Aucune signature n’est déclenchée au chargement de la page.
 
 Cette authentification prouve uniquement le contrôle d’une adresse. Elle ne constitue pas une autorisation de paiement, de transfert FB ou d’inscription, et n’accorde aucun droit de dépense. Chaque transaction continue d’exiger l’appel UniSat approprié et sa confirmation séparée.
 
@@ -10,8 +10,8 @@ Cette authentification prouve uniquement le contrôle d’une adresse. Elle ne c
 
 1. Le client lit à nouveau l’adresse et le réseau UniSat avant de demander un challenge. `BITCOIN_MAINNET` et `FRACTAL_BITCOIN_MAINNET` sont acceptés; le message signé et la session restent liés au réseau effectivement choisi.
 2. `POST /api/auth/challenge` crée un identifiant aléatoire de 256 bits, lié au site, à l’origine, à l’URI canonique, à l’adresse, au réseau et à une expiration de cinq minutes. La réponse fournit le message exact à examiner.
-3. Après l’action explicite « Sign this challenge in UniSat », le client appelle `unisat.signMessage(message, "bip322-simple")`.
-4. `POST /api/auth/verify` reçoit l’identifiant, l’adresse, le réseau et la signature. Le Worker reconstruit lui-même le message à partir de l’enregistrement serveur, vérifie BIP-322 avec `@exodus/bip322-js`, puis consomme le challenge et crée la session dans une transaction SQLite atomique du Durable Object.
+3. Après l’action explicite « Sign this challenge in UniSat », le client choisit `unisat.signMessage(message, "ecdsa")` pour les adresses Base58 `1…`/`3…`, et `unisat.signMessage(message, "bip322-simple")` pour les adresses Bech32 `bc1q…`/`bc1p…`.
+4. `POST /api/auth/verify` reçoit l’identifiant, l’adresse, le réseau et la signature. Le Worker reconstruit lui-même le message à partir de l’enregistrement serveur, vérifie la signature compacte compatible BIP-137 ou le témoin BIP-322 simple avec `@exodus/bip322-js`, puis consomme le challenge et crée la session dans une transaction SQLite atomique du Durable Object.
 5. La session est posée dans un cookie `HttpOnly`, `Secure`, `SameSite=None; Partitioned`, valable huit heures. Le client vérifie qu’il est effectivement renvoyé par `GET /api/auth/session?site=punks`; aucun secret ni signature réutilisable n’est enregistré dans le navigateur.
 
 Le message signé inclut notamment le domaine, l’URI `https://demro-labs.github.io/ordinal-punks-collection/`, le réseau, l’adresse, l’action « Login; prove wallet control only », un nonce et les horodatages. Il indique explicitement qu’aucun paiement, transfert ou accord de dépense n’est autorisé.
@@ -32,7 +32,7 @@ Les réponses d’authentification sont `no-store`. CORS n’autorise que les or
 - Les compteurs IP stockent une empreinte de l’IP limitée à une fenêtre de 15 minutes, jamais l’IP brute. Limites durables : 8 créations de challenge/15 min et 20 vérifications/15 min par IP; en plus, 6 challenges/heure par empreinte d’adresse. Les throttles en mémoire par isolate constituent une protection rapide supplémentaire.
 - Chaque challenge expire après cinq minutes et n’est consommable qu’une seule fois. La consommation, la révocation des anciennes sessions du même site/adresse et la création du nouveau jeton sont atomiques.
 - Les sessions sont isolées entre Punks (`__Host-demro-punks-auth`) et Pokédex (`__Host-demro-pokedex-auth`). Les dépenses on-chain restent indépendantes de ces sessions.
-- La connexion et les preuves de propriété acceptent Bitcoin mainnet et Fractal Bitcoin mainnet pour les quatre formats UniSat: `1…` P2PKH, `3…` P2SH-P2WPKH, `bc1q` P2WPKH et `bc1p` P2TR à clé unique. Le Worker vérifie cryptographiquement chaque signature selon la convention BIP-322 d’UniSat: témoin BIP-322 simple pour P2WPKH/P2TR et signature ECDSA récupérable compatible pour P2PKH/P2SH-P2WPKH. La session stocke le réseau utilisé; une preuve de propriété ne crée pas de session.
+- La connexion et les preuves de propriété acceptent Bitcoin mainnet et Fractal Bitcoin mainnet pour les quatre formats UniSat: `1…` P2PKH, `3…` P2SH-P2WPKH, `bc1q` P2WPKH et `bc1p` P2TR à clé unique. Legacy et Nested utilisent le format compact ECDSA/BIP-137 d’UniSat; Native SegWit et Taproot utilisent BIP-322 simple. Le Worker vérifie chaque signature contre l’adresse et le challenge; la session conserve le réseau utilisé. Une preuve de propriété ne crée pas de session.
 - La limite actuelle de **1 000 fichiers par commande Inscribe** est conservée dans le Worker. Les autres limites de taille et de requête restent inchangées.
 - Le secret UniSat existant demeure un binding `secret_text` nommé `UNISAT_API_KEY`; le déploiement préserve les bindings secrets sans lire ni remplacer leur valeur.
 

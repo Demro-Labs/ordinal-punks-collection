@@ -1,5 +1,7 @@
+import type { UniSatMessageSignatureType } from "@/lib/unisat-address-support";
+
 export type UniSatMobileSignProvider = {
-  signMessage?: (message: string, type: "bip322-simple") => Promise<string>;
+  signMessage?: (message: string, type: UniSatMessageSignatureType) => Promise<string>;
 };
 
 export const UNISAT_MOBILE_SIGN_TIMEOUT_MS = 30_000;
@@ -11,15 +13,16 @@ export class UniSatSignTimeoutError extends Error {
   }
 }
 
-export function signUniSatBip322Message(
+export function signUniSatMessage(
   provider: UniSatMobileSignProvider,
   message: string,
+  signatureType: UniSatMessageSignatureType = "bip322-simple",
   timeoutMs = UNISAT_MOBILE_SIGN_TIMEOUT_MS,
 ): Promise<string> {
-  if (!provider?.signMessage) return Promise.reject(new Error("This UniSat version does not expose BIP-322 message signing."));
+  if (!provider?.signMessage) return Promise.reject(new Error("This UniSat version does not expose message signing."));
   // Start the wallet prompt synchronously in the tap's call stack. Do not add
   // any network request or awaited provider check before this invocation.
-  const signPromise = provider.signMessage(message, "bip322-simple");
+  const signPromise = provider.signMessage(message, signatureType);
   let timer: ReturnType<typeof setTimeout>;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new UniSatSignTimeoutError()), timeoutMs);
@@ -27,5 +30,6 @@ export function signUniSatBip322Message(
   return Promise.race([signPromise, timeoutPromise]).finally(() => clearTimeout(timer));
 }
 
-/** Backward-compatible name used by the mobile wallet authentication flow. */
-export const signMobileUniSatMessage = signUniSatBip322Message;
+/** Backward-compatible aliases used by the sign-in and ownership-proof flows. */
+export const signMobileUniSatMessage = signUniSatMessage;
+export const signUniSatBip322Message = signUniSatMessage;

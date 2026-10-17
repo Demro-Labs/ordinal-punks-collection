@@ -20,7 +20,7 @@ type Wallet = {
   getAccounts?: () => Promise<string[]>;
   getChain?: () => Promise<{ enum?: string }>;
   getPublicKey?: () => Promise<string>;
-  signMessage?: (message: string, type: "bip322-simple") => Promise<string>;
+  signMessage?: (message: string, type: "ecdsa" | "bip322-simple") => Promise<string>;
   sendBitcoin?: (
     address: string,
     satoshis: number,

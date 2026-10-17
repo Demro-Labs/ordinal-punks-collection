@@ -44,7 +44,7 @@ type Provider = {
   ) => Promise<unknown>;
   getAccounts?: () => Promise<string[]>;
   getChain?: () => Promise<Chain>;
-  signMessage?: (message: string, type: "bip322-simple") => Promise<string>;
+  signMessage?: (message: string, type: "ecdsa" | "bip322-simple") => Promise<string>;
 };
 type PreparedTransfer = {
   contextKey: string;

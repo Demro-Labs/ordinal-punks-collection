@@ -1353,29 +1353,38 @@ test('sign-in challenges support Bitcoin and Fractal for both sites and stay bou
   }
 });
 
-test('valid BIP-322 sign-in creates a session for the signed network on both sites', async () => {
-  const address = 'bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l';
+test('valid BIP-322/BIP-137 sign-in creates sessions for Legacy, Nested, and Native addresses on both sites and networks', async () => {
   const testOnlyPrivateKey = 'L3VFeEujGtevx9w18HD1fhRbCH67Az2dpCymeRE1SoPK6XQtaN2k';
-  let ip = 240;
+  const legacyAddress = '14vV3aCHBeStb5bkenkNHbe2YAFinYdXgc';
+  const addresses = [
+    { address: legacyAddress, compactEcdsa: true },
+    { address: '37qyp7jQAzqb2rCBpMvVtLDuuzKAUCVnJb', compactEcdsa: true },
+    { address: 'bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l', compactEcdsa: false },
+  ];
+  let ip = 100;
   for (const site of ['punks', 'pokedex']) {
     for (const network of ['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET']) {
-      const { binding, state } = createAuthStorageMock();
-      const challengeResponse = await worker.fetch(makeRequest('/api/auth/challenge', {
-        method: 'POST', ip: `192.0.2.${ip++}`,
-        body: JSON.stringify({ site, address, network }),
-      }), { AUTH_STORAGE: binding });
-      const challenge = await challengeResponse.json();
-      const signature = await Signer.signAsync(testOnlyPrivateKey, address, challenge.message);
-      const verifyResponse = await worker.fetch(makeRequest('/api/auth/verify', {
-        method: 'POST', ip: `192.0.2.${ip++}`,
-        body: JSON.stringify({ site, address, network, challengeId: challenge.challengeId, signature }),
-      }), { AUTH_STORAGE: binding });
-      const result = await verifyResponse.json();
-      assert.equal(verifyResponse.status, 200);
-      assert.equal(result.session.site, site);
-      assert.equal(result.session.network, network);
-      assert.equal(state.session.network, network);
-      assert.match(verifyResponse.headers.get('set-cookie') || '', new RegExp(site === 'punks' ? '__Host-demro-punks-auth' : '__Host-demro-pokedex-auth'));
+      for (const { address, compactEcdsa } of addresses) {
+        const { binding, state } = createAuthStorageMock();
+        const challengeResponse = await worker.fetch(makeRequest('/api/auth/challenge', {
+          method: 'POST', ip: `192.0.2.${ip++}`,
+          body: JSON.stringify({ site, address, network }),
+        }), { AUTH_STORAGE: binding });
+        const challenge = await challengeResponse.json();
+        const signed = await Signer.signAsync(testOnlyPrivateKey, compactEcdsa ? legacyAddress : address, challenge.message);
+        const signature = Buffer.isBuffer(signed) ? signed.toString('base64') : signed;
+        const verifyResponse = await worker.fetch(makeRequest('/api/auth/verify', {
+          method: 'POST', ip: `192.0.2.${ip++}`,
+          body: JSON.stringify({ site, address, network, challengeId: challenge.challengeId, signature }),
+        }), { AUTH_STORAGE: binding });
+        const result = await verifyResponse.json();
+        assert.equal(verifyResponse.status, 200, `${site}/${network}/${address}: ${JSON.stringify(result)}`);
+        assert.equal(result.session.site, site);
+        assert.equal(result.session.address, address);
+        assert.equal(result.session.network, network);
+        assert.equal(state.session.network, network);
+        assert.match(verifyResponse.headers.get('set-cookie') || '', new RegExp(site === 'punks' ? '__Host-demro-punks-auth' : '__Host-demro-pokedex-auth'));
+      }
     }
   }
 });

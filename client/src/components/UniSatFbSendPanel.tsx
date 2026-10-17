@@ -16,7 +16,7 @@ type Provider = {
   getAccounts?: () => Promise<string[]>;
   getChain?: () => Promise<Chain>;
   switchChain?: (chain: "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET") => Promise<Chain>;
-  signMessage?: (message: string, type: "bip322-simple") => Promise<string>;
+  signMessage?: (message: string, type: "ecdsa" | "bip322-simple") => Promise<string>;
 };
 function storageKey(address: string, network: NativeNetwork) { return getNativeFbReceiptStorageKey(address, network); }
 function saveReceipt(receipt: NativeFbReceipt) { try { localStorage.setItem(storageKey(receipt.sender, receipt.networkEnum), JSON.stringify(receipt)); } catch { /* private mode or storage quota */ } }

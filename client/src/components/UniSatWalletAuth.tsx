@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LogOut, ShieldCheck } from "lucide-react";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
+import { getUniSatMessageSignatureType } from "@/lib/unisat-address-support";
 import { signMobileUniSatMessage, UniSatSignTimeoutError } from "@/lib/unisat-mobile-signing";
 
 const AUTH_API = "https://fractal-ordinal-live.servostar23.workers.dev";
@@ -9,7 +10,7 @@ const LOGIN_NETWORKS = new Set(["BITCOIN_MAINNET", "FRACTAL_BITCOIN_MAINNET"]);
 type UniSatAuthProvider = {
   getAccounts?: () => Promise<string[]>;
   getChain?: () => Promise<{ enum?: string }>;
-  signMessage?: (message: string, type: "bip322-simple") => Promise<string>;
+  signMessage?: (message: string, type: "ecdsa" | "bip322-simple") => Promise<string>;
 };
 
 type AuthSite = "punks" | "pokedex";
@@ -80,6 +81,7 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
     setMobileSignTimedOut(false);
     try {
       if (!networkReady) throw new Error("Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat first.");
+      if (!getUniSatMessageSignatureType(address)) throw new Error("This UniSat address format is not supported for sign-in.");
       if (!provider) throw new Error("UniSat is not available in this browser.");
       const [accounts, currentChain] = await Promise.all([
         provider.getAccounts ? provider.getAccounts() : Promise.resolve([address]),
@@ -111,13 +113,15 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
     setError("");
     try {
       if (Date.parse(challenge.expiresAt) <= Date.now()) throw new Error("The challenge expired. Create a new one.");
-      if (!provider?.signMessage) throw new Error("This UniSat version does not expose BIP-322 message signing.");
+      if (!provider?.signMessage) throw new Error("This UniSat version does not expose message signing.");
+      const signatureType = getUniSatMessageSignatureType(address);
+      if (!signatureType) throw new Error("This UniSat address format is not supported for sign-in.");
       let signature: string;
       if (mobile) {
         // UniSat Mobile's injected in-app provider can require signMessage to
         // start directly from the tap; run read-only wallet checks immediately
         // after the prompt, and never submit if the active wallet changed.
-        signature = await signMobileUniSatMessage(provider, challenge.message);
+        signature = await signMobileUniSatMessage(provider, challenge.message, signatureType);
         const [accounts, currentChain] = await Promise.all([
           provider.getAccounts ? provider.getAccounts() : Promise.resolve([address]),
           provider.getChain ? provider.getChain() : Promise.resolve(null),
@@ -131,9 +135,9 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
         ]);
         if (!accounts[0] || accounts[0].toLowerCase() !== address.toLowerCase()) throw new Error("The connected UniSat address changed. Create a new challenge for the active wallet.");
         if (currentChain?.enum && currentChain.enum !== challenge.network) throw new Error("The active UniSat network changed. Create a new challenge for the current network.");
-        signature = await provider.signMessage(challenge.message, "bip322-simple");
+        signature = await provider.signMessage(challenge.message, signatureType);
       }
-      if (typeof signature !== "string" || !signature) throw new Error("UniSat did not return a BIP-322 signature.");
+      if (typeof signature !== "string" || !signature) throw new Error("UniSat did not return a message signature.");
       const verifyResponse = await fetch(`${AUTH_API}/api/auth/verify`, {
         method: "POST",
         credentials: "include",
@@ -233,7 +237,7 @@ export function UniSatWalletAuth({ site, address, network, provider }: {
         </div>
       )}
       {error && !(mobileSignTimedOut && isMobileUniSatDevice()) && <p className="mt-3 font-mono text-[10px] leading-5 text-[#e08b7d]" role="alert">{error}</p>}
-      <p className="mt-3 font-mono text-[9px] leading-4 text-[#718092]">BIP-322 sign-in supports the four mainnet formats on Bitcoin and Fractal Bitcoin: 1… (P2PKH), 3… (P2SH-nested SegWit), bc1q… (P2WPKH) and bc1p… (P2TR). The signature is verified server-side and remains separate from every transaction approval.</p>
+      <p className="mt-3 font-mono text-[9px] leading-4 text-[#718092]">Sign-in supports all four Bitcoin and Fractal mainnet formats. Legacy (1…) and Nested SegWit (3…) use UniSat compact ECDSA; Native SegWit (bc1q…) and Taproot (bc1p…) use BIP-322 simple. The server verifies the signature; it never approves a transaction.</p>
     </section>
   );
 }
