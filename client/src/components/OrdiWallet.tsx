@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Eye, EyeOff, LockKeyhole, RefreshCw, ShieldCheck, Wallet, X } from "lucide-react";
 import { UniSatWalletConnect } from "@/components/UniSatWalletConnect";
+import { ProtocolAssetsPanel } from "@/components/ProtocolAssetsPanel";
 import {
   ADDRESS_SPECS, createMnemonic, decryptOrdiWallet, deriveOrdiWallet, encryptOrdiWallet,
   fetchAddressBalance, formatSats, readOrdiVault, type AddressType, type OrdiNetwork, type OrdiWalletRecord,
@@ -21,6 +22,7 @@ function short(value: string) { return `${value.slice(0, 12)}…${value.slice(-1
 export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } = {}) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"vault" | "connect">("connect");
+  const [connectedToSite, setConnectedToSite] = useState(false);
   const [wallet, setWallet] = useState<OrdiWalletRecord | null>(null);
   const [vaultExists, setVaultExists] = useState(false);
   const [mode, setMode] = useState<"create" | "import" | "unlock">("create");
@@ -36,6 +38,9 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
   const [reveal, setReveal] = useState<Record<string, boolean>>({});
 
   useEffect(() => { setVaultExists(Boolean(readOrdiVault())); }, [open]);
+  useEffect(() => {
+    try { setConnectedToSite(localStorage.getItem(`ordi-wallet-connected:${site}`) === "1"); } catch { setConnectedToSite(false); }
+  }, [open, site]);
   useEffect(() => {
     if (!open) return;
     const previousOverflow = document.body.style.overflow;
@@ -87,6 +92,12 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
     finally { setLoading(false); }
   }
   useEffect(() => { if (wallet) void refresh(); }, [wallet, network]);
+  function toggleSiteConnection() {
+    const next = !connectedToSite;
+    try { localStorage.setItem(`ordi-wallet-connected:${site}`, next ? "1" : "0"); } catch { /* storage may be unavailable */ }
+    setConnectedToSite(next);
+    setMessage(next ? "Ordi Wallet est connecté à ce site en lecture seule. Les clés privées restent dans le coffre local." : "Ordi Wallet est déconnecté de ce site.");
+  }
 
   return <>
     <button type="button" onClick={() => { setView("connect"); setOpen(true); }} className="inline-flex min-h-10 items-center gap-2 border border-[#d99a54]/70 bg-[#d99a54]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f2bd63] transition hover:bg-[#d99a54]/20" aria-label="Connecter UniSat au site">
@@ -119,8 +130,9 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
           </div>
           <div className="border border-[#2c323a] bg-[#0b0f13] p-4 sm:p-6"><h3 className="font-display text-xl text-[#f3efe5]">Sécurité Ordi Wallet</h3><ul className="mt-4 space-y-3 font-mono text-[10px] leading-5 text-[#9ea7b3]"><li>• BIP39 + BIP32 : standards déterministes interopérables.</li><li>• AES-256-GCM + PBKDF2 : le coffre local est chiffré avant stockage.</li><li>• Aucun seed, mot de passe ou clé privée n’est envoyé à UniSat, Mempool ou au serveur du site.</li><li>• Toujours sauvegarder la phrase hors ligne avant de fermer cette fenêtre.</li><li>• Les adresses sont affichées pour Bitcoin et Fractal ; les réseaux sont séparés au niveau des soldes et des explorateurs.</li></ul></div>
         </div> : <div className="p-4 sm:p-7">
-          <div className="flex flex-col gap-4 border-b border-[#2c323a] pb-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#70c7a0]">Coffre déverrouillé en mémoire</p><h2 className="mt-1 font-display text-2xl text-[#f3efe5]">Dashboard Ordi Wallet</h2></div><div className="flex items-center gap-2"><select className="border border-[#3b434d] bg-[#0b0f13] px-3 py-2 font-mono text-[10px] text-[#f3efe5]" value={network} onChange={event => setNetwork(event.target.value as OrdiNetwork)}>{NETWORKS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select><button onClick={() => void refresh()} className="border border-[#3b434d] p-2 text-[#f2bd63]" aria-label="Actualiser les soldes"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button></div></div>
+          <div className="flex flex-col gap-4 border-b border-[#2c323a] pb-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#70c7a0]">Coffre déverrouillé en mémoire</p><h2 className="mt-1 font-display text-2xl text-[#f3efe5]">Dashboard Ordi Wallet</h2><p className="mt-1 font-mono text-[9px] text-[#718092]">Site actif : {site === "punks" ? "Ordinal Punks" : "Fractal Pokédex"}</p></div><div className="flex flex-wrap items-center gap-2"><button type="button" onClick={toggleSiteConnection} className={`border px-3 py-2 font-mono text-[9px] uppercase tracking-[.1em] ${connectedToSite ? "border-[#70c7a0] bg-[#70c7a0]/10 text-[#9fe0bd]" : "border-[#d99a54] text-[#f2bd63]"}`}>{connectedToSite ? "Wallet connecté au site" : "Connecter au site"}</button><select className="border border-[#3b434d] bg-[#0b0f13] px-3 py-2 font-mono text-[10px] text-[#f3efe5]" value={network} onChange={event => setNetwork(event.target.value as OrdiNetwork)}>{NETWORKS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select><button onClick={() => void refresh()} className="border border-[#3b434d] p-2 text-[#f2bd63]" aria-label="Actualiser les soldes"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button></div></div>
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{addresses.map(item => <article key={item.type} className="border border-[#2c323a] bg-[#12171d] p-4"><div className="flex items-start justify-between gap-2"><div><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#f2bd63]">{item.label}</p><p className="mt-2 break-all font-mono text-[10px] text-[#d9d3c6]">{short(item.address)}</p></div><button onClick={() => copy(item.address)} className="text-[#9ea7b3] hover:text-[#f2bd63]" aria-label="Copier l’adresse"><Copy size={13} /></button></div><p className="mt-4 font-display text-xl text-[#f3efe5]">{formatSats(balances[item.type]?.total ?? null)}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">Confirmé {formatSats(balances[item.type]?.confirmed ?? null)}</p><details className="mt-4 border-t border-[#2c323a] pt-3"><summary className="cursor-pointer font-mono text-[9px] uppercase text-[#718092]">Clés avancées</summary><p className="mt-2 break-all font-mono text-[9px] text-[#718092]">Path: {item.path}</p><button onClick={() => setReveal(value => ({ ...value, [item.type]: !value[item.type] }))} className="mt-2 inline-flex items-center gap-1 font-mono text-[9px] uppercase text-[#e6a69b]">{reveal[item.type] ? <EyeOff size={12} /> : <Eye size={12} />}{reveal[item.type] ? "Masquer la clé privée" : "Afficher la clé privée"}</button>{reveal[item.type] && <><p className="mt-2 break-all border border-[#a45e54]/50 bg-[#a45e54]/10 p-2 font-mono text-[9px] text-[#e6a69b]">{item.privateKey}</p><button onClick={() => copy(item.privateKey)} className="mt-2 font-mono text-[9px] uppercase text-[#f2bd63]">Copier la clé privée</button></>}</details></article>)}</div>
+          {connectedToSite && <div className="mt-5 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-4"><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#9fe0bd]">Connexion active · lecture seule</p><p className="mt-2 font-mono text-[10px] leading-5 text-[#d9d3c6]">Le site utilise l’adresse Native SegWit du coffre pour afficher les soldes live. Aucune clé privée n’est exposée. Les transferts restent désactivés pour ce coffre local tant qu’une confirmation de signature dédiée n’est pas disponible.</p><ProtocolAssetsPanel address={wallet.addresses["native-segwit"].address} network={network} site={site} /></div>}
           <div className="mt-5 grid gap-3 lg:grid-cols-2"><div className="border border-[#2c323a] bg-[#12171d] p-4"><p className="font-mono text-[9px] uppercase tracking-[.14em] text-[#718092]">Phrase de récupération</p><p className="mt-2 break-words font-mono text-xs leading-6 text-[#d9d3c6]">{reveal.mnemonic ? wallet.mnemonic : "•••••••• •••••••• •••••••• ••••••••"}</p><button onClick={() => setReveal(value => ({ ...value, mnemonic: !value.mnemonic }))} className="mt-3 inline-flex items-center gap-1 font-mono text-[9px] uppercase text-[#f2bd63]">{reveal.mnemonic ? <EyeOff size={12} /> : <Eye size={12} />} {reveal.mnemonic ? "Masquer" : "Afficher"}</button>{reveal.mnemonic && <button onClick={() => copy(wallet.mnemonic)} className="ml-3 font-mono text-[9px] uppercase text-[#f2bd63]">Copier</button>}</div><div className="border border-[#70c7a0]/30 bg-[#70c7a0]/5 p-4 font-mono text-[10px] leading-5 text-[#9fe0bd]">Lecture des soldes via les endpoints publics Mempool. Les signatures et les broadcasts restent soumis à une confirmation explicite ; Ordi Wallet ne délègue jamais une clé privée à un serveur.</div></div>
         </div>}
         </>}
