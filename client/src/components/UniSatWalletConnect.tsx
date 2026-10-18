@@ -19,6 +19,7 @@ import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink"
 import { ProtocolAssetsPanel } from "@/components/ProtocolAssetsPanel";
 import { TransactionHistoryPanel } from "@/components/TransactionHistoryPanel";
 import { isLocalVaultSiteSession, isWalletExtensionContext, LOCAL_VAULT_SESSION_EVENT, readLocalVaultSiteSession, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
+import { getUniSatProvider } from "@/lib/unisat-provider";
 
 type UniSatChain = {
   enum?: string;
@@ -102,6 +103,7 @@ declare global {
 
 const FRACTAL_MAINNET = "FRACTAL_BITCOIN_MAINNET";
 const BITCOIN_MAINNET = "BITCOIN_MAINNET";
+const getProvider = () => getUniSatProvider() as UniSatProvider | undefined;
 type MempoolTrackingStatus = "idle" | "checking" | "pending" | "confirmed" | "timeout" | "error";
 type TransferReceipt = { txid: string; network: string; status: string; message: string; blockHeight: number | null; explorerUrl: string; checkedAt: string; liveBefore?: LiveInscription | null; liveAfter?: LiveInscription | null };
 
@@ -183,14 +185,14 @@ function isMobileBrowser() {
 
 function isUniSatMobileContext() {
   return new URLSearchParams(window.location.search).get(UNISAT_MOBILE_CONTEXT_PARAM) === "1"
-    || Boolean(window.unisat);
+    || Boolean(getProvider());
 }
 
 function openUniSatMobileWallet() {
   if (!isMobileBrowser()) return false;
   // UniSat's mobile connect deeplink returns to a custom app scheme, which
   // Safari/Chrome cannot receive. The official openDapp flow loads this site
-  // inside UniSat's in-app browser where window.unisat is injected.
+  // inside UniSat's in-app browser where getProvider() is injected.
   const dappUrl = new URL(window.location.href);
   dappUrl.searchParams.set(UNISAT_MOBILE_CONTEXT_PARAM, "1");
   const data = btoa(JSON.stringify([dappUrl.toString()]));
@@ -367,7 +369,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   };
 
   const refreshWalletDashboard = async () => {
-    const provider = window.unisat;
+    const provider = getProvider();
     if (!provider || !address) return;
     const results = await Promise.allSettled([
       provider.getBalance ? provider.getBalance() : Promise.resolve(null),
@@ -445,7 +447,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   };
   const disconnectWallet = async () => {
     stopLoadingInscriptions();
-    const provider = window.unisat as (typeof window.unisat & { disconnect?: () => Promise<void> }) | undefined;
+    const provider = getProvider() as (typeof window.unisat & { disconnect?: () => Promise<void> }) | undefined;
     try { await provider?.disconnect?.(); } catch { /* local session still clears */ }
     setAddress(null);
     setChain(null);
@@ -470,7 +472,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   };
 
   useEffect(() => {
-    const provider = window.unisat;
+    const provider = getProvider();
     setProviderAvailable(Boolean(provider));
     if (!provider) return;
 
@@ -525,7 +527,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   }, []);
 
   const connect = async () => {
-    const provider = window.unisat;
+    const provider = getProvider();
     setError("");
     if (!provider) {
       setProviderAvailable(false);
@@ -569,7 +571,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   };
 
   const switchToFractal = async () => {
-    const provider = window.unisat;
+    const provider = getProvider();
     if (!provider?.switchChain) {
       setError("Update UniSat Wallet to enable Fractal Bitcoin network switching.");
       return;
@@ -591,7 +593,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   };
 
   const switchToBitcoin = async () => {
-    const provider = window.unisat;
+    const provider = getProvider();
     if (!provider?.switchChain) {
       setError("Update UniSat Wallet to enable switching to Bitcoin mainnet.");
       return;
@@ -611,7 +613,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   };
 
   const loadInscriptions = async (append = false, targetId?: string, accountAddress = address) => {
-    const provider = window.unisat;
+    const provider = getProvider();
     if (!provider?.getInscriptions) {
       setTransferError("Update UniSat Wallet to view inscriptions from this site.");
       return;
@@ -624,7 +626,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     setBusy(true);
     setTransferError("");
     try {
-      const currentChain = await window.unisat?.getChain?.();
+      const currentChain = await getProvider()?.getChain?.();
       if (controller.signal.aborted || loadRun !== inscriptionLoadRunRef.current) return;
       if (!isSupportedMainnet(currentChain?.enum)) {
         setChain(currentChain ?? null);
@@ -850,7 +852,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
       setTransferError("A previous UniSat transfer response had an uncertain outcome. Check UniSat activity and the selected network's mempool before authorizing another transfer.");
       return;
     }
-    const provider = window.unisat;
+    const provider = getProvider();
     const recipient = destination.trim();
     const selected = inscriptions.find(item => item.inscriptionId === selectedInscriptionId);
     setTransferError("");
@@ -1022,7 +1024,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
 
   const openMobileNativeTransfer = () => {
     const ready = mobileNativeReadyForContext;
-    const provider = window.unisat;
+    const provider = getProvider();
     if (!isMobileUniSatDevice() || !ready || !provider?.sendInscription || ready.address !== address || ready.networkEnum !== chain?.enum) {
       setTransferError("The mobile transfer must be pre-checked with the current account. Prepare it again.");
       setMobileNativeTransferReady(null);
@@ -1079,13 +1081,13 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
 
   const connectedToFractal = Boolean(address && isSupportedMainnet(chain?.enum));
   const currentNetwork = getMempoolConfig(chain?.enum);
-  const nativeInscriptionTransfer = Boolean(window.unisat?.sendInscription) && !(isMobileUniSatDevice() && chain?.enum === FRACTAL_MAINNET);
+  const nativeInscriptionTransfer = Boolean(getProvider()?.sendInscription) && !(isMobileUniSatDevice() && chain?.enum === FRACTAL_MAINNET);
   const verifiedOrdinalTransfer =
     isSupportedMainnet(chain?.enum) &&
     !nativeInscriptionTransfer;
   const mobilePsbtTransferUnavailable =
     isMobileUniSatDevice() && connectedToFractal && !nativeInscriptionTransfer &&
-    (!window.unisat?.getBitcoinUtxos || !window.unisat?.getPublicKey || !window.unisat?.getAccounts || !window.unisat?.signPsbt);
+    (!getProvider()?.getBitcoinUtxos || !getProvider()?.getPublicKey || !getProvider()?.getAccounts || !getProvider()?.signPsbt);
   const walletPageSize = 10;
   const normalizedInscriptionSearch = inscriptionSearch.trim().toLowerCase();
   const filteredInscriptions = normalizedInscriptionSearch
@@ -1290,10 +1292,10 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         </section>
       )}
       {connectedToFractal && (
-        <UniSatWalletAuth key={`${address ?? ""}:${chain?.enum ?? ""}`} site="punks" address={address ?? ""} network={chain?.enum ?? ""} provider={window.unisat} />
+        <UniSatWalletAuth key={`${address ?? ""}:${chain?.enum ?? ""}`} site="punks" address={address ?? ""} network={chain?.enum ?? ""} provider={getProvider()} />
       )}
       {connectedToFractal && (
-        <UniSatFbSendPanel provider={window.unisat} address={address ?? ""} chain={chain} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} site={site} />
+        <UniSatFbSendPanel provider={getProvider()} address={address ?? ""} chain={chain} network={chain!.enum as "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET"} onWalletRefresh={() => { void refreshWalletDashboard(); }} onSwitchToFractal={() => { void switchToFractal(); }} walletBusy={busy} site={site} />
       )}
       {connectedToFractal && isSupportedMainnet(chain?.enum) && (
         <UniSatRunesSendPanel site={site} address={address ?? ""} chain={chain} onWalletRefresh={() => { void refreshWalletDashboard(); }} />
@@ -1381,7 +1383,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                 />
                 <span>I checked this inscription and destination. I understand the on-chain transfer cannot be reversed.</span>
               </label>
-              {confirmed && selectedInscription && destination.trim() && address && isSupportedMainnet(chain?.enum) && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={window.unisat} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
+              {confirmed && selectedInscription && destination.trim() && address && isSupportedMainnet(chain?.enum) && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={getProvider()} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
               {mobileNativeReadyForContext && <p className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#70c7a0]" role="status">Pre-check complete. Wallet ownership check is valid. Tap again to open UniSat transaction confirmation.</p>}
               {isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) && (
                 <button
@@ -1441,7 +1443,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
               Load more inscriptions ({inscriptionCursor} of {inscriptionTotal})
             </button>
           )}
-          <UniSatMobileOpenDappLink site={site} walletMethodAvailable={nativeInscriptionTransfer ? typeof window.unisat?.sendInscription === "function" : Boolean(window.unisat?.getBitcoinUtxos && window.unisat?.getPublicKey && window.unisat?.getAccounts && window.unisat?.signPsbt)} methodLabel={nativeInscriptionTransfer ? "sendInscription" : "verified PSBT signing"} />{transferError && <p className="mt-3 font-mono text-[10px] text-[#e08b7d]" role="alert">{transferError}</p>}
+          <UniSatMobileOpenDappLink site={site} walletMethodAvailable={nativeInscriptionTransfer ? typeof window.unisat?.sendInscription === "function" : Boolean(getProvider()?.getBitcoinUtxos && getProvider()?.getPublicKey && getProvider()?.getAccounts && getProvider()?.signPsbt)} methodLabel={nativeInscriptionTransfer ? "sendInscription" : "verified PSBT signing"} />{transferError && <p className="mt-3 font-mono text-[10px] text-[#e08b7d]" role="alert">{transferError}</p>}
           {txid && (
             <>
               <p className="mt-3 break-all font-mono text-[10px] text-[#70c7a0]" role="status">

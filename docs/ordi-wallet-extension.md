@@ -1,6 +1,6 @@
 # Ordi Wallet browser extension preview
 
-This repository can build an unpacked desktop WebExtension popup that reuses the site's encrypted local vault, live balance views, protocol-asset panel, and reviewed Native SegWit local PSBT signer.
+This repository can build an unpacked desktop WebExtension popup that reuses the site's encrypted local vault, live balance views, protocol-transfer routing, and reviewed Native SegWit local PSBT signer.
 
 ## Build
 
@@ -21,5 +21,5 @@ The extension is built into `dist/extension/` and packaged as `client/public/dow
 - This is an unsigned preview, not a Chrome Web Store, Edge Add-ons, or Mozilla Add-ons release, and it has not had an independent security audit.
 - Safari and mobile-browser installation are not supported by this build.
 - Extension storage is isolated from each website's origin. The extension does not inject a provider or silently share private keys with either website. Import the same recovery phrase separately into a site's local vault if using that website's existing local-vault integration.
-- Public balances/activity come from Mempool endpoints. The embedded local signer supports reviewed PSBTs for the vault's Native SegWit key; a user must review and explicitly broadcast. Existing Ordinal/Rune/BRC-20 site flows remain separate and may use UniSat approval.
+- Public balances/activity come from Mempool and the shared UniSat indexer Worker. The embedded local signer supports reviewed native BTC PSBTs; protocol-specific construction stays in UniSat's reviewed Assets flow, while this vault never exposes a key or API secret to it. BRC-20, BRC20-Prog, Runes and Alkanes routes are shown explicitly so they cannot be mistaken for generic BTC signing.
 - Never package, publish, or use this preview for valuable funds until the source and security model have been independently reviewed.
