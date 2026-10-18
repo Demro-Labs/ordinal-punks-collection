@@ -1210,6 +1210,37 @@ export default {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
       return walletProtocolAssets(request, env, headers);
     }
+    if (request.method === 'GET' && url.pathname === '/api/ordinals/address-list') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const chain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
+      const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
+      const address = url.searchParams.get('address') || '';
+      const start = parseBoundedInteger(url.searchParams.get('start'), 0, 10_000);
+      const limit = parseBoundedInteger(url.searchParams.get('limit'), 50, 50);
+      if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain) || !validWalletAddress(address) || start === null || limit === null || limit < 1) {
+        return Response.json({ error: 'Réseau, adresse ou pagination Ordinals invalide.' }, { status: 400, headers: noStore });
+      }
+      try {
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/inscriptions?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
+        const sourceStart = Number(source?.start);
+        const total = Number(source?.total);
+        if (!Number.isSafeInteger(sourceStart) || sourceStart !== start || !Number.isSafeInteger(total) || total < 0 || !Array.isArray(source?.detail) || source.detail.length > limit) throw new Error('Invalid UniSat Ordinals response');
+        const detail = source.detail.map(item => {
+          const inscriptionId = typeof item?.inscriptionId === 'string' && /^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId) ? item.inscriptionId.toLowerCase() : null;
+          const location = typeof item?.location === 'string' && /^[a-f0-9]{64}:\d+:\d+$/i.test(item.location) ? item.location : null;
+          const inscriptionNumber = item?.inscriptionNumber === null || item?.inscriptionNumber === undefined ? null : Number(item.inscriptionNumber);
+          const outputValue = item?.outputValue === null || item?.outputValue === undefined ? null : Number(item.outputValue);
+          if (!inscriptionId) return null;
+          return { inscriptionId, inscriptionNumber: Number.isSafeInteger(inscriptionNumber) && inscriptionNumber >= 0 ? inscriptionNumber : null, location, outputValue: Number.isSafeInteger(outputValue) && outputValue >= 0 ? outputValue : null, contentType: typeof item?.contentType === 'string' ? item.contentType : null };
+        });
+        if (detail.some(item => item === null)) throw new Error('Invalid Ordinals item');
+        return Response.json({ network: chain, address, start, total, detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
+      } catch {
+        console.warn('Ordinals address lookup failed', { chain });
+        return Response.json({ error: 'Les inscriptions Ordinals sont temporairement indisponibles.' }, { status: 503, headers: noStore });
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/api/runes/balance-list') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
