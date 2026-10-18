@@ -49,6 +49,34 @@ describe("getSpendableUtxos", () => {
     expect(result[0]).toMatchObject({ isLowFee: true, height: 100, inscriptionsRunesAlkanesChecked: true });
   });
 
+  it("keeps paging until every exact PSBT outpoint is verified", async () => {
+    const cursors: number[] = [];
+    installWindowAndFetch(async input => {
+      const url = new URL(String(input));
+      const cursor = Number(url.searchParams.get("cursor"));
+      cursors.push(cursor);
+      const utxo = cursor === 0
+        ? makeSafeUtxo({ txid: "a".repeat(64), vout: 0 })
+        : makeSafeUtxo({ txid: "b".repeat(64), vout: 1 });
+      return Response.json({ chain: "bitcoin", address: ADDRESS, cursor, nextCursor: cursor + 1, total: 2, scannedCount: 1, utxo: [utxo] });
+    });
+
+    const result = await getSpendableUtxos("BITCOIN_MAINNET", ADDRESS, 10_000, { requiredOutpoints: [`${"b".repeat(64)}:1`] });
+    expect(cursors).toEqual([0, 1]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ txid: "b".repeat(64), vout: 1 });
+  });
+
+  it("rejects a PSBT input if only unrelated safe UTXOs were found", async () => {
+    installWindowAndFetch(async () => Response.json({
+      chain: "bitcoin", address: ADDRESS, cursor: 0, nextCursor: 1, total: 1, scannedCount: 1,
+      utxo: [makeSafeUtxo({ txid: "a".repeat(64), vout: 0 })],
+    }));
+
+    await expect(getSpendableUtxos("BITCOIN_MAINNET", ADDRESS, 10_000, { requiredOutpoints: [`${"b".repeat(64)}:1`] }))
+      .rejects.toThrow(/exact PSBT input/i);
+  });
+
   it("continues paging beyond 250 outputs until enough safe UTXOs are found", async () => {
     const requestedCursors: number[] = [];
     installWindowAndFetch(async input => {
