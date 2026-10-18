@@ -653,6 +653,29 @@ test('routes BRC-20 and Alkanes wallet inventory through the selected network se
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('routes Bitcoin Alkanes collections through the Bitcoin UniSat API and secret', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  let authorization = '';
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    assert.equal(url.origin, 'https://open-api.unisat.io');
+    assert.equal(url.pathname, `/v1/indexer/address/${address}/alkanes/collection-list`);
+    authorization = new Headers(init.headers).get('Authorization') || '';
+    return Response.json({ code: 0, data: { start: 0, total: 1, detail: [{ alkaneid: '2:2', type: 'collection', collectionData: { name: 'Bitcoin Collection', totalSupply: '100', minted: 26 } }] } });
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/alkanes/collection-list?chain=BITCOIN_MAINNET&address=${address}`, { ip: '192.0.2.66' }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(result.network, 'BITCOIN_MAINNET');
+    assert.equal(result.total, 1);
+    assert.equal(result.detail[0].collectionData.name, 'Bitcoin Collection');
+    assert.equal(authorization, 'Bearer bitcoin-test-only');
+    assert.equal(JSON.stringify(result).includes('test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('caches successful public market responses at the edge', async () => {
   const previousCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
   const previousFetch = globalThis.fetch;
