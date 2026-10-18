@@ -17,7 +17,7 @@ import {
   type OrdiNetwork,
   type OrdiWalletRecord,
 } from "@/lib/ordi-wallet";
-import { LOCAL_VAULT_SESSION_EVENT, publishLocalVaultSiteSession, readLocalVaultSiteSession, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
+import { createLocalVaultSiteSession, isWalletExtensionContext, LOCAL_VAULT_SESSION_EVENT, publishLocalVaultSiteSession, readLocalVaultSiteSession, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
 
 const BASE = import.meta.env.BASE_URL;
 const NETWORKS: Array<{ id: OrdiNetwork; label: string }> = [
@@ -39,6 +39,7 @@ const inputClass = "min-h-12 w-full border border-[#3b434d] bg-[#0b0f13] p-3 fon
 const buttonClass = "inline-flex min-h-11 items-center justify-center gap-2 px-4 py-2 font-mono text-[10px] uppercase tracking-[.12em]";
 
 export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } = {}) {
+  const extensionContext = isWalletExtensionContext();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"vault" | "connect">("vault");
   const [connectedToSite, setConnectedToSite] = useState(false);
@@ -185,22 +186,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
 
   useEffect(() => {
     if (!wallet || !connectedToSite) return;
-    const active = wallet.addresses[activeAddressType];
-    publishLocalVaultSiteSession({
-      version: 2,
-      site,
-      network,
-      activeAddressType,
-      address: active.address,
-      publicKey: active.publicKey,
-      addresses: Object.fromEntries(ADDRESS_SPECS.map(spec => [spec.type, {
-        type: spec.type,
-        label: spec.label,
-        address: wallet.addresses[spec.type].address,
-        publicKey: wallet.addresses[spec.type].publicKey,
-      }])) as never,
-      connectedAt: new Date().toISOString(),
-    });
+    publishLocalVaultSiteSession(createLocalVaultSiteSession({ wallet, site, network, activeAddressType }));
   }, [wallet, connectedToSite, network, activeAddressType, site]);
 
   function toggleSiteConnection() {
@@ -215,28 +201,15 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
       // Browser storage may be unavailable.
     }
     if (next) {
-      const active = wallet.addresses[activeAddressType];
-      publishLocalVaultSiteSession({
-        version: 2,
-        site,
-        network,
-        activeAddressType,
-        address: active.address,
-        publicKey: active.publicKey,
-        addresses: Object.fromEntries(ADDRESS_SPECS.map(spec => [spec.type, {
-          type: spec.type,
-          label: spec.label,
-          address: wallet.addresses[spec.type].address,
-          publicKey: wallet.addresses[spec.type].publicKey,
-        }])) as never,
-        connectedAt: new Date().toISOString(),
-      });
+      publishLocalVaultSiteSession(createLocalVaultSiteSession({ wallet, site, network, activeAddressType }));
     } else {
       publishLocalVaultSiteSession(null, site);
     }
     setConnectedToSite(next);
     setMessage(next
-      ? "Ordi Wallet is connected to this site. Private keys remain in the local vault."
+      ? extensionContext
+        ? "Local Vault enabled in this extension only. Browser extensions have separate storage from websites; import the same recovery phrase into the target site’s Local Vault to use it there."
+        : "Local Vault linked to this site: only the selected network and public addresses are shared. Private keys stay in the encrypted vault; UniSat remains a separate signing provider."
       : "Ordi Wallet is disconnected from this site.");
   }
 
@@ -301,9 +274,9 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
                 <aside className="border border-[#2c323a] bg-[#0b0f13] p-4 sm:p-6"><h3 className="font-display text-xl text-[#f3efe5]">Ordi Wallet security</h3><ul className="mt-4 space-y-3 font-mono text-[10px] leading-5 text-[#9ea7b3]"><li>• BIP39 + BIP32: interoperable wallet standards.</li><li>• AES-256-GCM + PBKDF2: the local vault is encrypted before storage.</li><li>• Your recovery phrase, password, and private keys are not sent to UniSat, Mempool, or the site server.</li><li>• Back up your recovery phrase offline before closing this wallet.</li><li>• Bitcoin and Fractal balances are queried separately.</li></ul></aside>
               </div> : <div className="p-3 sm:p-7">
                 <div className="flex flex-col gap-4 border-b border-[#2c323a] pb-5 sm:flex-row sm:items-center sm:justify-between">
-                  <div><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#70c7a0]">Vault unlocked in memory</p><h2 className="mt-1 font-display text-2xl text-[#f3efe5]">Ordi Wallet dashboard</h2><p className="mt-1 font-mono text-[9px] text-[#718092]">Active site: {site === "punks" ? "Ordinal Punks" : "Fractal Pokédex"}</p></div>
+                  <div><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#70c7a0]">Vault unlocked in memory</p><h2 className="mt-1 font-display text-2xl text-[#f3efe5]">Ordi Wallet dashboard</h2><p className="mt-1 font-mono text-[9px] text-[#718092]">{extensionContext ? "Extension vault · isolated from website storage" : `Active site: ${site === "punks" ? "Ordinal Punks" : "Fractal Pokédex"}`}</p></div>
                   <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-                    <button type="button" onClick={toggleSiteConnection} className={`col-span-2 ${buttonClass} border px-3 text-[9px] tracking-[.1em] sm:col-span-1 ${connectedToSite ? "border-[#70c7a0] bg-[#70c7a0]/10 text-[#9fe0bd]" : "border-[#d99a54] text-[#f2bd63]"}`}>{connectedToSite ? "Connected to site" : "Connect local vault"}</button>
+                    <button type="button" onClick={toggleSiteConnection} className={`col-span-2 ${buttonClass} border px-3 text-[9px] tracking-[.1em] sm:col-span-1 ${connectedToSite ? "border-[#70c7a0] bg-[#70c7a0]/10 text-[#9fe0bd]" : "border-[#d99a54] text-[#f2bd63]"}`}>{connectedToSite ? extensionContext ? "Enabled in extension" : "Connected to site" : extensionContext ? "Enable in extension" : "Connect local vault"}</button>
                     <select aria-label="Select network" className="min-h-11 min-w-0 border border-[#3b434d] bg-[#0b0f13] px-2 font-mono text-[10px] text-[#f3efe5] sm:px-3" value={network} onChange={event => setNetwork(event.target.value as OrdiNetwork)}>{NETWORKS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
                     <select aria-label="Select address type" className="min-h-11 min-w-0 border border-[#3b434d] bg-[#0b0f13] px-2 font-mono text-[10px] text-[#f3efe5] sm:px-3" value={activeAddressType} onChange={event => setActiveAddressType(event.target.value as AddressType)}>{ADDRESS_SPECS.map(item => <option key={item.type} value={item.type}>{item.label}</option>)}</select>
                     <button type="button" onClick={() => void refresh()} className="flex min-h-11 items-center justify-center border border-[#3b434d] px-3 text-[#f2bd63]" aria-label="Refresh balances"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></button>
@@ -316,7 +289,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
                   <p className="mt-3 font-display text-xl text-[#f3efe5]">{formatSats(balances[item.type]?.total ?? null)}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">Confirmed {formatSats(balances[item.type]?.confirmed ?? null)}</p>
                   <details className="mt-4 border-t border-[#2c323a] pt-3"><summary className="min-h-10 cursor-pointer py-2 font-mono text-[9px] uppercase text-[#718092]">Advanced keys</summary><p className="mt-2 break-all font-mono text-[9px] text-[#718092]">Derivation path: {item.path}</p><button type="button" onClick={() => setReveal(value => ({ ...value, [item.type]: !value[item.type] }))} className="mt-2 inline-flex min-h-10 items-center gap-1 font-mono text-[9px] uppercase text-[#e6a69b]">{reveal[item.type] ? <EyeOff size={12} /> : <Eye size={12} />}{reveal[item.type] ? "Hide private key" : "Reveal private key"}</button>{reveal[item.type] && <><p className="mt-2 break-all border border-[#a45e54]/50 bg-[#a45e54]/10 p-2 font-mono text-[9px] text-[#e6a69b]">{item.privateKey}</p><button type="button" onClick={() => copy(item.privateKey)} className="mt-2 min-h-10 font-mono text-[9px] uppercase text-[#f2bd63]">Copy private key</button></>}</details>
                 </article>)}</div>
-                {connectedToSite && <div className="mt-4 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 sm:mt-5 sm:p-4"><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#9fe0bd]">Local vault connected to this site</p><p className="mt-2 break-all font-mono text-[10px] leading-5 text-[#d9d3c6]">Native SegWit address: {wallet.addresses["native-segwit"].address}</p><p className="mt-2 font-mono text-[10px] leading-5 text-[#d9d3c6]">Desktop and UniSat Mobile use the same explicit session bridge on this page. Private keys remain in the unlocked vault; transaction signing still requires a separate review.</p><ProtocolAssetsPanel address={wallet.addresses["native-segwit"].address} network={network} site={site} /></div>}
+                {connectedToSite && <div className="mt-4 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 sm:mt-5 sm:p-4"><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#9fe0bd]">{extensionContext ? "Local vault enabled in this extension only" : "Local vault connected to this site"}</p><p className="mt-2 break-all font-mono text-[10px] leading-5 text-[#d9d3c6]">{ADDRESS_SPECS.find(item => item.type === activeAddressType)?.label} address: {wallet.addresses[activeAddressType].address}</p><p className="mt-2 font-mono text-[10px] leading-5 text-[#d9d3c6]">{extensionContext ? "Extension storage is isolated from website origins. Import this recovery phrase separately into the target site’s Local Vault; no keys are shared across origins." : "Only the selected network and public addresses are shared with this page. Private keys remain in the unlocked vault; transaction signing still requires a separate review."}</p><ProtocolAssetsPanel address={wallet.addresses[activeAddressType].address} network={network} site={site} /></div>}
                 {connectedToSite && <LocalPsbtSignerPanel wallet={wallet} network={network} />}
                 <div className="mt-4 grid gap-3 sm:mt-5 lg:grid-cols-2"><div className="min-w-0 border border-[#2c323a] bg-[#12171d] p-4"><p className="font-mono text-[9px] uppercase tracking-[.14em] text-[#718092]">Recovery phrase</p><p className="mt-2 break-words font-mono text-xs leading-6 text-[#d9d3c6]">{reveal.mnemonic ? wallet.mnemonic : "•••••••• •••••••• •••••••• ••••••••"}</p><button type="button" onClick={() => setReveal(value => ({ ...value, mnemonic: !value.mnemonic }))} className="mt-2 inline-flex min-h-10 items-center gap-1 font-mono text-[9px] uppercase text-[#f2bd63]">{reveal.mnemonic ? <EyeOff size={12} /> : <Eye size={12} />} {reveal.mnemonic ? "Hide" : "Reveal"}</button>{reveal.mnemonic && <button type="button" onClick={() => copy(wallet.mnemonic)} className="ml-3 min-h-10 font-mono text-[9px] uppercase text-[#f2bd63]">Copy</button>}</div><div className="border border-[#70c7a0]/30 bg-[#70c7a0]/5 p-4 font-mono text-[10px] leading-5 text-[#9fe0bd]">Balances are fetched from public Mempool endpoints. Signing happens locally after explicit review; Ordi Wallet never sends a private key to a server.</div></div>
               </div>}
