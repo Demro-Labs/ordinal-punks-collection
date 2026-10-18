@@ -88,10 +88,15 @@ const SPENDABLE_UTXO_PAGE_SIZE = 25;
 const MAX_SPENDABLE_UTXO_PAGES = 20;
 
 /** Fetch confirmed, non-asset UTXOs; a low-fee/RBF history does not make a confirmed output replaceable. */
-export async function getSpendableUtxos(network: string, address: string, minimumSats: number, options: { mobile?: boolean } = {}): Promise<SpendableUtxo[]> {
+export async function getSpendableUtxos(network: string, address: string, minimumSats: number, options: { mobile?: boolean; requiredOutpoints?: string[] } = {}): Promise<SpendableUtxo[]> {
   const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
   if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0) {
     throw new Error("Invalid network, address, or amount for spendable UTXO verification.");
+  }
+  const normalizedOutpoints = options.requiredOutpoints?.map(value => value.toLowerCase());
+  const requiredOutpoints = normalizedOutpoints ? normalizedOutpoints.filter((value, index) => normalizedOutpoints.indexOf(value) === index) : null;
+  if (requiredOutpoints && (requiredOutpoints.length !== options.requiredOutpoints!.length || requiredOutpoints.length < 1 || requiredOutpoints.some(value => !/^[a-f0-9]{64}:\d+$/.test(value)))) {
+    throw new Error("The required PSBT outpoints are invalid or duplicated.");
   }
   const collected: SpendableUtxo[] = [];
   let cursor = 0;
@@ -129,11 +134,20 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     );
     collected.push(...safe);
     const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
-    if (safeSats >= minimumSats) return collected;
+    if (requiredOutpoints) {
+      const byOutpoint = new Map(collected.map(item => [`${item.txid.toLowerCase()}:${item.vout}`, item]));
+      if (requiredOutpoints.every(outpoint => byOutpoint.has(outpoint))) return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
+    } else if (safeSats >= minimumSats) return collected;
     if (pageScannedCount === 0 || nextCursor === total) break;
     cursor = nextCursor!;
   }
   const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
+  if (requiredOutpoints) {
+    const byOutpoint = new Map(collected.map(item => [`${item.txid.toLowerCase()}:${item.vout}`, item]));
+    const missing = requiredOutpoints.filter(outpoint => !byOutpoint.has(outpoint));
+    if (missing.length) throw new Error(`The live safe-UTXO index did not verify every exact PSBT input (${missing.join(", ")}). No transaction was signed or broadcast.`);
+    return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
+  }
   if (safeSats < minimumSats) {
     const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
     throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.`);
