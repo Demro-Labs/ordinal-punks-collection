@@ -18,7 +18,7 @@ import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 import { ProtocolAssetsPanel } from "@/components/ProtocolAssetsPanel";
 import { TransactionHistoryPanel } from "@/components/TransactionHistoryPanel";
-import { LOCAL_VAULT_SESSION_EVENT, readLocalVaultSiteSession, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
+import { isLocalVaultSiteSession, isWalletExtensionContext, LOCAL_VAULT_SESSION_EVENT, readLocalVaultSiteSession, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
 
 type UniSatChain = {
   enum?: string;
@@ -317,7 +317,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   useEffect(() => {
     const sync = (event?: Event) => {
       const detail = event ? (event as CustomEvent<LocalVaultSiteSession | null>).detail : undefined;
-      setLocalVaultSession(detail?.site === site ? detail : readLocalVaultSiteSession(site));
+      setLocalVaultSession(isLocalVaultSiteSession(detail) && detail.site === site ? detail : readLocalVaultSiteSession(site));
     };
     sync();
     const onStorage = (event: StorageEvent) => {
@@ -1139,14 +1139,14 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
   return (
     <div id="unisat-wallet-panel" className="unisat-wallet-panel flex flex-col gap-4 border border-[#2c323a] bg-[#14191f] p-4">
       {localVaultSession && <section className="border border-[#70c7a0]/50 bg-[#70c7a0]/5 p-3" aria-labelledby="local-vault-site-connection-title">
-        <p id="local-vault-site-connection-title" className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#9fe0bd]">Ordi Wallet · Local Vault connected</p>
+        <p id="local-vault-site-connection-title" className="font-mono text-[9px] uppercase tracking-[0.18em] text-[#9fe0bd]">{isWalletExtensionContext() ? "Ordi Wallet · extension-local vault (not linked to website)" : "Ordi Wallet · Local Vault connected"}</p>
         <div className="mt-2 grid gap-2 font-mono text-[10px] leading-5 text-[#d9d3c6] sm:grid-cols-2">
           <p className="break-all sm:col-span-2"><span className="text-[#718092]">Vault address:</span> {localVaultSession.address}</p>
           <p><span className="text-[#718092]">Network:</span> {localVaultSession.network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin mainnet"}</p>
           <p><span className="text-[#718092]">Mode:</span> read-only dashboard + reviewed local PSBT</p>
         </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">{Object.values(localVaultSession.addresses).map(item => <div key={item.type} className={`border p-2 ${item.type === localVaultSession.activeAddressType ? "border-[#70c7a0] bg-[#70c7a0]/10" : "border-[#2c323a]"}`}><p className="font-mono text-[9px] uppercase text-[#f2bd63]">{item.label}{item.type === localVaultSession.activeAddressType ? " · active" : ""}</p><p className="mt-1 break-all font-mono text-[9px] text-[#d9d3c6]">{item.address}</p></div>)}</div>
-        <p className="mt-2 font-mono text-[10px] leading-5 text-[#9fe0bd]">The local vault is available on this {isMobileUniSatDevice() ? "mobile page" : "desktop page"}. UniSat remains a separate provider for wallet approvals, inscriptions, and native transfers.</p>
+        <p className="mt-2 font-mono text-[10px] leading-5 text-[#9fe0bd]">{isWalletExtensionContext() ? "The extension keeps its own isolated vault. Import the recovery phrase separately into the website Local Vault; no keys are shared across origins." : `The local vault is available on this ${isMobileUniSatDevice() ? "mobile page" : "desktop page"}. UniSat remains a separate provider for wallet approvals, inscriptions, and native transfers.`}</p>
       </section>}
       <nav className="transaction-shortcut-nav sticky top-0 z-30 -mx-4 -mt-4 mb-1 flex gap-2 overflow-x-auto border-b border-[#2c323a] bg-[#14191f]/95 px-3 py-2 backdrop-blur sm:static sm:top-auto sm:z-auto sm:mx-0 sm:mt-0 sm:mb-3 sm:flex-wrap sm:overflow-visible sm:rounded-sm sm:border sm:border-[#3b434d] sm:bg-[#10151a] sm:px-4 sm:py-3" aria-label="Wallet and transaction actions">
         <p className="hidden w-full font-mono text-[9px] uppercase tracking-[0.18em] text-[#718092] sm:block">Wallet &amp; transaction shortcuts</p>
