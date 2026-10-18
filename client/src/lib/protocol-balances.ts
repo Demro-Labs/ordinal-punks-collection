@@ -4,6 +4,8 @@ export type ProtocolNetwork = "BITCOIN_MAINNET" | "FRACTAL_BITCOIN_MAINNET";
 export type Brc20Balance = { ticker: string; overallBalance: string; transferableBalance: string; availableBalance: string };
 export type RuneBalance = { amount: string; runeid: string; rune: string; spacedRune: string; symbol: string; divisibility: number };
 export type AlkaneBalance = { alkaneid: string; amount: string; type: string; name: string; symbol: string; divisibility: number | null };
+export type AlkaneCollection = { alkaneid: string; name: string; totalSupply: string; minted: number | null };
+export type AlkaneCollectionPage = { network: "BITCOIN_MAINNET"; address: string; start: number; total: number; detail: AlkaneCollection[]; refreshedAt?: string };
 export type ProtocolBalances = {
   network: ProtocolNetwork;
   address: string;
@@ -48,6 +50,10 @@ function normalizeAlkane(value: unknown): AlkaneBalance | null {
   if (!isRecord(value) || typeof value.alkaneid !== "string" || !/^\d{1,20}:\d{1,20}$/.test(value.alkaneid) || typeof value.amount !== "string" || !/^\d{1,80}$/.test(value.amount) || typeof value.type !== "string" || typeof value.name !== "string" || typeof value.symbol !== "string" || (value.divisibility !== null && (!Number.isSafeInteger(value.divisibility) || Number(value.divisibility) < 0 || Number(value.divisibility) > 38))) return null;
   return { alkaneid: value.alkaneid, amount: value.amount, type: value.type, name: value.name, symbol: value.symbol, divisibility: value.divisibility as number | null };
 }
+function normalizeAlkaneCollection(value: unknown): AlkaneCollection | null {
+  if (!isRecord(value) || typeof value.alkaneid !== "string" || !/^\d{1,20}:\d{1,20}$/.test(value.alkaneid) || value.type !== "collection" || !isRecord(value.collectionData) || typeof value.collectionData.name !== "string" || typeof value.collectionData.totalSupply !== "string" || (value.collectionData.minted !== null && !Number.isSafeInteger(value.collectionData.minted))) return null;
+  return { alkaneid: value.alkaneid, name: value.collectionData.name, totalSupply: value.collectionData.totalSupply, minted: value.collectionData.minted as number | null };
+}
 
 async function readList<T>(path: string, address: string, network: ProtocolNetwork, signal: AbortSignal | undefined, normalize: (value: unknown) => T | null, label: string): Promise<T[]> {
   const result = await request<{ network?: string; address?: string; detail?: unknown }>(path, signal);
@@ -57,6 +63,21 @@ async function readList<T>(path: string, address: string, network: ProtocolNetwo
   const rows = result.detail.map(normalize);
   if (rows.some(row => row === null)) throw new Error(`A ${label} balance row is invalid.`);
   return rows as T[];
+}
+
+export async function fetchAlkaneCollectionPage(address: string, network: ProtocolNetwork, start: number, signal?: AbortSignal): Promise<AlkaneCollectionPage> {
+  if (!/^[A-Za-z0-9]{14,100}$/.test(address)) throw new Error("Invalid wallet address.");
+  if (network !== "BITCOIN_MAINNET") throw new Error("Alkane collection indexing is currently enabled only for Bitcoin mainnet.");
+  if (!Number.isSafeInteger(start) || start < 0 || start > 10_000) throw new Error("Invalid Alkane collection page offset.");
+  const limit = 25;
+  const query = new URLSearchParams({ address, chain: network, start: String(start), limit: String(limit) });
+  const result = await request<{ network?: string; address?: string; start?: number; total?: number; detail?: unknown; refreshedAt?: string }>(`/api/alkanes/collection-list?${query}`, signal);
+  if (result.network !== network || result.address !== address || result.start !== start || !Number.isSafeInteger(result.total) || (result.total ?? -1) < 0 || !Array.isArray(result.detail) || result.detail.length > limit) {
+    throw new Error("The Alkane collection indexer returned an incomplete response or data for a different network or wallet.");
+  }
+  const detail = result.detail.map(normalizeAlkaneCollection);
+  if (detail.some(item => item === null)) throw new Error("An Alkane collection row is invalid.");
+  return { network, address, start, total: result.total as number, detail: detail as AlkaneCollection[], refreshedAt: result.refreshedAt };
 }
 
 export async function fetchProtocolBalances(address: string, network: ProtocolNetwork, signal?: AbortSignal): Promise<ProtocolBalances> {

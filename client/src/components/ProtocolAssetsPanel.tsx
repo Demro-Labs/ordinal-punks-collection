@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { Brc20TransferFlow } from "@/components/Brc20TransferFlow";
-import { fetchProtocolBalances, type ProtocolBalances, type ProtocolNetwork } from "@/lib/protocol-balances";
+import {
+  fetchAlkaneCollectionPage,
+  fetchProtocolBalances,
+  type AlkaneCollection,
+  type ProtocolBalances,
+  type ProtocolNetwork,
+} from "@/lib/protocol-balances";
 
 type SiteName = "punks" | "pokedex";
 
@@ -23,6 +29,11 @@ export function ProtocolAssetsPanel({ address, network, site = "pokedex" }: { ad
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [selectedTicker, setSelectedTicker] = useState("");
+  const [alkaneCollections, setAlkaneCollections] = useState<AlkaneCollection[]>([]);
+  const [alkaneCollectionTotal, setAlkaneCollectionTotal] = useState(0);
+  const [alkaneCollectionError, setAlkaneCollectionError] = useState("");
+  const [loadingAlkaneCollections, setLoadingAlkaneCollections] = useState(false);
+  const collectionRequest = useRef<AbortController | null>(null);
 
   const load = useCallback((signal?: AbortSignal) => {
     setLoading(true);
@@ -33,14 +44,48 @@ export function ProtocolAssetsPanel({ address, network, site = "pokedex" }: { ad
       .finally(() => { if (!signal?.aborted) setLoading(false); });
   }, [address, network]);
 
+  const loadAlkaneCollections = useCallback(async (start: number, append: boolean) => {
+    if (network !== "BITCOIN_MAINNET") return;
+    collectionRequest.current?.abort();
+    const controller = new AbortController();
+    collectionRequest.current = controller;
+    setLoadingAlkaneCollections(true);
+    setAlkaneCollectionError("");
+    if (!append) {
+      setAlkaneCollections([]);
+      setAlkaneCollectionTotal(0);
+    }
+    try {
+      const page = await fetchAlkaneCollectionPage(address, network, start, controller.signal);
+      if (!controller.signal.aborted) {
+        setAlkaneCollections(current => append && current.length === start ? [...current, ...page.detail] : page.detail);
+        setAlkaneCollectionTotal(page.total);
+      }
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        setAlkaneCollectionError(cause instanceof Error ? cause.message : "The Bitcoin Alkane collection indexer is unavailable.");
+      }
+    } finally {
+      if (!controller.signal.aborted) setLoadingAlkaneCollections(false);
+    }
+  }, [address, network]);
+
   useEffect(() => {
     setSelectedTicker("");
     setData(null);
+    setAlkaneCollections([]);
+    setAlkaneCollectionTotal(0);
+    setAlkaneCollectionError("");
     const controller = new AbortController();
     load(controller.signal);
+    if (network === "BITCOIN_MAINNET") void loadAlkaneCollections(0, false);
     const timer = window.setInterval(() => load(controller.signal), 60_000);
-    return () => { controller.abort(); window.clearInterval(timer); };
-  }, [address, network, load]);
+    return () => {
+      controller.abort();
+      collectionRequest.current?.abort();
+      window.clearInterval(timer);
+    };
+  }, [address, network, load, loadAlkaneCollections]);
 
   const selected = data?.brc20.find(item => item.ticker === selectedTicker);
   const explorer = network === "BITCOIN_MAINNET" ? "https://unisat.io" : "https://fractal.unisat.io";
@@ -53,12 +98,19 @@ export function ProtocolAssetsPanel({ address, network, site = "pokedex" }: { ad
   ];
 
   return <section className="border-t border-[#2c323a] pt-4" aria-labelledby="protocol-assets-title">
-    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"><div><p className="font-mono text-[9px] uppercase tracking-[.18em] text-[#d99a54]">Protocol indexers · {network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin"}</p><h2 id="protocol-assets-title" className="mt-1 font-display text-xl text-[#f3efe5]">Live asset balances</h2><p className="mt-1 font-mono text-[10px] text-[#7f8b99]">BRC-20 · BRC20-Prog · Runes · Alkanes</p></div><div className="grid grid-cols-2 gap-2 sm:flex"><button type="button" onClick={() => load()} disabled={loading} className="inline-flex min-h-11 items-center justify-center gap-1 border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#9ea7b3] hover:border-[#d99a54] disabled:opacity-40"><RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh</button><a href={explorer} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center gap-1 border border-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#f2bd63]">UniSat <ExternalLink size={12} /></a></div></div>
+    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"><div><p className="font-mono text-[9px] uppercase tracking-[.18em] text-[#d99a54]">Protocol indexers · {network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin"}</p><h2 id="protocol-assets-title" className="mt-1 font-display text-xl text-[#f3efe5]">Live asset balances</h2><p className="mt-1 font-mono text-[10px] text-[#7f8b99]">BRC-20 · BRC20-Prog · Runes · Alkanes{network === "BITCOIN_MAINNET" ? " · Alkanes collections" : ""}</p></div><div className="grid grid-cols-2 gap-2 sm:flex"><button type="button" onClick={() => { load(); if (network === "BITCOIN_MAINNET") void loadAlkaneCollections(0, false); }} disabled={loading} className="inline-flex min-h-11 items-center justify-center gap-1 border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#9ea7b3] hover:border-[#d99a54] disabled:opacity-40"><RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh</button><a href={explorer} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center gap-1 border border-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#f2bd63]">UniSat <ExternalLink size={12} /></a></div></div>
     {error && <p className="mt-3 break-words border border-[#a45e54] p-3 font-mono text-[10px] text-[#e08b7d]" role="alert">{error}</p>}
     {errors.length > 0 && <p className="mt-3 border border-[#e0b45f]/40 p-3 font-mono text-[10px] leading-5 text-[#e0b45f]" role="status">Some protocol sources are temporarily unavailable; affected lists are not shown as zero balances. {errors.map(([name]) => name).join(" · ")}</p>}
     <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">{cards.map(card => <article key={card.title} className="min-w-0 border border-[#3b434d] bg-[#10151a] p-3"><div className="flex items-center justify-between gap-2"><h3 className={`font-mono text-[10px] uppercase ${card.color}`}>{card.title}</h3><span className="font-mono text-[9px] text-[#718092]">{card.count}</span></div>{card.body}</article>)}</div>
+    {network === "BITCOIN_MAINNET" && <article className="mt-3 border border-[#3b434d] bg-[#10151a] p-3" aria-labelledby="alkane-collections-title">
+      <div className="flex items-center justify-between gap-2"><h3 id="alkane-collections-title" className="font-mono text-[10px] uppercase text-[#e0b45f]">Alkanes collections · Bitcoin</h3><span className="font-mono text-[9px] text-[#718092]">{alkaneCollections.length}/{alkaneCollectionTotal}</span></div>
+      {alkaneCollectionError && <p className="mt-2 break-words font-mono text-[10px] text-[#e08b7d]" role="alert">Collection data is unavailable; it is not being shown as a zero balance. {alkaneCollectionError}</p>}
+      {!alkaneCollectionError && alkaneCollections.length === 0 && <Empty loading={loadingAlkaneCollections}>No collections indexed for this address.</Empty>}
+      {alkaneCollections.length > 0 && <div className="mt-2 space-y-2">{alkaneCollections.map(item => <div key={item.alkaneid} className="flex flex-col gap-1 border-b border-[#2c323a] pb-2 font-mono text-[10px] sm:flex-row sm:items-center sm:justify-between"><span className="min-w-0 break-words text-[#d9d3c6]">{item.name}<span className="ml-2 text-[#718092]">{item.alkaneid}</span></span><span className="shrink-0 text-[#70c7a0]">{item.minted ?? "—"}/{item.totalSupply || "—"} minted</span></div>)}</div>}
+      {!alkaneCollectionError && alkaneCollections.length < alkaneCollectionTotal && <button type="button" onClick={() => void loadAlkaneCollections(alkaneCollections.length, true)} disabled={loadingAlkaneCollections} className="mt-3 min-h-10 border border-[#3b434d] px-3 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-40">{loadingAlkaneCollections ? "Loading…" : "Load more collections"}</button>}
+    </article>}
     {selected && <Brc20TransferFlow key={selected.ticker} address={address} network={network} ticker={selected.ticker} amount={selected.availableBalance} site={site} onDone={load} kind="classic" />}
-    <div className="mt-3 border border-[#3b434d]/80 p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]"><strong className="text-[#e0b45f]">Alkanes transfers:</strong> use UniSat Wallet: Assets → choose the Alkane → Transfer on the active network. The DApp bridge does not document a <code>sendAlkanes</code> method, so no Alkanes transfer is simulated here. <a href="https://docs.unisat.io/products/unisat-wallet/how-to-deposit-withdraw-assets" target="_blank" rel="noreferrer" className="ml-1 text-[#f2bd63] underline">Official UniSat guide</a></div>
+    <div className="mt-3 border border-[#3b434d]/80 p-3 font-mono text-[10px] leading-5 text-[#9ea7b3]"><strong className="text-[#e0b45f]">Alkanes transfers:</strong> use UniSat Wallet: Assets → choose the Alkane → Transfer on the active network. The current Local Vault lists indexed assets and Bitcoin collections but does not build Alkanes transfer transactions; no Alkanes transfer is simulated here. <a href="https://docs.unisat.io/products/unisat-wallet/how-to-deposit-withdraw-assets" target="_blank" rel="noreferrer" className="ml-1 text-[#f2bd63] underline">Official UniSat guide</a></div>
     {data && <p className="mt-2 font-mono text-[9px] text-[#718092]">Synced · {new Date(data.refreshedAt).toLocaleTimeString("en-US")}</p>}
   </section>;
 }
