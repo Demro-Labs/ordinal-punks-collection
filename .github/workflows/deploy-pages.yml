@@ -46,6 +46,14 @@ jobs:
         env:
           GITHUB_ACTIONS: true
 
+      - name: Build desktop extension package
+        run: pnpm run build:extension
+
+      - name: Add extension download to Pages artifact
+        run: |
+          mkdir -p dist/public/downloads
+          cp client/public/downloads/ordi-wallet-extension.zip dist/public/downloads/ordi-wallet-extension.zip
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
