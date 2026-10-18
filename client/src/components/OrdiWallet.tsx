@@ -5,6 +5,7 @@ import { UniSatWalletConnect } from "@/components/UniSatWalletConnect";
 import { ProtocolAssetsPanel } from "@/components/ProtocolAssetsPanel";
 import { ProtocolTransferCenter } from "@/components/ProtocolTransferCenter";
 import { LocalPsbtSignerPanel } from "@/components/LocalPsbtSignerPanel";
+import { LocalNativeTransferPanel } from "@/components/LocalNativeTransferPanel";
 import {
   ADDRESS_SPECS,
   createMnemonic,
@@ -12,13 +13,13 @@ import {
   deriveOrdiWallet,
   encryptOrdiWallet,
   fetchAddressBalance,
-  formatSats,
   readOrdiVault,
   type AddressType,
   type OrdiNetwork,
   type OrdiWalletRecord,
 } from "@/lib/ordi-wallet";
 import { createLocalVaultSiteSession, isWalletExtensionContext, LOCAL_VAULT_SESSION_EVENT, publishLocalVaultSiteSession, readLocalVaultSiteSession, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
+import { formatSatsAsAsset } from "@/lib/bitcoin-units";
 
 const BASE = import.meta.env.BASE_URL;
 const NETWORKS: Array<{ id: OrdiNetwork; label: string }> = [
@@ -287,10 +288,11 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
                 {error && <p className="mt-4 break-words border border-[#a45e54]/50 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#e6a69b]" role="alert">{error}</p>}
                 <div className="mt-4 grid min-w-0 gap-3 sm:mt-5 sm:grid-cols-2 xl:grid-cols-4">{addresses.map(item => <article key={item.type} className="min-w-0 border border-[#2c323a] bg-[#12171d] p-4">
                   <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#f2bd63]">{item.label}</p><p className="mt-2 break-all font-mono text-[10px] text-[#d9d3c6]">{short(item.address)}</p></div><button type="button" onClick={() => copy(item.address)} className="flex min-h-10 min-w-10 shrink-0 items-center justify-center text-[#9ea7b3] hover:text-[#f2bd63]" aria-label="Copy address"><Copy size={15} /></button></div>
-                  <p className="mt-3 font-display text-xl text-[#f3efe5]">{formatSats(balances[item.type]?.total ?? null)}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">Confirmed {formatSats(balances[item.type]?.confirmed ?? null)}</p>
+                  <p className="mt-3 font-display text-xl text-[#f3efe5]">{formatSatsAsAsset(balances[item.type]?.total ?? null, network === "BITCOIN_MAINNET" ? "BTC" : "FB")}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">Confirmed {formatSatsAsAsset(balances[item.type]?.confirmed ?? null, network === "BITCOIN_MAINNET" ? "BTC" : "FB")}</p>
                   <details className="mt-4 border-t border-[#2c323a] pt-3"><summary className="min-h-10 cursor-pointer py-2 font-mono text-[9px] uppercase text-[#718092]">Advanced keys</summary><p className="mt-2 break-all font-mono text-[9px] text-[#718092]">Derivation path: {item.path}</p><button type="button" onClick={() => setReveal(value => ({ ...value, [item.type]: !value[item.type] }))} className="mt-2 inline-flex min-h-10 items-center gap-1 font-mono text-[9px] uppercase text-[#e6a69b]">{reveal[item.type] ? <EyeOff size={12} /> : <Eye size={12} />}{reveal[item.type] ? "Hide private key" : "Reveal private key"}</button>{reveal[item.type] && <><p className="mt-2 break-all border border-[#a45e54]/50 bg-[#a45e54]/10 p-2 font-mono text-[9px] text-[#e6a69b]">{item.privateKey}</p><button type="button" onClick={() => copy(item.privateKey)} className="mt-2 min-h-10 font-mono text-[9px] uppercase text-[#f2bd63]">Copy private key</button></>}</details>
                 </article>)}</div>
                 {connectedToSite && <div className="mt-4 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 sm:mt-5 sm:p-4"><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#9fe0bd]">{extensionContext ? "Local vault enabled in this extension only" : "Local vault connected to this site"}</p><p className="mt-2 break-all font-mono text-[10px] leading-5 text-[#d9d3c6]">{ADDRESS_SPECS.find(item => item.type === activeAddressType)?.label} address: {wallet.addresses[activeAddressType].address}</p><p className="mt-2 font-mono text-[10px] leading-5 text-[#d9d3c6]">{extensionContext ? "Extension storage is isolated from website origins. Import this recovery phrase separately into the target site’s Local Vault; no keys are shared across origins." : "Only the selected network and public addresses are shared with this page. Private keys remain in the unlocked vault; transaction signing still requires a separate review."}</p><ProtocolAssetsPanel address={wallet.addresses[activeAddressType].address} network={network} site={site} /><ProtocolTransferCenter network={network} /></div>}
+                <LocalNativeTransferPanel wallet={wallet} network={network} onDone={() => void refresh()} />
                 {connectedToSite && <LocalPsbtSignerPanel wallet={wallet} network={network} />}
                 <div className="mt-4 grid gap-3 sm:mt-5 lg:grid-cols-2"><div className="min-w-0 border border-[#2c323a] bg-[#12171d] p-4"><p className="font-mono text-[9px] uppercase tracking-[.14em] text-[#718092]">Recovery phrase</p><p className="mt-2 break-words font-mono text-xs leading-6 text-[#d9d3c6]">{reveal.mnemonic ? wallet.mnemonic : "•••••••• •••••••• •••••••• ••••••••"}</p><button type="button" onClick={() => setReveal(value => ({ ...value, mnemonic: !value.mnemonic }))} className="mt-2 inline-flex min-h-10 items-center gap-1 font-mono text-[9px] uppercase text-[#f2bd63]">{reveal.mnemonic ? <EyeOff size={12} /> : <Eye size={12} />} {reveal.mnemonic ? "Hide" : "Reveal"}</button>{reveal.mnemonic && <button type="button" onClick={() => copy(wallet.mnemonic)} className="ml-3 min-h-10 font-mono text-[9px] uppercase text-[#f2bd63]">Copy</button>}</div><div className="border border-[#70c7a0]/30 bg-[#70c7a0]/5 p-4 font-mono text-[10px] leading-5 text-[#9fe0bd]">Balances are fetched from public Mempool endpoints. Signing happens locally after explicit review; Ordi Wallet never sends a private key to a server.</div></div>
               </div>}
