@@ -1,3 +1,4 @@
+import { LIVE_DATA_API_BASE } from "@/lib/live";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { confirmFractalSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, InsufficientSafeUtxosError, trackMempoolTransaction } from "./mempool";
 
@@ -158,9 +159,9 @@ describe("confirmFractalSpendableUtxos", () => {
 
 describe("trackMempoolTransaction network routing", () => {
   it.each([
-    { network: "BITCOIN_MAINNET", endpoint: "https://mempool.space", label: "Bitcoin" },
-    { network: "FRACTAL_BITCOIN_MAINNET", endpoint: "https://mempool.fractalbitcoin.io", label: "Fractal Bitcoin" },
-  ])("uses only the $label Mempool for its network enum", async ({ network, endpoint, label }) => {
+    { network: "BITCOIN_MAINNET", label: "Bitcoin" },
+    { network: "FRACTAL_BITCOIN_MAINNET", label: "Fractal Bitcoin" },
+  ])("uses only the $label Mempool for its network enum", async ({ network, label }) => {
     const txid = "b".repeat(64);
     const urls: string[] = [];
     installWindowAndFetch(async input => {
@@ -170,7 +171,7 @@ describe("trackMempoolTransaction network routing", () => {
 
     const receipt = await trackMempoolTransaction(txid, network);
 
-    expect(urls).toEqual([`${endpoint}/api/tx/${txid}/status`]);
+    expect(urls).toEqual([`${LIVE_DATA_API_BASE}/api/mempool/tx-status?chain=${encodeURIComponent(network)}&txid=${txid}`]);
     expect(receipt).toMatchObject({ txid, network: label, status: "confirmed", blockHeight: 123 });
   });
 
@@ -187,9 +188,9 @@ describe("trackMempoolTransaction network routing", () => {
 
 describe("Mempool fee fallback and Legacy transaction routing", () => {
   it.each([
-    { network: "BITCOIN_MAINNET", endpoint: "https://mempool.space" },
-    { network: "FRACTAL_BITCOIN_MAINNET", endpoint: "https://mempool.fractalbitcoin.io" },
-  ])("falls back to the selected $network Mempool for current fees", async ({ network, endpoint }) => {
+    { network: "BITCOIN_MAINNET" },
+    { network: "FRACTAL_BITCOIN_MAINNET" },
+  ])("falls back to the selected $network Mempool through the Worker proxy for current fees", async ({ network }) => {
     const urls: string[] = [];
     installWindowAndFetch(async input => {
       const url = String(input);
@@ -200,13 +201,13 @@ describe("Mempool fee fallback and Legacy transaction routing", () => {
     const estimate = await getRecommendedFeeEstimate(network);
     expect(estimate).toMatchObject({ network, feeRate: 3, strategy: "single-provider-fallback", sources: { mempool: { feeRate: 3, available: true }, unisat: { feeRate: null, available: false } } });
     expect(urls).toHaveLength(2);
-    expect(urls[1]).toBe(`${endpoint}/api/v1/fees/recommended`);
+    expect(urls[1]).toBe(`${LIVE_DATA_API_BASE}/api/mempool/fees?chain=${encodeURIComponent(network)}`);
   });
 
   it.each([
     { network: "BITCOIN_MAINNET", endpoint: "https://mempool.space" },
     { network: "FRACTAL_BITCOIN_MAINNET", endpoint: "https://mempool.fractalbitcoin.io" },
-  ])("fetches Legacy parent hex from the matching $network Mempool", async ({ network, endpoint }) => {
+  ])("fetches Legacy parent hex from the matching $network Mempool via the Worker proxy", async ({ network }) => {
     const txid = "c".repeat(64);
     const rawHex = "02000000";
     const urls: string[] = [];
@@ -215,7 +216,7 @@ describe("Mempool fee fallback and Legacy transaction routing", () => {
       return new Response(rawHex, { status: 200, headers: { "Content-Type": "text/plain" } });
     });
     await expect(getMempoolRawTransaction(network, txid)).resolves.toBe(rawHex);
-    expect(urls).toEqual([`${endpoint}/api/tx/${txid}/hex`]);
+    expect(urls).toEqual([`${LIVE_DATA_API_BASE}/api/mempool/tx-hex?chain=${encodeURIComponent(network)}&txid=${txid}`]);
   });
 
   it("rejects an unknown network instead of routing Legacy inputs to the wrong chain", async () => {

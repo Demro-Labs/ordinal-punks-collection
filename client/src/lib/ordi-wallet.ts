@@ -1,3 +1,4 @@
+import { LIVE_DATA_API_BASE } from "@/lib/live";
 import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
 import { HDKey } from "@scure/bip32";
@@ -101,8 +102,8 @@ export function formatSats(value: number | null) {
 }
 
 export async function fetchAddressBalance(network: OrdiNetwork, address: string) {
-  const base = network === "BITCOIN_MAINNET" ? "https://mempool.space" : "https://mempool.fractalbitcoin.io";
-  const response = await fetch(`${base}/api/address/${encodeURIComponent(address)}`, { cache: "no-store" });
+  const query = new URLSearchParams({ chain: network, address });
+  const response = await fetch(`${LIVE_DATA_API_BASE}/api/mempool/address?${query}`, { cache: "no-store", headers: { Accept: "application/json" } });
   if (!response.ok) throw new Error(`Mempool HTTP ${response.status}`);
   const value = await response.json() as { chain_stats?: { funded_txo_sum?: number; spent_txo_sum?: number }; mempool_stats?: { funded_txo_sum?: number; spent_txo_sum?: number } };
   const chain = value.chain_stats ?? {}; const mempool = value.mempool_stats ?? {};

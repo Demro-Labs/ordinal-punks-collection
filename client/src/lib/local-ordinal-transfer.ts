@@ -3,7 +3,8 @@ import * as bitcoin from "bitcoinjs-lib";
 import ecc from "@bitcoinerlab/secp256k1";
 import type { AddressType, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
 import { fetchAddressOrdinals, type AddressOrdinal } from "@/lib/ordinals";
-import { getMempoolConfig, getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
+import { LIVE_DATA_API_BASE } from "@/lib/live";
+import { getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
 import { buildOrdinalTransferPsbt, extractAndVerifySignedOrdinalTransaction, type OrdinalLocation, type OrdinalTransferPlan, type PreviousOutputRef } from "@/lib/ordinal-transfer-psbt";
 
 const MAX_SAFE_FEE_RATE = 1_000;
@@ -23,11 +24,6 @@ function sameOrdinalSet(left: AddressOrdinal[], right: AddressOrdinal[]) {
 function toOrdinalLocations(items: AddressOrdinal[]): OrdinalLocation[] {
   return items.map(({ inscriptionId, location }) => ({ inscriptionId, location: location ?? undefined }));
 }
-function getApi(network: OrdiNetwork) {
-  const config = getMempoolConfig(network);
-  if (!config) throw new Error("Réseau non pris en charge par le vault local.");
-  return config;
-}
 async function fetchText(url: string) {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -39,8 +35,9 @@ async function fetchText(url: string) {
     return text;
   } finally { window.clearTimeout(timer); }
 }
-async function loadPreviousTx(api: string, txid: string) {
-  return fetchText(`${api}/api/tx/${encodeURIComponent(txid)}/hex`);
+async function loadPreviousTx(network: OrdiNetwork, txid: string) {
+  const query = new URLSearchParams({ chain: network, txid });
+  return fetchText(`${LIVE_DATA_API_BASE}/api/mempool/tx-hex?${query}`);
 }
 async function assertOrdinalListStillCurrent(network: OrdiNetwork, address: string, expected: AddressOrdinal[]) {
   const current = await fetchAddressOrdinals(address, network);
@@ -80,7 +77,6 @@ export async function prepareLocalOrdinalTransfer(params: {
   const fee = await getRecommendedFeeEstimate(network);
   const feeRateSatVb = Math.ceil(fee.feeRate);
   if (!Number.isSafeInteger(feeRateSatVb) || feeRateSatVb < 1 || feeRateSatVb > MAX_SAFE_FEE_RATE) throw new Error("Le taux de frais live est hors limites; aucun PSBT n’a été préparé.");
-  const api = getApi(network).api;
   const recipientScriptHex = Buffer.from(bitcoin.address.toOutputScript(recipient, bitcoin.networks.bitcoin)).toString("hex");
   const changeScriptHex = Buffer.from(bitcoin.address.toOutputScript(account.address, bitcoin.networks.bitcoin)).toString("hex");
   const requiredSafeSats = Math.max(1_200, Math.ceil(feeRateSatVb * 500) + 1_200);
@@ -90,7 +86,7 @@ export async function prepareLocalOrdinalTransfer(params: {
   const inscriptionTxid = location[0];
   if (!/^[a-f0-9]{64}$/i.test(inscriptionTxid)) throw new Error("La position live de l’inscription est invalide.");
   const txids = Array.from(new Set([inscriptionTxid, ...safeFeeUtxos.map(item => item.txid.toLowerCase())]));
-  const rawEntries = await Promise.all(txids.map(async txid => [txid, await loadPreviousTx(api, txid)] as const));
+  const rawEntries = await Promise.all(txids.map(async txid => [txid, await loadPreviousTx(network, txid)] as const));
   const rawTxById = new Map(rawEntries);
   const sourceTxHex = rawTxById.get(inscriptionTxid.toLowerCase());
   if (!sourceTxHex) throw new Error("La transaction source de l’inscription est indisponible.");
@@ -153,10 +149,11 @@ export async function broadcastLocalOrdinalTransfer(local: LocalOrdinalPlan, wal
   await assertFeeInputsStillSafe(local.network, local.address, local.plan);
   const rawTxHex = extractAndVerifySignedOrdinalTransaction(signed.signedPsbtHex, local.plan);
   if (rawTxHex.toLowerCase() !== signed.rawTxHex.toLowerCase() || bitcoin.Transaction.fromHex(rawTxHex).getId().toLowerCase() !== signed.txid.toLowerCase()) throw new Error("La transaction signée ne correspond plus à la revue; diffusion annulée.");
-  const config = getApi(local.network);
-  const response = await fetch(`${config.api}/api/tx`, { method: "POST", headers: { "Content-Type": "text/plain" }, body: rawTxHex });
-  const returned = (await response.text()).replace(/^"|"$/g, "").toLowerCase();
-  if (!response.ok || returned !== signed.txid.toLowerCase()) throw new Error(`Résultat de diffusion incertain. Vérifiez ${signed.txid} dans Mempool avant toute nouvelle tentative.`);
+  const query = new URLSearchParams({ chain: local.network });
+  const response = await fetch(`${LIVE_DATA_API_BASE}/api/mempool/tx?${query}`, { method: "POST", headers: { "Content-Type": "text/plain", Accept: "application/json" }, body: rawTxHex, cache: "no-store" });
+  const result = await response.json().catch(() => null) as { txid?: string; error?: string } | null;
+  const returned = typeof result?.txid === "string" ? result.txid.toLowerCase() : "";
+  if (!response.ok || returned !== signed.txid.toLowerCase()) throw new Error(`Résultat de diffusion incertain. Vérifiez ${signed.txid} dans Mempool avant toute nouvelle tentative${result?.error ? ` (${result.error})` : ""}.`);
   return signed.txid;
 }
 export type { LocalOrdinalPlan };

@@ -4,6 +4,7 @@ import { ADDRESS_SPECS, type AddressType, type OrdiNetwork, type OrdiWalletRecor
 import { fetchAddressOrdinals } from "@/lib/ordinals";
 import { fetchAlkaneCollectionPage, fetchProtocolBalances, type ProtocolBalances } from "@/lib/protocol-balances";
 import { formatRuneAmount } from "@/lib/runes";
+import { LIVE_DATA_API_BASE } from "@/lib/live";
 
 type AddressMap = OrdiWalletRecord["addresses"];
 type MempoolTx = {
@@ -22,12 +23,13 @@ type PortfolioRow = {
   errors: string[];
 };
 
-const endpoint = (network: OrdiNetwork) => network === "BITCOIN_MAINNET" ? "https://mempool.space" : "https://mempool.fractalbitcoin.io";
+const explorerEndpoint = (network: OrdiNetwork) => network === "BITCOIN_MAINNET" ? "https://mempool.space" : "https://mempool.fractalbitcoin.io";
 const short = (value: string) => `${value.slice(0, 12)}…${value.slice(-10)}`;
 const assetName = (network: OrdiNetwork) => network === "BITCOIN_MAINNET" ? "BTC" : "FB";
 
 async function fetchActivity(address: string, network: OrdiNetwork, signal: AbortSignal): Promise<MempoolTx[]> {
-  const response = await fetch(`${endpoint(network)}/api/address/${encodeURIComponent(address)}/txs`, { signal, cache: "no-store", headers: { Accept: "application/json" } });
+  const query = new URLSearchParams({ chain: network, address });
+  const response = await fetch(`${LIVE_DATA_API_BASE}/api/mempool/address-txs?${query}`, { signal, cache: "no-store", headers: { Accept: "application/json" } });
   if (!response.ok) throw new Error(`Activity endpoint HTTP ${response.status}`);
   const result: unknown = await response.json();
   if (!Array.isArray(result)) throw new Error("Invalid recent activity response.");
@@ -118,7 +120,7 @@ export function LocalVaultPortfolioPanel({ addresses, network }: { addresses: Ad
       {ADDRESS_SPECS.map(spec => {
         const row = rows.find(item => item.type === spec.type);
         const address = addresses[spec.type].address;
-        const explorer = endpoint(network);
+        const explorer = explorerEndpoint(network);
         const protocols = row?.protocols ?? null;
         return <article key={spec.type} className="min-w-0 border border-[#2c323a] bg-[#10151a] p-3">
           <div className="flex items-center justify-between gap-2"><h4 className="font-mono text-[9px] uppercase tracking-[.1em] text-[#f2bd63]">{spec.label}</h4><span className="font-mono text-[8px] text-[#718092]">{row ? "LIVE" : "…"}</span></div>
