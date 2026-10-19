@@ -315,34 +315,61 @@ async function broadcastBrc20ProgActivation(request, corsHeaders) {
 
 async function uni(path, env, init = {}) {
   if (!env.UNISAT_API_KEY) throw new Error('UniSat server binding is missing');
-  const response = await fetch(API_BASE + path, {
-    ...init,
-    headers: {
-      Authorization: 'Bearer ' + env.UNISAT_API_KEY,
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...(init.headers || {}),
-    },
-  });
-  if (!response.ok) {
-    if (path.startsWith('/v3/market/collection/auction/')) {
-      let upstreamBody = '';
-      try { upstreamBody = await response.clone().text(); } catch {}
-      // Diagnostic only: never log authorization headers; redact long token-like values and bound output.
-      console.warn('UniSat market upstream error', {
-        path,
-        status: response.status,
-        contentType: response.headers.get('content-type') || '',
-        body: upstreamBody.slice(0, 300)
-          .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
-          .replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]'),
-      });
+  // Inscription/order routes use this helper rather than uniNetwork. Keep quota
+  // fallback consistent, but retry only UniSat's documented quota code (-2005)
+  // and only with a separately configured Fractal key. Never retry arbitrary 403s.
+  const keys = [env.UNISAT_API_KEY, env.UNISAT_API_KEY_FALLBACK]
+    .filter((key, index, values) => typeof key === 'string' && key.length > 0 && values.indexOf(key) === index);
+  for (let index = 0; index < keys.length; index += 1) {
+    const response = await fetch(API_BASE + path, {
+      ...init,
+      headers: {
+        ...(init.headers || {}),
+        Authorization: 'Bearer ' + keys[index],
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+    let payload = null;
+    if (!response.ok || index + 1 < keys.length) {
+      try { payload = await response.clone().json(); } catch {}
     }
-    throw new Error('UniSat upstream returned ' + response.status);
+    const upstreamCode = payload && (typeof payload.code === 'number' || typeof payload.code === 'string')
+      ? String(payload.code) : null;
+    const quotaExceeded = upstreamCode === '-2005';
+    if (quotaExceeded && index + 1 < keys.length) {
+      console.warn('UniSat API quota exceeded; trying configured Fractal fallback key', {
+        path,
+        requestId: response.headers.get('x-request-id') || response.headers.get('cf-ray') || null,
+      });
+      continue;
+    }
+    if (!response.ok) {
+      if (path.startsWith('/v3/market/collection/auction/')) {
+        let upstreamBody = '';
+        try { upstreamBody = await response.clone().text(); } catch {}
+        // Diagnostic only: never log authorization headers; redact long token-like values and bound output.
+        console.warn('UniSat market upstream error', {
+          path,
+          status: response.status,
+          contentType: response.headers.get('content-type') || '',
+          body: upstreamBody.slice(0, 300)
+            .replace(/Bearer\\s+\\S+/gi, 'Bearer [redacted]')
+            .replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]'),
+        });
+      }
+      if (response.status === 403 && quotaExceeded) throw new Error('UniSat API quota exceeded');
+      throw new Error('UniSat upstream returned ' + response.status);
+    }
+    if (payload === null) {
+      try { payload = await response.json(); }
+      catch { throw new Error('UniSat upstream returned invalid JSON'); }
+    }
+    if (payload?.code === 0) return payload.data;
+    if (String(payload?.code) === '-2005') throw new Error('UniSat API quota exceeded');
+    throw new Error('UniSat upstream rejected the request');
   }
-  const payload = await response.json();
-  if (payload.code !== 0) throw new Error('UniSat upstream rejected the request');
-  return payload.data;
+  throw new Error('UniSat API quota exceeded');
 }
 
 async function uniNetwork(base, path, env, init = {}) {
