@@ -245,10 +245,10 @@ export async function broadcastLocalPsbt(network: OrdiNetwork, rawTxHex: string,
   const account = wallet.addresses[review.addressType];
   if (!account || account.address !== review.sourceAddress) throw new Error("Le compte source a changé depuis l’examen.");
   await verifyInputs(network, account.address, review.inputs, review.inputSats);
-  const config = getMempoolConfig(network);
-  if (!config) throw new Error("Réseau non configuré pour la diffusion.");
-  const response = await fetch(`${config.api}/api/tx`, { method: "POST", headers: { "Content-Type": "text/plain" }, body: tx.toHex() });
-  const returned = (await response.text()).replace(/^\"|\"$/g, "").toLowerCase();
-  if (!response.ok || returned !== expectedTxid.toLowerCase()) throw new Error(`Résultat de diffusion incertain. Vérifiez le TXID ${expectedTxid} dans Mempool avant de réessayer.`);
+  const query = new URLSearchParams({ chain: network });
+  const response = await fetch(`${LIVE_DATA_API_BASE}/api/mempool/tx?${query}`, { method: "POST", headers: { "Content-Type": "text/plain", Accept: "application/json" }, body: tx.toHex(), cache: "no-store" });
+  const result = await response.json().catch(() => null) as { txid?: string; error?: string } | null;
+  const returned = typeof result?.txid === "string" ? result.txid.toLowerCase() : "";
+  if (!response.ok || returned !== expectedTxid.toLowerCase()) throw new Error(`Résultat de diffusion incertain. Vérifiez le TXID ${expectedTxid} dans Mempool avant de réessayer${result?.error ? ` (${result.error})` : ""}.`);
   return returned;
 }
