@@ -38,6 +38,26 @@ async function requestJson<T>(url: string, timeoutMs = 8_000, init?: RequestInit
   } finally { window.clearTimeout(timer); }
 }
 
+async function requestText(url: string, timeoutMs = 10_000): Promise<string> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal, headers: { Accept: "text/plain" } });
+    const text = (await response.text()).trim().replace(/^\"|\"$/g, "");
+    if (!response.ok) throw new Error(`Mempool HTTP ${response.status}`);
+    if (!/^(?:[a-f0-9]{2})+$/i.test(text)) throw new Error("Mempool n’a pas retourné une transaction brute valide.");
+    return text;
+  } finally { window.clearTimeout(timer); }
+}
+
+/** Fetch the full parent transaction required by BIP174 for Legacy P2PKH inputs. */
+export async function getMempoolRawTransaction(network: string, txid: string) {
+  const config = getMempoolConfig(network);
+  if (!config) throw new Error("No Mempool endpoint is configured for this network.");
+  if (!/^[a-f0-9]{64}$/i.test(txid)) throw new Error("The previous transaction id is invalid.");
+  return requestText(`${config.api}/api/tx/${encodeURIComponent(txid)}/hex`);
+}
+
 export type FeeEstimateSource = { feeRate: number | null; available: boolean };
 export type FeeEstimate = {
   network: string;
@@ -58,11 +78,26 @@ export async function getRecommendedFeeEstimate(network: string): Promise<FeeEst
   const config = getMempoolConfig(network);
   if (!config) throw new Error("Select Bitcoin mainnet or Fractal Bitcoin mainnet in UniSat.");
   const query = new URLSearchParams({ chain: network, target: "halfHour" });
-  const result = await requestJson<FeeEstimate & { error?: string }>(`${LIVE_DATA_API_BASE}/api/fees/recommended?${query}`, 10_000);
-  if (!Number.isFinite(result.feeRate) || result.feeRate < 1 || result.feeRate > 10_000 || result.network !== network || result.target !== "halfHour") {
-    throw new Error(result.error || "Mempool/UniSat fee estimators did not return a valid rate.");
+  let workerFailure = "";
+  try {
+    const result = await requestJson<FeeEstimate & { error?: string }>(`${LIVE_DATA_API_BASE}/api/fees/recommended?${query}`, 10_000);
+    if (!Number.isFinite(result.feeRate) || result.feeRate < 1 || result.feeRate > 10_000 || result.network !== network || result.target !== "halfHour") {
+      throw new Error(result.error || "The Worker fee estimate is invalid.");
+    }
+    return result;
+  } catch (error) {
+    workerFailure = error instanceof Error ? error.message : "The fee Worker is temporarily unavailable.";
   }
-  return result;
+  try {
+    const direct = await requestJson<{ halfHourFee?: number; fastestFee?: number; hourFee?: number; economyFee?: number; minimumFee?: number }>(`${config.api}/api/v1/fees/recommended`);
+    const rawRate = direct.halfHourFee ?? direct.fastestFee ?? direct.hourFee ?? direct.economyFee ?? direct.minimumFee;
+    const feeRate = Math.ceil(Number(rawRate));
+    if (!Number.isSafeInteger(feeRate) || feeRate < 1 || feeRate > 10_000) throw new Error("Mempool n’a pas retourné un taux de frais valide.");
+    return { network, target: "halfHour", feeRate, strategy: "single-provider-fallback", sources: { mempool: { feeRate, available: true }, unisat: { feeRate: null, available: false } }, sampledAt: new Date().toISOString() };
+  } catch (error) {
+    const mempoolFailure = error instanceof Error ? error.message : "Mempool est temporairement indisponible.";
+    throw new Error(`Les frais live sont indisponibles via le Worker (${workerFailure}) et Mempool (${mempoolFailure}). Aucun ancien taux n’a été réutilisé.`);
+  }
 }
 
 export async function getRecommendedFeeRate(network: string) {
