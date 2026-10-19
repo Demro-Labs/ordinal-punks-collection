@@ -305,7 +305,7 @@ async function uni(path, env, init = {}) {
         status: response.status,
         contentType: response.headers.get('content-type') || '',
         body: upstreamBody.slice(0, 300)
-          .replace(/Bearer\\s+\\S+/gi, 'Bearer [redacted]')
+          .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
           .replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]'),
       });
     }
