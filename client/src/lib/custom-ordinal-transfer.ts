@@ -130,7 +130,7 @@ async function fetchText(url: string, init?: RequestInit) {
 }
 
 async function getValidatedScript(
-  api: string,
+  network: MempoolConfig["chain"],
   address: string,
   role: string,
   networkLabel: string
@@ -145,8 +145,10 @@ async function getValidatedScript(
       `The ${role} address is not a supported Bitcoin/Fractal mainnet address.`
     );
   }
+  const chain = network === "bitcoin" ? "BITCOIN_MAINNET" : "FRACTAL_BITCOIN_MAINNET";
+  const query = new URLSearchParams({ chain, address });
   const body = await fetchText(
-    `${api}/api/v1/validate-address/${encodeURIComponent(address)}`
+    `${LIVE_DATA_API_BASE}/api/mempool/validate-address?${query}`
   );
   const result = JSON.parse(body) as {
     isvalid?: boolean;
@@ -315,8 +317,10 @@ async function mapWithConcurrency<T, U>(
   return results;
 }
 
-async function readRawTransaction(api: string, txid: string) {
-  const hex = await fetchText(`${api}/api/tx/${encodeURIComponent(txid)}/hex`);
+async function readRawTransaction(network: MempoolConfig["chain"], txid: string) {
+  const chain = network === "bitcoin" ? "BITCOIN_MAINNET" : "FRACTAL_BITCOIN_MAINNET";
+  const query = new URLSearchParams({ chain, txid });
+  const hex = await fetchText(`${LIVE_DATA_API_BASE}/api/mempool/tx-hex?${query}`);
   if (!/^(?:[a-f0-9]{2})+$/i.test(hex))
     throw new Error("Mempool returned an invalid previous transaction.");
   const transaction = bitcoin.Transaction.fromHex(hex);
@@ -384,13 +388,13 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
   } = params;
   const location = parseLocation(selectedInscription.location);
   const recipientScriptHex = await getValidatedScript(
-    mempool.api,
+    mempool.chain,
     recipientAddress,
     "recipient",
     mempool.label
   );
   const changeScriptHex = await getValidatedScript(
-    mempool.api,
+    mempool.chain,
     currentAddress,
     "wallet",
     mempool.label
@@ -407,7 +411,7 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
   const rawTxEntries = await mapWithConcurrency(
     allTxids,
     8,
-    async txid => [txid, await readRawTransaction(mempool.api, txid)] as const
+    async txid => [txid, await readRawTransaction(mempool.chain, txid)] as const
   );
   const rawTxById = new Map(rawTxEntries);
   const feeUtxos = refs.map(ref => ({
@@ -493,20 +497,26 @@ export async function sendOrdinalInscriptionWithCustomPsbt(params: {
   const expectedTxid = bitcoin.Transaction.fromHex(rawTxHex)
     .getId()
     .toLowerCase();
-  let broadcastResult: string;
+  let returnedTxid: string;
   try {
-    broadcastResult = await fetchText(`${mempool.api}/api/tx`, {
+    const chain = mempool.chain === "bitcoin" ? "BITCOIN_MAINNET" : "FRACTAL_BITCOIN_MAINNET";
+    const query = new URLSearchParams({ chain });
+    const response = await fetchText(`${LIVE_DATA_API_BASE}/api/mempool/tx?${query}`, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: rawTxHex,
     });
+    const receipt = JSON.parse(response) as { network?: string; txid?: string };
+    if (receipt.network !== chain || typeof receipt.txid !== "string" || !/^[a-f0-9]{64}$/i.test(receipt.txid)) {
+      throw new Error("The network relay returned an invalid broadcast receipt.");
+    }
+    returnedTxid = receipt.txid.toLowerCase();
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(
       `BROADCAST_OUTCOME_UNCLEAR: ${detail}. Check the ${mempool.label} Mempool for ${expectedTxid} before retrying.`
     );
   }
-  const returnedTxid = broadcastResult.replace(/^\"|\"$/g, "").toLowerCase();
   if (returnedTxid !== expectedTxid) {
     throw new Error(
       `BROADCAST_OUTCOME_UNCLEAR: Mempool did not confirm expected transaction ${expectedTxid}; check ${mempool.label} Mempool before retrying.`
