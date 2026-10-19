@@ -1769,7 +1769,7 @@ test('lists active address UTXOs separately for Bitcoin and Fractal without trea
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     calls.push({ url: String(url), auth: new Headers(init.headers).get('Authorization') });
-    assert.match(url.pathname, /\/v1\/indexer\/address\/.*\/utxo-data$/);
+    assert.match(url.pathname, /\/v1\/indexer\/address\/.*\/all-utxo-data$/);
     return Response.json({ cursor: Number(url.searchParams.get('cursor')), total: 2, utxo: [
       { txid: '11'.repeat(32), vout: 0, satoshi: '1200', height: 100, scriptPk: '0014' + '22'.repeat(20), inscriptions: [], isSpent: false },
       { txid: '33'.repeat(32), vout: 1, satoshi: '546', height: 101, scriptPk: '0014' + '44'.repeat(20), inscriptions: ['inscription-test'], isSpent: false },
