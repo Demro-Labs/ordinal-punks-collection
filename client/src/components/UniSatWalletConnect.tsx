@@ -1386,7 +1386,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                 />
                 <span>I checked this inscription and destination. I understand the on-chain transfer cannot be reversed.</span>
               </label>
-              {confirmed && selectedInscription && destination.trim() && address && isSupportedMainnet(chain?.enum) && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={getProvider()} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
+              {!localVaultSession && confirmed && selectedInscription && destination.trim() && address && isSupportedMainnet(chain?.enum) && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={getProvider()} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
               {mobileNativeReadyForContext && <p className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#70c7a0]" role="status">Pre-check complete. Wallet ownership check is valid. Tap again to open UniSat transaction confirmation.</p>}
               {isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) && (
                 <button
@@ -1397,10 +1397,18 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                   Open this page in UniSat
                 </button>
               )}
+              {localVaultSession && (
+                <div className="mt-3 border border-[#70c7a0]/50 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#9fe0bd]" role="status">
+                  <p className="uppercase tracking-[0.12em]">Local Ordi Wallet mode</p>
+                  <p className="mt-1 text-[#d9d3c6]">This UniSat panel cannot sign with your Local Vault. UniSat signing is disabled while Local Ordi Wallet is connected. Open the unlocked Ordi Wallet and select this inscription in the Live Ordinals &amp; Runes panel to prove ownership with local BIP-322, review the exact PSBT, sign locally, and broadcast only after confirmation.</p>
+                  <button type="button" onClick={() => window.dispatchEvent(new Event("ordi-wallet:open"))} className="mt-2 min-h-10 border border-[#70c7a0] px-3 uppercase text-[#9fe0bd]">Open Local Ordi Wallet</button>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => mobileNativeReadyForContext ? openMobileNativeTransfer() : void sendSelectedInscription()}
                 disabled={
+                  Boolean(localVaultSession) ||
                   transferOutcomeUnclear ||
                   mobilePsbtTransferUnavailable ||
                   (isMobileBrowser() &&
@@ -1413,7 +1421,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                 }
                 className="mt-3 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {transferOutcomeUnclear ? "Transfer status unknown — verify first" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? verifiedOrdinalTransfer ? "Preparing verified transfer…" : "Preparing transfer…" : mobileNativeReadyForContext ? "Approve in UniSat" : verifiedOrdinalTransfer ? "Prepare verified transfer" : isMobileUniSatDevice() ? "Prepare transfer" : "Review transfer in UniSat"}
+                {localVaultSession ? "Use Local Ordi Wallet above" : transferOutcomeUnclear ? "Transfer status unknown — verify first" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? verifiedOrdinalTransfer ? "Preparing verified transfer…" : "Preparing transfer…" : mobileNativeReadyForContext ? "Approve in UniSat" : verifiedOrdinalTransfer ? "Prepare verified transfer" : isMobileUniSatDevice() ? "Prepare transfer" : "Review transfer in UniSat"}
               </button>
               {mobilePsbtTransferUnavailable ? (
                 <p
