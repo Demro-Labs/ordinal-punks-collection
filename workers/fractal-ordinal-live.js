@@ -1074,6 +1074,64 @@ export default {
     }
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     if (url.pathname.startsWith('/api/auth/')) return handleWalletAuth(request, env, headers);
+    if (url.pathname.startsWith('/api/mempool/')) {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const chain = url.searchParams.get('chain') || '';
+      if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Unsupported Mempool network.' }, { status: 400, headers: noStore });
+      const base = chain === 'BITCOIN_MAINNET' ? 'https://mempool.space' : 'https://mempool.fractalbitcoin.io';
+      const address = url.searchParams.get('address') || '';
+      const txid = url.searchParams.get('txid') || '';
+      const validTxid = /^[a-f0-9]{64}$/i.test(txid);
+      const validAddress = validWalletAddress(address);
+      let upstreamPath = '';
+      if (request.method === 'GET' && url.pathname === '/api/mempool/address') {
+        if (!validAddress) return Response.json({ error: 'Invalid address.' }, { status: 400, headers: noStore });
+        upstreamPath = '/api/address/' + encodeURIComponent(address);
+      } else if (request.method === 'GET' && url.pathname === '/api/mempool/address-txs') {
+        if (!validAddress) return Response.json({ error: 'Invalid address.' }, { status: 400, headers: noStore });
+        upstreamPath = '/api/address/' + encodeURIComponent(address) + '/txs';
+      } else if (request.method === 'GET' && url.pathname === '/api/mempool/validate-address') {
+        if (!validAddress) return Response.json({ error: 'Invalid address.' }, { status: 400, headers: noStore });
+        upstreamPath = '/api/v1/validate-address/' + encodeURIComponent(address);
+      } else if (request.method === 'GET' && url.pathname === '/api/mempool/tx-status') {
+        if (!validTxid) return Response.json({ error: 'Invalid transaction id.' }, { status: 400, headers: noStore });
+        upstreamPath = '/api/tx/' + encodeURIComponent(txid) + '/status';
+      } else if (request.method === 'GET' && url.pathname === '/api/mempool/tx-hex') {
+        if (!validTxid) return Response.json({ error: 'Invalid transaction id.' }, { status: 400, headers: noStore });
+        upstreamPath = '/api/tx/' + encodeURIComponent(txid) + '/hex';
+      } else if (request.method === 'GET' && url.pathname === '/api/mempool/fees') {
+        upstreamPath = '/api/v1/fees/recommended';
+      } else if (request.method === 'POST' && url.pathname === '/api/mempool/tx') {
+        const raw = (await request.text()).trim().replace(/^"|"$/g, '');
+        if (!/^(?:[a-f0-9]{2})+$/i.test(raw) || raw.length > 2_000_000) return Response.json({ error: 'Invalid raw transaction hex.' }, { status: 400, headers: noStore });
+        try {
+          const upstream = await fetch(base + '/api/tx', { method: 'POST', headers: { 'Content-Type': 'text/plain', Accept: 'text/plain' }, body: raw, signal: AbortSignal.timeout(15_000) });
+          const body = (await upstream.text()).trim().replace(/^"|"$/g, '');
+          if (!upstream.ok) return Response.json({ error: 'Mempool rejected the transaction.', detail: body.slice(0, 300) }, { status: upstream.status, headers: noStore });
+          if (!/^[a-f0-9]{64}$/i.test(body)) return Response.json({ error: 'Mempool returned an invalid transaction id.' }, { status: 502, headers: noStore });
+          return Response.json({ network: chain, txid: body.toLowerCase(), broadcastAt: new Date().toISOString() }, { headers: noStore });
+        } catch {
+          return Response.json({ error: 'Mempool broadcast endpoint is unavailable.' }, { status: 503, headers: noStore });
+        }
+      } else {
+        return Response.json({ error: 'Unsupported Mempool proxy route.' }, { status: 404, headers: noStore });
+      }
+      try {
+        const upstream = await fetch(base + upstreamPath, { headers: { Accept: url.pathname.endsWith('/tx-hex') ? 'text/plain' : 'application/json' }, signal: AbortSignal.timeout(10_000) });
+        const body = await upstream.text();
+        if (!upstream.ok) return Response.json({ error: 'Mempool upstream request failed.', upstreamStatus: upstream.status }, { status: upstream.status, headers: noStore });
+        if (url.pathname.endsWith('/tx-hex')) {
+          const hex = body.trim().replace(/^"|"$/g, '');
+          if (!/^(?:[a-f0-9]{2})+$/i.test(hex)) return Response.json({ error: 'Mempool returned invalid transaction hex.' }, { status: 502, headers: noStore });
+          return new Response(hex, { headers: { ...noStore, 'Content-Type': 'text/plain; charset=utf-8' } });
+        }
+        const data = JSON.parse(body);
+        return Response.json(data, { headers: noStore });
+      } catch {
+        return Response.json({ error: 'Mempool live source is temporarily unavailable.' }, { status: 503, headers: noStore });
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/api/fractal/balance') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
