@@ -719,7 +719,7 @@ test('caches successful public market responses at the edge', async () => {
     assert.equal(first.headers.get('x-edge-cache'), 'MISS');
     assert.equal(second.status, 200);
     assert.equal(second.headers.get('x-edge-cache'), 'HIT');
-    assert.equal(second.headers.get('cache-control'), 'public, max-age=20, s-maxage=20, stale-while-revalidate=60');
+    assert.equal(second.headers.get('cache-control'), 'public, max-age=60, s-maxage=60, stale-while-revalidate=300');
     assert.equal(upstreamCalls, 5);
   } finally {
     globalThis.fetch = previousFetch;
