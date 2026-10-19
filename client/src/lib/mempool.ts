@@ -148,7 +148,7 @@ export function minimumSpendableSatsForScript(scriptHex: string): number {
   if (/^0014[a-f0-9]{40}$/.test(script)) return 294; // P2WPKH
   if (/^(?:0020[a-f0-9]{64}|5120[a-f0-9]{64})$/.test(script)) return 330; // P2WSH / P2TR
   if (/^a914[a-f0-9]{40}87$/.test(script)) return 540; // P2SH
-  if (/^76a914[a-f0-9]{40}88$/.test(script)) return 546; // P2PKH
+  if (/^76a914[a-f0-9]{40}88ac$/.test(script)) return 546; // P2PKH
   return 600; // Unknown/non-standard script: keep conservative floor.
 }
 
