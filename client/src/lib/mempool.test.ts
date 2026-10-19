@@ -188,8 +188,8 @@ describe("trackMempoolTransaction network routing", () => {
 
 describe("Mempool fee fallback and Legacy transaction routing", () => {
   it.each([
-    { network: "BITCOIN_MAINNET", endpoint: "https://mempool.space" },
-    { network: "FRACTAL_BITCOIN_MAINNET", endpoint: "https://mempool.fractalbitcoin.io" },
+    { network: "BITCOIN_MAINNET" },
+    { network: "FRACTAL_BITCOIN_MAINNET" },
   ])("falls back to the selected $network Mempool through the Worker proxy for current fees", async ({ network, endpoint }) => {
     const urls: string[] = [];
     installWindowAndFetch(async input => {
