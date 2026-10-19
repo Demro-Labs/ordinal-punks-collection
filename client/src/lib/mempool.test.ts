@@ -1,6 +1,6 @@
 import { LIVE_DATA_API_BASE } from "@/lib/live";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { confirmFractalSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, InsufficientSafeUtxosError, trackMempoolTransaction } from "./mempool";
+import { confirmFractalSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, InsufficientSafeUtxosError, minimumSpendableSatsForScript, trackMempoolTransaction } from "./mempool";
 
 const ADDRESS = "bc1qtestaddress0000000000000000000000000";
 
@@ -33,7 +33,39 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("minimumSpendableSatsForScript", () => {
+  it("uses the Worker-aligned dust floor for standard script templates", () => {
+    expect(minimumSpendableSatsForScript(`0014${"11".repeat(20)}`)).toBe(294);
+    expect(minimumSpendableSatsForScript(`5120${"22".repeat(32)}`)).toBe(330);
+    expect(minimumSpendableSatsForScript(`a914${"33".repeat(20)}87`)).toBe(540);
+    expect(minimumSpendableSatsForScript(`76a914${"44".repeat(20)}88`)).toBe(546);
+    expect(minimumSpendableSatsForScript("deadbeef")).toBe(600);
+  });
+});
+
 describe("getSpendableUtxos", () => {
+  it.each([
+    { label: "P2WPKH", scriptPk: `0014${"11".repeat(20)}`, satoshi: 294 },
+    { label: "P2TR", scriptPk: `5120${"22".repeat(32)}`, satoshi: 330 },
+  ])("accepts a confirmed $label output at its standard dust floor", async ({ scriptPk, satoshi }) => {
+    installWindowAndFetch(async () => Response.json({
+      chain: "fractal", address: ADDRESS, cursor: 0, nextCursor: 1, total: 1, scannedCount: 1,
+      utxo: [makeSafeUtxo({ scriptPk, satoshi })],
+    }));
+    const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, satoshi);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ scriptPk, satoshi });
+  });
+
+  it("rejects an output below its script-specific dust floor", async () => {
+    installWindowAndFetch(async () => Response.json({
+      chain: "fractal", address: ADDRESS, cursor: 0, nextCursor: 1, total: 1, scannedCount: 1,
+      utxo: [makeSafeUtxo({ satoshi: 293 })],
+    }));
+    await expect(getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 293))
+      .rejects.toBeInstanceOf(InsufficientSafeUtxosError);
+  });
+
   it("accepts a confirmed low-fee output after the Worker verifies it has no assets", async () => {
     installWindowAndFetch(async () => Response.json({
       chain: "fractal",
