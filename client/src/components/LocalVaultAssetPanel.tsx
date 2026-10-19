@@ -35,6 +35,8 @@ export function LocalVaultAssetPanel({
   const [busy, setBusy] = useState(false);
   const [transferError, setTransferError] = useState("");
   const [message, setMessage] = useState("");
+  const [brc20InscriptionId, setBrc20InscriptionId] = useState("");
+  const [brc20CompletedId, setBrc20CompletedId] = useState("");
   const [ownershipProofKey, setOwnershipProofKey] = useState<string | null>(null);
   const load = async () => {
     setLoading(true);
@@ -83,15 +85,18 @@ export function LocalVaultAssetPanel({
     try {
       const txid = await broadcastLocalOrdinalTransfer(localPlan, wallet, signed);
       setMessage(`Ordinal diffusé sur ${network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"} : ${txid}`);
+      if (selectedItem && selectedItem.inscriptionId === brc20InscriptionId) setBrc20CompletedId(brc20InscriptionId);
       void load();
     } catch (cause) { setTransferError(cause instanceof Error ? cause.message : "Résultat de diffusion incertain. Vérifiez le TXID dans Mempool avant toute autre action."); }
     finally { setBusy(false); }
   }
   return <section className="mt-4 border border-[#70c7a0]/35 bg-[#101a16] p-3 sm:p-4" aria-labelledby="local-vault-assets-title">
-    <LocalVaultBrc20TransferPanel wallet={wallet} network={network} addressType={addressType} site={site} onCreated={(inscriptionId, target) => {
+    <LocalVaultBrc20TransferPanel wallet={wallet} network={network} addressType={addressType} site={site} completedInscriptionId={brc20CompletedId} onCreated={(inscriptionId, target) => {
       void (async () => {
         await load();
         setSelected(inscriptionId);
+        setBrc20InscriptionId(inscriptionId);
+        setBrc20CompletedId("");
         setRecipient(target);
         setLocalPlan(null);
         setSigned(null);
