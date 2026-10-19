@@ -1081,7 +1081,7 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('desktop and mobile fail closed when the Fractal Alkanes balance endpoint is unavailable', async () => {
+test('desktop and mobile use UniSat available UTXOs when the Fractal Alkanes balance route returns 404', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qmobiletestaddress000000000000000000000';
   const record = {
@@ -1099,6 +1099,7 @@ test('desktop and mobile fail closed when the Fractal Alkanes balance endpoint i
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false } });
     if (url.pathname.endsWith(`/runes/utxo/${record.txid}/0/balance`)) return Response.json({ code: 0, data: [] });
     if (url.pathname.endsWith(`/alkanes/utxo/${record.txid}/0/balance`)) return new Response('not found', { status: 404 });
+    if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { total: 0, utxo: [] } });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
@@ -1108,9 +1109,10 @@ test('desktop and mobile fail closed when the Fractal Alkanes balance endpoint i
     ]) {
       const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25${query}`, { ip }), { UNISAT_API_KEY: 'test-only' });
       const data = await response.json();
-      assert.equal(response.status, 503, mode);
-      assert.equal(data.code, 'ALKANES_BALANCE_UNISAT_HTTP_404', mode);
-      assert.equal(Array.isArray(data.utxo), false, mode);
+      assert.equal(response.status, 200, mode);
+      assert.equal(data.utxo.length, 0, mode);
+      assert.equal(data.diagnostics.hasAlkanes, 1, mode);
+      assert.equal(data.diagnosticsSats.hasAlkanes, record.satoshi, mode);
     }
     assert.deepEqual(upstreamMobileModes, [null, null]);
   } finally { globalThis.fetch = previousFetch; }
