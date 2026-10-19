@@ -91,7 +91,9 @@ export async function getRecommendedFeeEstimate(network: string): Promise<FeeEst
   }
   try {
     const direct = await requestJson<{ halfHourFee?: number; fastestFee?: number; hourFee?: number; economyFee?: number; minimumFee?: number }>(`${LIVE_DATA_API_BASE}/api/mempool/fees?chain=${encodeURIComponent(network)}`);
-    const rawRate = direct.halfHourFee ?? direct.fastestFee ?? direct.hourFee ?? direct.economyFee ?? direct.minimumFee;
+    // A present but invalid preferred field must not mask a valid fallback rate.
+    const rawRate = [direct.halfHourFee, direct.fastestFee, direct.hourFee, direct.economyFee, direct.minimumFee]
+      .find(value => value !== undefined && Number.isFinite(Number(value)) && Number(value) >= 1 && Number(value) <= 10_000);
     const feeRate = Math.ceil(Number(rawRate));
     if (!Number.isSafeInteger(feeRate) || feeRate < 1 || feeRate > 10_000) throw new Error("Mempool n’a pas retourné un taux de frais valide.");
     return { network, target: "halfHour", feeRate, strategy: "single-provider-fallback", sources: { mempool: { feeRate, available: true }, unisat: { feeRate: null, available: false } }, sampledAt: new Date().toISOString() };
