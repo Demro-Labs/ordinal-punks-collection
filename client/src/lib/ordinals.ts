@@ -38,14 +38,52 @@ function normalize(value: unknown): AddressOrdinal | null {
   };
 }
 
-export async function fetchAddressOrdinals(address: string, network: OrdinalNetwork, signal?: AbortSignal): Promise<AddressOrdinals> {
-  if (!validAddress(address)) throw new Error("Invalid Local Vault address.");
-  const query = new URLSearchParams({ address, chain: network, start: "0", limit: "50" });
-  const response = await fetch(`${LIVE_DATA_API_BASE}/api/ordinals/address-list?${query}`, { signal, cache: "no-store", headers: { Accept: "application/json" } });
+const ORDINAL_PAGE_SIZE = 50;
+const MAX_LOCAL_VAULT_INSCRIPTIONS = 1_000;
+const PAGE_DELAY_MS = 250;
+
+function waitForNextPage() {
+  return new Promise(resolve => window.setTimeout(resolve, PAGE_DELAY_MS));
+}
+
+async function fetchOrdinalPage(address: string, network: OrdinalNetwork, start: number, signal?: AbortSignal) {
+  const query = new URLSearchParams({ address, chain: network, start: String(start), limit: String(ORDINAL_PAGE_SIZE) });
+  const response = await fetch(`${LIVE_DATA_API_BASE}/api/ordinals/address-list?${query}`, {
+    signal, cache: "no-store", headers: { Accept: "application/json" },
+  });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(typeof payload?.error === "string" ? payload.error : `Live Ordinals request failed (${response.status}).`);
-  if (payload.network !== network || payload.address !== address || payload.start !== 0 || !Number.isSafeInteger(payload.total) || payload.total < 0 || !Array.isArray(payload.detail) || payload.detail.length > 50) throw new Error("The Ordinals indexer returned an incomplete response.");
+  if (payload.network !== network || payload.address !== address || payload.start !== start
+    || !Number.isSafeInteger(payload.total) || payload.total < 0
+    || !Array.isArray(payload.detail) || payload.detail.length > ORDINAL_PAGE_SIZE) {
+    throw new Error("The Ordinals indexer returned an incomplete page.");
+  }
   const detail = payload.detail.map(normalize);
   if (detail.some((item: AddressOrdinal | null) => item === null)) throw new Error("The Ordinals indexer returned an invalid inscription.");
-  return { network, address, start: 0, total: payload.total, detail: detail as AddressOrdinal[], refreshedAt: typeof payload.refreshedAt === "string" ? payload.refreshedAt : new Date().toISOString() };
+  return { total: payload.total as number, detail: detail as AddressOrdinal[], refreshedAt: typeof payload.refreshedAt === "string" ? payload.refreshedAt : new Date().toISOString() };
+}
+
+export async function fetchAddressOrdinals(address: string, network: OrdinalNetwork, signal?: AbortSignal): Promise<AddressOrdinals> {
+  if (!validAddress(address)) throw new Error("Invalid Local Vault address.");
+  const first = await fetchOrdinalPage(address, network, 0, signal);
+  if (first.total > MAX_LOCAL_VAULT_INSCRIPTIONS) {
+    throw new Error(`This Local Vault address has ${first.total} inscriptions. The safe local signer currently verifies at most ${MAX_LOCAL_VAULT_INSCRIPTIONS} inscriptions per address; no transaction was signed.`);
+  }
+  if (first.detail.length !== Math.min(ORDINAL_PAGE_SIZE, first.total)) throw new Error("The Ordinals indexer returned an incomplete first page.");
+  const detail = [...first.detail];
+  for (let start = ORDINAL_PAGE_SIZE; start < first.total; start += ORDINAL_PAGE_SIZE) {
+    if (signal?.aborted) throw new DOMException("The Ordinals lookup was cancelled.", "AbortError");
+    await waitForNextPage();
+    const page = await fetchOrdinalPage(address, network, start, signal);
+    if (page.total !== first.total || page.detail.length !== Math.min(ORDINAL_PAGE_SIZE, first.total - start)) {
+      throw new Error("The Ordinals index changed or returned an incomplete page during local verification. Refresh and retry.");
+    }
+    detail.push(...page.detail);
+  }
+  const ids = new Set<string>();
+  for (const item of detail) {
+    if (ids.has(item.inscriptionId)) throw new Error("The Ordinals index returned a duplicate inscription; local signing is blocked.");
+    ids.add(item.inscriptionId);
+  }
+  return { network, address, start: 0, total: first.total, detail, refreshedAt: new Date().toISOString() };
 }
