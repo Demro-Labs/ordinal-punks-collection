@@ -450,12 +450,14 @@ async function uniNetwork(base, path, env, init = {}) {
       } catch {}
     }
 
-    if (currentResponse.status === 403 && upstreamCode === '-2005' && keyIndex + 1 < apiKeys.length) {
-      // Retry quota exhaustion only with an explicitly configured fallback key for the same network.
-      // Never cross-use Bitcoin and Fractal credentials, and never expose either key to the client.
-      console.warn('UniSat API quota exceeded; trying configured same-network fallback key', {
+    if (currentResponse.status === 403 && keyIndex + 1 < apiKeys.length) {
+      // UniSat can return 403 for quota exhaustion or key-specific access denial.
+      // Retry only with a configured key for this exact same network.
+      // Never cross-use Bitcoin and Fractal credentials, or expose either key to clients.
+      console.warn('UniSat API returned 403; trying configured same-network fallback key', {
         network,
         path,
+        upstreamCode,
         requestId: currentResponse.headers.get('x-request-id') || currentResponse.headers.get('cf-ray') || null,
       });
       continue;
