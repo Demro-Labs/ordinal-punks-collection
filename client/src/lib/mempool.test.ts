@@ -38,7 +38,7 @@ describe("minimumSpendableSatsForScript", () => {
     expect(minimumSpendableSatsForScript(`0014${"11".repeat(20)}`)).toBe(294);
     expect(minimumSpendableSatsForScript(`5120${"22".repeat(32)}`)).toBe(330);
     expect(minimumSpendableSatsForScript(`a914${"33".repeat(20)}87`)).toBe(540);
-    expect(minimumSpendableSatsForScript(`76a914${"44".repeat(20)}88`)).toBe(546);
+    expect(minimumSpendableSatsForScript(`76a914${"44".repeat(20)}88ac`)).toBe(546);
     expect(minimumSpendableSatsForScript("deadbeef")).toBe(600);
   });
 });
@@ -98,6 +98,21 @@ describe("getSpendableUtxos", () => {
     expect(result.reduce((sum, item) => sum + item.satoshi, 0)).toBe(1_092);
   });
 
+  it("fails closed when collectAll reaches the 500-output cap before the index is exhausted", async () => {
+    let calls = 0;
+    installWindowAndFetch(async input => {
+      const url = new URL(String(input));
+      const cursor = Number(url.searchParams.get("cursor"));
+      calls += 1;
+      return Response.json({
+        chain: "fractal", address: ADDRESS, cursor, nextCursor: cursor + 25, total: 501, scannedCount: 25, utxo: [],
+      });
+    });
+
+    await expect(getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1, { collectAll: true }))
+      .rejects.toThrow(/scan is incomplete.*500 of 501/i);
+    expect(calls).toBe(20);
+  });
   it("keeps paging until every exact PSBT outpoint is verified", async () => {
     const cursors: number[] = [];
     installWindowAndFetch(async input => {
