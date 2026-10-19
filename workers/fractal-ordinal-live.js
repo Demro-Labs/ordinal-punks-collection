@@ -337,14 +337,25 @@ async function uni(path, env, init = {}) {
     const upstreamCode = payload && (typeof payload.code === 'number' || typeof payload.code === 'string')
       ? String(payload.code) : null;
     const quotaExceeded = upstreamCode === '-2005';
-    if (quotaExceeded && index + 1 < keys.length) {
-      console.warn('UniSat API quota exceeded; trying configured Fractal fallback key', {
+    // A 403 may be quota exhaustion (-2005), key-specific authorization, or a
+    // provider-side access policy. A separately configured key for this same
+    // Fractal API can safely distinguish those cases without crossing networks.
+    if (response.status === 403 && index + 1 < keys.length) {
+      console.warn('UniSat Fractal API returned 403; retrying with configured same-network fallback key', {
         path,
+        upstreamCode,
         requestId: response.headers.get('x-request-id') || response.headers.get('cf-ray') || null,
       });
       continue;
     }
     if (!response.ok) {
+      if (response.status === 403) {
+        console.warn('UniSat Fractal API denied request', {
+          path,
+          upstreamCode,
+          requestId: response.headers.get('x-request-id') || response.headers.get('cf-ray') || null,
+        });
+      }
       if (path.startsWith('/v3/market/collection/auction/')) {
         let upstreamBody = '';
         try { upstreamBody = await response.clone().text(); } catch {}
