@@ -182,7 +182,7 @@ function buildOwnershipChallengeMessage(siteName, address, network, challengeId,
     `Nonce: ${challengeId}`,
     `Issued At: ${new Date(issuedAt).toISOString()}`,
     `Expiration Time: ${new Date(expiresAt).toISOString()}`,
-    `This signature only proves wallet ownership on ${networkLabel}. It does not authorize, sign, or broadcast a payment or transfer. A separate UniSat transaction approval is required.`,
+    `This signature only proves wallet ownership on ${networkLabel}. It does not authorize, sign, or broadcast a payment or transfer. A separate transaction review and signature is required.`,
   ].join('\n');
 }
 

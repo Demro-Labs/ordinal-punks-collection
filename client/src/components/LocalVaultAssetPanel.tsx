@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { UniSatRunesSendPanel } from "@/components/UniSatRunesSendPanel";
+import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
 import { fetchAddressOrdinals, type AddressOrdinal, type OrdinalNetwork } from "@/lib/ordinals";
 import { broadcastLocalOrdinalTransfer, prepareLocalOrdinalTransfer, signLocalOrdinalTransfer, type LocalOrdinalPlan } from "@/lib/local-ordinal-transfer";
 import type { AddressType, OrdiWalletRecord } from "@/lib/ordi-wallet";
@@ -35,6 +36,7 @@ export function LocalVaultAssetPanel({
   const [busy, setBusy] = useState(false);
   const [transferError, setTransferError] = useState("");
   const [message, setMessage] = useState("");
+  const [ownershipProofKey, setOwnershipProofKey] = useState<string | null>(null);
   const load = async () => {
     setLoading(true);
     setError("");
@@ -53,12 +55,16 @@ export function LocalVaultAssetPanel({
     return () => window.clearInterval(timer);
   }, [address, network]);
   const selectedItem = useMemo(() => items.find(item => item.inscriptionId === selected) ?? null, [items, selected]);
+  const ownershipContextKey = selectedItem && recipient.trim()
+    ? JSON.stringify(["ordinal-transfer", site, network, address, addressType, selectedItem.inscriptionId, recipient.trim()])
+    : "";
   const explorer = network === "BITCOIN_MAINNET" ? "https://unisat.io" : "https://fractal.unisat.io";
   function chooseInscription(item: AddressOrdinal) {
     setSelected(item.inscriptionId); setLocalPlan(null); setSigned(null); setConfirmedReview(false); setConfirmedBroadcast(false); setBroadcastAttempted(false); setTransferError(""); setMessage("");
   }
   async function reviewTransfer() {
     if (!selectedItem) return;
+    if (!ownershipContextKey || ownershipProofKey !== ownershipContextKey) { setTransferError("Complete the local BIP-322 ownership proof for this inscription, recipient, and network before preparing the transfer."); return; }
     setBusy(true); setTransferError(""); setMessage(""); setLocalPlan(null); setSigned(null); setConfirmedReview(false); setConfirmedBroadcast(false); setBroadcastAttempted(false);
     try {
       setLocalPlan(await prepareLocalOrdinalTransfer({ network, wallet, addressType, inscriptionId: selectedItem.inscriptionId, recipient }));
@@ -67,7 +73,7 @@ export function LocalVaultAssetPanel({
     finally { setBusy(false); }
   }
   async function signTransfer() {
-    if (!localPlan || !confirmedReview) return;
+    if (!localPlan || !confirmedReview || ownershipProofKey !== ownershipContextKey) return;
     setBusy(true); setTransferError(""); setMessage("");
     try { setSigned(await signLocalOrdinalTransfer(localPlan, wallet)); setMessage("Signature créée localement et vérifiée. Rien n’a encore été diffusé."); }
     catch (cause) { setTransferError(cause instanceof Error ? cause.message : "La signature locale a échoué."); }
@@ -96,6 +102,7 @@ export function LocalVaultAssetPanel({
     {selectedItem && <div className="mt-3 border border-[#d99a54]/40 bg-[#10151a] p-3 sm:p-4" aria-labelledby="local-ordinal-transfer-title">
       <div className="flex items-center gap-2 text-[#f2bd63]"><ShieldCheck size={15} /><h3 id="local-ordinal-transfer-title" className="font-mono text-[10px] uppercase tracking-[.14em]">Ordinal transfer · Local Vault</h3></div>
       <p className="mt-2 break-all font-mono text-[9px] text-[#9ea7b3]">{selectedItem.inscriptionId} · {network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin mainnet"}</p>
+      <LocalVaultOwnershipProof key={ownershipContextKey || "ordinal-proof-empty"} site={site} network={network} wallet={wallet} addressType={addressType} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />
       <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"><input aria-label="Ordinal recipient address" value={recipient} onChange={event => { setRecipient(event.target.value); setLocalPlan(null); setSigned(null); setConfirmedReview(false); setConfirmedBroadcast(false); setBroadcastAttempted(false); }} placeholder="Recipient address" className="min-h-11 min-w-0 border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-base text-[#f3efe5] placeholder:text-[#718092] sm:text-sm" /><button type="button" onClick={() => void reviewTransfer()} disabled={busy || !recipient.trim()} className="inline-flex min-h-11 items-center justify-center gap-2 border border-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-40">Review local transfer</button></div>
       {localPlan && <div className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]"><p className="uppercase text-[#9fe0bd]">Transaction review — no signature yet</p><p className="mt-2 break-all">Inscription sat → {localPlan.recipient}</p><p className="mt-2 uppercase text-[#f2bd63]">Exact inputs ({localPlan.plan.inputs.length})</p><ul className="mt-1 space-y-1">{localPlan.plan.inputs.map((input, index) => <li key={`${input.txid}:${input.vout}`} className="break-all">{index === 0 ? "Ordinal" : "Fee"}: {input.txid}:{input.vout} · {formatSats(input.valueSats)} · {input.spendType}</li>)}</ul><p className="mt-2 uppercase text-[#f2bd63]">Exact outputs</p><p className="break-all">Recipient: {formatSats(localPlan.plan.outputs[0].valueSats)} → {localPlan.recipient}</p>{localPlan.plan.outputs[1] && <p className="break-all">Vault change: {formatSats(localPlan.plan.outputs[1].valueSats)} → {localPlan.address}</p>}<p className="mt-2">Total inputs: {formatSats(localPlan.plan.totalInputSats)} · exact fee: {formatSats(localPlan.plan.feeSats)} · approx. {localPlan.plan.feeRateSatVb.toFixed(2)} sat/vB</p><label className="mt-3 flex min-h-11 items-start gap-2 py-2"><input type="checkbox" checked={confirmedReview} onChange={event => setConfirmedReview(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><span>Je confirme le réseau, l’inscription, chaque entrée/sortie, le destinataire et les frais. Autoriser la signature locale du PSBT.</span></label><button type="button" onClick={() => void signTransfer()} disabled={!confirmedReview || busy || Boolean(signed)} className="inline-flex min-h-11 items-center justify-center bg-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#0b0d10] disabled:opacity-40">{busy ? "Signing locally…" : "Sign Ordinal locally"}</button></div>}
       {signed && localPlan && <div className="mt-3 border border-[#d99a54]/50 p-3 font-mono text-[10px] leading-5"><p className="break-all text-[#f2bd63]">TXID: {signed.txid}</p><p className="mt-1 text-[#9ea7b3]">Signature locale vérifiée. Confirmez explicitement la diffusion sur le réseau indiqué.</p><label className="mt-2 flex min-h-11 items-start gap-2 py-2 text-[#d9d3c6]"><input type="checkbox" checked={confirmedBroadcast} onChange={event => setConfirmedBroadcast(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><span>Je confirme la diffusion irréversible de ce TXID sur {network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"}.</span></label><button type="button" onClick={() => void broadcastTransfer()} disabled={!confirmedBroadcast || busy || broadcastAttempted} className="mt-2 inline-flex min-h-11 items-center justify-center bg-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#0b0d10] disabled:opacity-40">{busy ? "Broadcasting…" : broadcastAttempted ? "Broadcast attempted — verify TXID" : "Broadcast via Mempool"}</button></div>}

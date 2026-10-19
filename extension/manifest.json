@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Ordi Wallet — Local Vault Preview",
-  "version": "0.4.0",
-  "description": "A local encrypted Bitcoin and Fractal vault with protocol routing and reviewed local PSBT tools.",
+  "version": "0.5.0",
+  "description": "A local encrypted Bitcoin and Fractal vault with BIP-322 ownership proofs and reviewed local PSBT tools.",
   "action": {
     "default_title": "Open Ordi Wallet",
     "default_popup": "extension.html",
