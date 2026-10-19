@@ -3,13 +3,15 @@ import { CheckCircle2, Loader2, Send, ShieldCheck } from "lucide-react";
 import { broadcastLocalPsbt, finalizeLocalPsbt, signLocalPsbt, reviewLocalPsbt, type LocalPsbtReview } from "@/lib/local-psbt-signer";
 import { prepareLocalNativeTransfer, type LocalNativeTransferPlan } from "@/lib/local-native-transfer";
 import { describeFeeSources, getRecommendedFeeEstimate, getMempoolConfig, trackMempoolTransaction, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
-import type { OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
+import { ADDRESS_SPECS, type AddressType, type OrdiNetwork, type OrdiWalletRecord } from "@/lib/ordi-wallet";
 
 function assetLabel(network: OrdiNetwork) { return network === "BITCOIN_MAINNET" ? "BTC" : "FB"; }
 function formatAsset(sats: number, asset: string) { return `${(sats / 100_000_000).toLocaleString("en-US", { minimumFractionDigits: 8, maximumFractionDigits: 8 })} ${asset}`; }
 
 export function LocalNativeTransferPanel({ wallet, network, onDone }: { wallet: OrdiWalletRecord; network: OrdiNetwork; onDone?: () => void }) {
   const asset = assetLabel(network);
+  const [addressType, setAddressType] = useState<AddressType>("native-segwit");
+  const account = wallet.addresses[addressType];
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [feeEstimate, setFeeEstimate] = useState<FeeEstimate | null>(null);
@@ -33,8 +35,9 @@ export function LocalNativeTransferPanel({ wallet, network, onDone }: { wallet: 
   const prepare = async () => {
     setBusy(true); setError(""); setMessage(""); reset();
     try {
-      const next = await prepareLocalNativeTransfer(network, wallet, recipient, amount);
+      const next = await prepareLocalNativeTransfer(network, wallet, addressType, recipient, amount);
       const nextReview = await reviewLocalPsbt(next.psbtHex, wallet, network);
+      if (nextReview.addressType !== addressType || nextReview.sourceAddress !== account.address) throw new Error("Le PSBT généré ne correspond pas au compte source choisi.");
       setPlan(next); setReview(nextReview); setMessage("Transaction préparée et vérifiée contre les UTXO confirmés sans actifs. Aucun transfert n’a encore été signé.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Impossible de préparer le transfert."); }
     finally { setBusy(false); }
@@ -72,7 +75,12 @@ export function LocalNativeTransferPanel({ wallet, network, onDone }: { wallet: 
 
   return <section className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3 sm:mt-5 sm:p-4" aria-labelledby="local-native-transfer-title">
     <div className="flex items-center gap-2 text-[#f2bd63]"><Send size={15} /><h3 id="local-native-transfer-title" className="font-mono text-[10px] uppercase tracking-[.14em]">Send {asset} · Local Vault</h3></div>
-    <p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Paiement natif {asset} pour mobile et desktop : les UTXO confirmés sans Ordinal, Rune ou Alkane sont vérifiés en direct, puis la transaction est signée dans le coffre local. Les clés privées ne quittent jamais cet appareil.</p>
+    <p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Paiement natif {asset} depuis Legacy, Nested SegWit, Native SegWit ou Taproot : les UTXO confirmés sans Ordinal, Rune ou Alkane sont vérifiés en direct, puis la transaction est signée dans le coffre local. Les clés privées ne quittent jamais cet appareil.</p>
+    <label className="mt-3 block font-mono text-[9px] uppercase tracking-[.12em] text-[#9ea7b3]" htmlFor="local-native-source-type">Type d’adresse source</label>
+    <select id="local-native-source-type" aria-label="Type d’adresse source" value={addressType} onChange={event => { reset(); setAddressType(event.target.value as AddressType); }} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-sm text-[#f3efe5]">
+      {ADDRESS_SPECS.map(item => <option key={item.type} value={item.type}>{item.label}</option>)}
+    </select>
+    <p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#718092]">Source : {account.label} · {account.address}</p>
     <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_12rem_auto]">
       <input aria-label={`Adresse ${asset} destinataire`} value={recipient} onChange={event => { setRecipient(event.target.value); reset(); }} placeholder="Adresse destinataire" className="min-h-11 min-w-0 border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-base text-[#f3efe5] placeholder:text-[#718092] sm:text-sm" />
       <input aria-label={`Montant ${asset}`} inputMode="decimal" value={amount} onChange={event => { setAmount(event.target.value); reset(); }} placeholder={`Montant ${asset}`} className="min-h-11 border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-base text-[#f3efe5] placeholder:text-[#718092] sm:text-sm" />
@@ -81,10 +89,11 @@ export function LocalNativeTransferPanel({ wallet, network, onDone }: { wallet: 
     {feeEstimate && <p className="mt-2 font-mono text-[9px] text-[#718092]">Frais live : {Math.ceil(feeEstimate.feeRate)} sat/vB · {describeFeeSources(feeEstimate.strategy, feeEstimate.sources)}</p>}
     {review && plan && <div className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]">
       <p className="flex items-center gap-2 uppercase text-[#9fe0bd]"><CheckCircle2 size={13} /> Revue obligatoire</p>
-      <p className="mt-2 break-all">Envoyer : {formatAsset(plan.amountSats, asset)} → {plan.recipient}</p>
+      <p className="mt-2 break-all">Depuis : {ADDRESS_SPECS.find(item => item.type === plan.addressType)?.label} · {plan.sourceAddress}</p>
+      <p className="break-all">Envoyer : {formatAsset(plan.amountSats, asset)} → {plan.recipient}</p>
       <p>Entrées : {review.inputCount} · Total : {formatAsset(review.inputSats, asset)} · Frais : {formatAsset(review.feeSats, asset)}</p>
       {plan.changeSats > 0 && <p>Change vers le coffre : {formatAsset(plan.changeSats, asset)}</p>}
-      <label className="mt-3 flex min-h-11 items-start gap-2 py-2"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /> <span>Je confirme le réseau {asset === "BTC" ? "Bitcoin" : "Fractal Bitcoin"}, l’adresse, le montant et les frais. Créer la signature locale.</span></label>
+      <label className="mt-3 flex min-h-11 items-start gap-2 py-2"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /> <span>Je confirme le réseau {asset === "BTC" ? "Bitcoin" : "Fractal Bitcoin"}, le compte source, l’adresse, le montant et les frais. Créer la signature locale.</span></label>
       <button type="button" onClick={() => void sign()} disabled={!confirmed || busy} className="inline-flex min-h-11 items-center justify-center bg-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#0b0d10] disabled:opacity-40">{busy ? "Signing…" : `Sign ${asset} locally`}</button>
     </div>}
     {signed && !tx && <div className="mt-3 border border-[#d99a54]/40 p-3"><p className="font-mono text-[10px] text-[#f2bd63]">Signature en mémoire uniquement; pas encore diffusée.</p><button type="button" onClick={() => void finalize()} disabled={busy} className="mt-2 inline-flex min-h-11 border border-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#f2bd63]">Verify signature</button></div>}
