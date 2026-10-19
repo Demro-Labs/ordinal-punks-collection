@@ -143,13 +143,13 @@ export function UniSatOwnershipProof({
   };
 
   return <section className="mt-3 border border-[#d99a54]/60 bg-[#151a1f] p-3 font-mono text-[10px] leading-5" aria-label="UniSat wallet ownership check">
-    <p className="flex items-center gap-2 uppercase tracking-[0.1em] text-[#f2bd63]"><ShieldCheck size={13} /> {messageSigningSupported ? `Ownership signature required · ${signatureType === "ecdsa" ? "ECDSA/BIP-137" : "BIP-322 simple"}` : addressType ? `${getUniSatAddressTypeLabel(addressType)} · unsupported` : "Unsupported UniSat address format"}</p>
+    <p className="flex items-center gap-2 uppercase tracking-[0.1em] text-[#f2bd63]"><ShieldCheck size={13} /> {messageSigningSupported ? `UniSat Wallet · Ownership signature required · ${signatureType === "ecdsa" ? "ECDSA/BIP-137" : "BIP-322 simple"}` : addressType ? `${getUniSatAddressTypeLabel(addressType)} · unsupported` : "Unsupported UniSat wallet address format"}</p>
     <p className="mt-1 text-[#9ea7b3]">{messageSigningSupported
       ? `This signature proves control of ${address ? `${address.slice(0, 10)}…${address.slice(-6)}` : "the connected wallet"} on ${network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"}. It does not pay anything or sign the transaction.`
       : "Only UniSat’s documented Legacy, Nested SegWit, Native SegWit, and Taproot account formats are supported here."}</p>
     {verified ? <p className="mt-2 flex items-center gap-2 text-[#70c7a0]" role="status"><CheckCircle2 size={13} /> Wallet ownership verified. UniSat transaction approval remains a separate step.</p> : <div className="mt-2 flex flex-wrap gap-2">
       {messageSigningSupported && <button type="button" onClick={() => void requestChallenge()} disabled={working || !contextKey || !address || !provider?.getAccounts || !provider.getChain} className="min-h-10 border border-[#3b434d] px-3 py-2 uppercase tracking-[0.06em] text-[#d9d3c6] disabled:opacity-40">{working && !activeChallenge ? <><Loader2 size={12} className="mr-1 inline animate-spin" /> Preparing…</> : "1 · Prepare proof"}</button>}
-      {messageSigningSupported && activeChallenge && <button type="button" onClick={signOwnership} disabled={working || !provider?.signMessage} className="min-h-10 border border-[#d99a54] bg-[#d99a54] px-3 py-2 uppercase tracking-[0.06em] text-[#0b0d10] disabled:opacity-40">{working ? <><Loader2 size={12} className="mr-1 inline animate-spin" /> Verifying…</> : "2 · Sign ownership"}</button>}
+      {messageSigningSupported && activeChallenge && <button type="button" onClick={signOwnership} disabled={working || !provider?.signMessage} className="min-h-10 border border-[#d99a54] bg-[#d99a54] px-3 py-2 uppercase tracking-[0.06em] text-[#0b0d10] disabled:opacity-40">{working ? <><Loader2 size={12} className="mr-1 inline animate-spin" /> Verifying…</> : "2 · Sign in UniSat"}</button>}
     </div>}
     {activeChallenge && !verified && <p className="mt-2 text-[#718092]">Challenge valid until {new Date(activeChallenge.expiresAt).toLocaleTimeString("en-US")} · this message authorizes no payment or transfer.</p>}
     {error && <p className="mt-2 text-[#e08b7d]" role="alert">{error}</p>}
