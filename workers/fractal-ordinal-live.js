@@ -295,7 +295,22 @@ async function uni(path, env, init = {}) {
       ...(init.headers || {}),
     },
   });
-  if (!response.ok) throw new Error('UniSat upstream returned ' + response.status);
+  if (!response.ok) {
+    if (path.startsWith('/v3/market/collection/auction/')) {
+      let upstreamBody = '';
+      try { upstreamBody = await response.clone().text(); } catch {}
+      // Diagnostic only: never log authorization headers; redact long token-like values and bound output.
+      console.warn('UniSat market upstream error', {
+        path,
+        status: response.status,
+        contentType: response.headers.get('content-type') || '',
+        body: upstreamBody.slice(0, 300)
+          .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+          .replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]'),
+      });
+    }
+    throw new Error('UniSat upstream returned ' + response.status);
+  }
   const payload = await response.json();
   if (payload.code !== 0) throw new Error('UniSat upstream rejected the request');
   return payload.data;
