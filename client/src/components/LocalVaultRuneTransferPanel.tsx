@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Send, ShieldCheck } from "lucide-react";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
-import { fetchRuneBalancePage, formatRuneAmount, type RuneBalance } from "@/lib/runes";
+import { fetchAllRuneBalancePages, formatRuneAmount, type RuneBalance } from "@/lib/runes";
 import { prepareLocalRuneTransfer, signLocalRuneTransfer, broadcastLocalRuneTransfer, type LocalRuneTransferPlan } from "@/lib/local-rune-transfer";
 import type { AddressType, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
 
@@ -31,9 +31,8 @@ export function LocalVaultRuneTransferPanel({ wallet, network, addressType, site
     setRunes([]); setSelected(""); setAmount(""); setPlan(null); setSigned(null); setOwnershipProofKey(null);
     setConfirmedReview(false); setConfirmedBroadcast(false); setBroadcastAttempted(false); setError(""); setMessage("");
     setLoading(true);
-    void fetchRuneBalancePage(account.address, network, 0, 25).then(page => {
+    void fetchAllRuneBalancePages(account.address, network).then(page => {
       if (!active) return;
-      if (page.total > 25 || page.detail.length !== page.total) throw new Error("Rune balance list exceeds the verified local page; complete pagination is required.");
       setRunes(page.detail);
       setSelected(page.detail[0]?.runeid ?? "");
     }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "Rune balance list unavailable."); })
