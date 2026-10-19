@@ -1511,13 +1511,6 @@ export default {
     if (url.pathname !== '/api/market' && url.pathname !== '/api/live-inscription') {
       return new Response('Not found', { status: 404, headers });
     }
-    if (isRateLimited(request)) {
-      return Response.json({ error: 'Too many requests.' }, {
-        status: 429,
-        headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' },
-      });
-    }
-
     try {
       if (url.pathname === '/api/market') {
         const collectionId = url.searchParams.get('collectionId') || '';
@@ -1529,7 +1522,17 @@ export default {
             headers: { ...headers, 'Cache-Control': 'no-store' },
           });
         }
-        return edgeCachedResponse(request, headers, 20, 60, async () => Response.json(await market(collectionId, start, limit, env), { headers }));
+        // Rate-limit only cache misses: cached public market reads must not consume
+        // the same per-IP budget used by wallet and transaction preparation routes.
+        return edgeCachedResponse(request, headers, 60, 300, async () => {
+          if (isRateLimited(request)) {
+            return Response.json({ error: 'Too many requests.' }, {
+              status: 429,
+              headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' },
+            });
+          }
+          return Response.json(await market(collectionId, start, limit, env), { headers });
+        });
       }
 
       const inscriptionId = url.searchParams.get('inscriptionId') || '';
@@ -1544,11 +1547,26 @@ export default {
         return Response.json({ error: 'Unsupported mainnet.' }, { status: 400, headers: { ...headers, 'Cache-Control': 'no-store' } });
       }
       if (url.searchParams.get('refresh') === '1') {
+        if (isRateLimited(request)) {
+          return Response.json({ error: 'Too many requests.' }, {
+            status: 429,
+            headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' },
+          });
+        }
         return Response.json(await inscription(inscriptionId, env, chain), {
           headers: { ...headers, 'Cache-Control': 'no-store', 'X-Edge-Cache': 'BYPASS' },
         });
       }
-      return edgeCachedResponse(request, headers, 120, 300, async () => Response.json(await inscription(inscriptionId, env, chain), { headers }));
+      // Cached public inscription reads bypass the per-IP limit; only cache misses count.
+      return edgeCachedResponse(request, headers, 120, 300, async () => {
+        if (isRateLimited(request)) {
+          return Response.json({ error: 'Too many requests.' }, {
+            status: 429,
+            headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' },
+          });
+        }
+        return Response.json(await inscription(inscriptionId, env, chain), { headers });
+      });
     } catch {
       console.warn('Live API upstream request failed', url.pathname);
       return Response.json({ error: 'Live UniSat data is temporarily unavailable.' }, {
