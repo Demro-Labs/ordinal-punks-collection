@@ -332,13 +332,46 @@ async function uniNetwork(base, path, env, init = {}) {
     // Never forward either UniSat key to an unconfigured upstream host.
     headers.delete('Authorization');
   }
-  const response = await fetch(base + path, {
-    ...init,
-    headers,
-  });
-  if (!response.ok) throw new Error('UniSat upstream returned ' + response.status);
-  const payload = await response.json();
-  if (payload.code !== 0) throw new Error('UniSat upstream rejected the request');
+  const network = isBitcoinApi ? 'bitcoin' : isFractalApi ? 'fractal' : 'other';
+  let response;
+  try {
+    response = await fetch(base + path, {
+      ...init,
+      headers,
+    });
+  } catch (error) {
+    console.warn('UniSat network fetch failed', {
+      network,
+      path,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+    throw new Error('UniSat network request failed');
+  }
+  if (!response.ok) {
+    // Record status and request identifiers only; never log auth headers, addresses, or response bodies.
+    console.warn('UniSat network upstream HTTP error', {
+      network,
+      path,
+      status: response.status,
+      requestId: response.headers.get('x-request-id') || response.headers.get('cf-ray') || null,
+    });
+    throw new Error('UniSat upstream returned ' + response.status);
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    console.warn('UniSat network returned invalid JSON', { network, path, status: response.status });
+    throw new Error('UniSat upstream returned invalid JSON');
+  }
+  if (payload.code !== 0) {
+    console.warn('UniSat network API rejected request', {
+      network,
+      path,
+      code: typeof payload.code === 'number' || typeof payload.code === 'string' ? String(payload.code).slice(0, 32) : 'missing',
+    });
+    throw new Error('UniSat upstream rejected the request');
+  }
   return payload.data;
 }
 
