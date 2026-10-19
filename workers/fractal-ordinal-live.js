@@ -135,6 +135,18 @@ function isInscribeRateLimited(request) {
   return false;
 }
 
+function normalizeSatoshiValue(item) {
+  // UniSat normally returns "satoshi"; some compatible indexer responses expose
+  // the same integer as "value". Accept only exact integer sats, never BTC decimals.
+  const raw = item?.satoshi !== undefined && item?.satoshi !== null ? item.satoshi : item?.value;
+  if (typeof raw === 'number') return Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+  if (typeof raw === 'string' && /^\\d+$/.test(raw)) {
+    const value = Number(raw);
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+  return null;
+}
+
 function parseBoundedInteger(raw, fallback, maximum) {
   if (raw === null) return fallback;
   if (!/^\d+$/.test(raw)) return null;
@@ -691,7 +703,7 @@ async function spendableUtxos(request, env, corsHeaders) {
   for (const item of raw.slice(0, 25)) {
     const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
     const vout = Number(item?.vout);
-    const satoshi = Number(item?.satoshi);
+    const satoshi = normalizeSatoshiValue(item);
     const scriptPk = typeof item?.scriptPk === 'string' ? item.scriptPk.toLowerCase() : '';
     const height = Number(item?.height);
     const isLowFee = item?.isLowFee === undefined ? false : item.isLowFee;
@@ -724,7 +736,7 @@ async function spendableUtxos(request, env, corsHeaders) {
     const detail = await spendableUtxoStage('UTXO_DETAIL', () => uniNetwork(base, `/v1/indexer/utxo/${txid}/${vout}`, env));
     if (
       String(detail?.txid || '').toLowerCase() !== txid || Number(detail?.vout) !== vout ||
-      detail?.address !== address || Number(detail?.satoshi) !== satoshi ||
+      detail?.address !== address || normalizeSatoshiValue(detail) !== satoshi ||
       String(detail?.scriptPk || '').toLowerCase() !== scriptPk
     ) {
       rejected.detailMismatch += 1;
@@ -802,7 +814,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
   for (const candidate of candidates) {
     const txid = typeof candidate?.txid === 'string' ? candidate.txid.toLowerCase() : '';
     const vout = Number(candidate?.vout);
-    const satoshi = Number(candidate?.satoshi);
+    const satoshi = normalizeSatoshiValue(candidate);
     const scriptPk = typeof candidate?.scriptPk === 'string' ? candidate.scriptPk.toLowerCase() : '';
     const key = `${txid}:${vout}`;
     if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !Number.isSafeInteger(satoshi) || satoshi < 600 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) || seen.has(key)) {
