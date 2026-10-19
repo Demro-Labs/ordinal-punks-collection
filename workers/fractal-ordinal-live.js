@@ -350,7 +350,7 @@ async function uniNetwork(base, path, env, init = {}) {
   // transaction inputs and signing flows must always use fresh upstream verification.
   const method = (init.method || 'GET').toUpperCase();
   const cacheableRead = method === 'GET' &&
-    !/\\/(?:all-utxo-data|available-utxo-data|utxo-data|utxo\\/|tx\\/|rawtx\\/|fees\\/)|\\/v[235]\\/inscribe\\//i.test(path);
+    !['all-utxo-data', 'available-utxo-data', 'utxo-data', '/utxo/', '/tx/', '/rawtx/', '/fees/', '/v2/inscribe/', '/v3/inscribe/', '/v5/inscribe/'].some((segment) => path.includes(segment));
   const edgeCache = cacheableRead ? globalThis.caches?.default : null;
   const cacheKey = edgeCache ? new Request(base + path, { method: 'GET' }) : null;
   if (edgeCache && cacheKey) {
