@@ -482,6 +482,31 @@ test('returns transferable inscriptions for a six-character classic BRC-20 ticke
     assert.equal(data.detail[0].amount, '12.5');
   } finally { globalThis.fetch = previousFetch; }
 });
+test('falls back to the documented address/ticker info endpoint when transferable-inscriptions fails', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const inscriptionId = `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai7`;
+  const calls = [];
+  globalThis.fetch = async input => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith('/transferable-inscriptions?start=0&limit=100')) {
+      return Response.json({ code: -1, msg: 'endpoint temporarily unavailable' });
+    }
+    assert.equal(url, `https://open-api-fractal.unisat.io/v1/indexer/address/${address}/brc20/ordi/info`);
+    return Response.json({ code: 0, data: { transferableCount: 1, transferableInscriptions: [{ inscriptionId, inscriptionNumber: 7, data: { amt: '2.75' }, confirmations: 4 }] } });
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/brc20/transferable?address=${address}&ticker=ordi&chain=FRACTAL_BITCOIN_MAINNET`, { ip: '192.0.2.96' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.total, 1);
+    assert.equal(data.detail[0].inscriptionId, inscriptionId);
+    assert.equal(data.detail[0].amount, '2.75');
+    assert.equal(calls.length, 2);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('returns a live Fractal balance without exposing the UniSat API key', async () => {
   const previousFetch = globalThis.fetch;
   let unisatAuth = '';
