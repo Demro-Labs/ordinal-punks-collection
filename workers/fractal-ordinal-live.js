@@ -728,7 +728,10 @@ async function spendableUtxos(request, env, corsHeaders) {
   const requestedSize = parseBoundedInteger(url.searchParams.get('size'), 25, 25);
   if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new SpendableUtxoError('INVALID_QUERY', 400);
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
-  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}&withLowFee=true`, env));
+  // Discover candidates from the full address UTXO index, not only UniSat's pre-filtered available list.
+  // Every candidate is still independently verified below (confirmed, unspent, script/address match,
+  // no inscriptions, Runes, or Alkanes) before it can be returned as fee-safe.
+  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
   if (!Array.isArray(source?.utxo)) throw new SpendableUtxoError('UTXO_LIST_INVALID_RESPONSE');
   const raw = source.utxo;
   if (raw.length > requestedSize) throw new SpendableUtxoError('UTXO_PAGE_OVERSIZED');
