@@ -835,6 +835,16 @@ async function spendableUtxos(request, env, corsHeaders) {
     hasRunes: 0,
     hasAlkanes: 0,
   };
+  // Aggregate rejected value totals without returning rejected outpoints.
+  const rejectedSats = {
+    unconfirmedOrInvalidHeight: 0,
+    invalidFlags: 0,
+    hasInscriptionOrUnknown: 0,
+    detailMismatch: 0,
+    spentOrUnknown: 0,
+    hasRunes: 0,
+    hasAlkanes: 0,
+  };
   for (const item of raw.slice(0, 25)) {
     const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
     const vout = Number(item?.vout);
@@ -858,14 +868,17 @@ async function spendableUtxos(request, env, corsHeaders) {
     }
     if (!Number.isSafeInteger(height) || height <= 0) {
       rejected.unconfirmedOrInvalidHeight += 1;
+      rejectedSats.unconfirmedOrInvalidHeight += satoshi;
       continue;
     }
     if (typeof isLowFee !== 'boolean' || typeof isOpInRBF !== 'boolean') {
       rejected.invalidFlags += 1;
+      rejectedSats.invalidFlags += satoshi;
       continue;
     }
     if (!Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0) {
       rejected.hasInscriptionOrUnknown += 1;
+      rejectedSats.hasInscriptionOrUnknown += satoshi;
       continue;
     }
     const detail = await spendableUtxoStage('UTXO_DETAIL', () => uniNetwork(base, `/v1/indexer/utxo/${txid}/${vout}`, env));
@@ -875,14 +888,17 @@ async function spendableUtxos(request, env, corsHeaders) {
       String(detail?.scriptPk || '').toLowerCase() !== scriptPk
     ) {
       rejected.detailMismatch += 1;
+      rejectedSats.detailMismatch += satoshi;
       continue;
     }
     if (!Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0) {
       rejected.unconfirmedOrInvalidHeight += 1;
+      rejectedSats.unconfirmedOrInvalidHeight += satoshi;
       continue;
     }
     if (detail?.isSpent !== false) {
       rejected.spentOrUnknown += 1;
+      rejectedSats.spentOrUnknown += satoshi;
       continue;
     }
     if (typeof (detail?.isOpInRBF === undefined ? false : detail.isOpInRBF) !== 'boolean') {
@@ -891,12 +907,14 @@ async function spendableUtxos(request, env, corsHeaders) {
     }
     if (!Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0) {
       rejected.hasInscriptionOrUnknown += 1;
+      rejectedSats.hasInscriptionOrUnknown += satoshi;
       continue;
     }
     const runes = await spendableUtxoStage('RUNES_BALANCE', () => uniNetwork(base, `/v1/indexer/runes/utxo/${txid}/${vout}/balance`, env));
     if (!Array.isArray(runes)) throw new SpendableUtxoError('RUNES_INVALID_RESPONSE');
     if (runes.length !== 0) {
       rejected.hasRunes += 1;
+      rejectedSats.hasRunes += satoshi;
       continue;
     }
     if (chain === 'fractal') {
@@ -915,6 +933,7 @@ async function spendableUtxos(request, env, corsHeaders) {
       if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
       if (alkanes.length !== 0) {
         rejected.hasAlkanes += 1;
+        rejectedSats.hasAlkanes += satoshi;
         continue;
       }
     }
@@ -927,7 +946,7 @@ async function spendableUtxos(request, env, corsHeaders) {
   if (sourceTotal !== null && (!Number.isSafeInteger(sourceTotal) || sourceTotal < nextCursor)) throw new SpendableUtxoError('UTXO_LIST_INCONSISTENT_TOTAL');
   // If UniSat omits total, a full page means there may be another page. Only a short/empty page proves exhaustion.
   const total = sourceTotal ?? nextCursor + (raw.length === requestedSize ? 1 : 0);
-  return Response.json({ chain, address, cursor, nextCursor, total, scannedCount: raw.length, utxo: checked, diagnostics: rejected }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  return Response.json({ chain, address, cursor, nextCursor, total, scannedCount: raw.length, utxo: checked, diagnostics: rejected, diagnosticsSats: rejectedSats }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
 
 async function confirmSpendableUtxos(request, env, corsHeaders) {
