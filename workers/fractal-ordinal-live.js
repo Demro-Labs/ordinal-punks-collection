@@ -345,6 +345,27 @@ async function uniNetwork(base, path, env, init = {}) {
     headers.delete('Authorization');
   }
   const network = isBitcoinApi ? 'bitcoin' : isFractalApi ? 'fractal' : 'other';
+  // Cache only successful, read-only indexer lookups at the edge to conserve UniSat quotas.
+  // Never cache UTXO/spend-state, fee estimates, transaction data, or inscription-order routes:
+  // transaction inputs and signing flows must always use fresh upstream verification.
+  const method = (init.method || 'GET').toUpperCase();
+  const cacheableRead = method === 'GET' &&
+    !/\\/(?:all-utxo-data|available-utxo-data|utxo-data|utxo\\/|tx\\/|rawtx\\/|fees\\/)|\\/v[235]\\/inscribe\\//i.test(path);
+  const edgeCache = cacheableRead ? globalThis.caches?.default : null;
+  const cacheKey = edgeCache ? new Request(base + path, { method: 'GET' }) : null;
+  if (edgeCache && cacheKey) {
+    try {
+      const cached = await edgeCache.match(cacheKey);
+      if (cached) {
+        const cachedPayload = await cached.json();
+        if (cachedPayload?.code === 0 && Object.prototype.hasOwnProperty.call(cachedPayload, 'data')) {
+          return cachedPayload.data;
+        }
+      }
+    } catch {
+      // Cache is an optimization only; continue with the live provider on any cache failure.
+    }
+  }
   let response;
   try {
     response = await fetch(base + path, {
@@ -395,6 +416,16 @@ async function uniNetwork(base, path, env, init = {}) {
       code: typeof payload.code === 'number' || typeof payload.code === 'string' ? String(payload.code).slice(0, 32) : 'missing',
     });
     throw new Error('UniSat upstream rejected the request');
+  }
+  if (edgeCache && cacheKey) {
+    try {
+      await edgeCache.put(cacheKey, new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=180' },
+      }));
+    } catch {
+      // A cache write failure must never turn a successful provider response into a failed request.
+    }
   }
   return payload.data;
 }
