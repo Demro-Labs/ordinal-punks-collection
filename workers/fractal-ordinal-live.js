@@ -776,6 +776,35 @@ async function spendableUtxoStage(stage, operation) {
   }
 }
 
+async function alkanesBalanceOrAvailableUtxo(base, address, txid, vout, satoshi, scriptPk, env, stage) {
+  try {
+    const balance = await spendableUtxoStage(`${stage}_ALKANES_BALANCE`, () =>
+      uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env)
+    );
+    if (!Array.isArray(balance)) throw new SpendableUtxoError(`${stage}_ALKANES_INVALID_RESPONSE`);
+    return { balance, available: true };
+  } catch (error) {
+    // The published Fractal Swagger omits the per-outpoint Alkanes route.
+    // On HTTP 404 only, use the documented available-utxo-data filter, which excludes
+    // protocol-asset UTXOs. A candidate absent from that list is never marked fee-safe.
+    if (!(error instanceof SpendableUtxoError) || error.code !== `${stage}_ALKANES_BALANCE_UNISAT_HTTP_404`) throw error;
+    const source = await spendableUtxoStage(`${stage}_AVAILABLE_UTXO`, () =>
+      uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=0&size=500`, env)
+    );
+    if (!Array.isArray(source?.utxo) || source.utxo.length > 500) {
+      throw new SpendableUtxoError(`${stage}_AVAILABLE_UTXO_INVALID_RESPONSE`);
+    }
+    const available = source.utxo.some(item =>
+      String(item?.txid || '').toLowerCase() === txid &&
+      Number(item?.vout) === vout &&
+      item?.address === address &&
+      normalizeSatoshiValue(item) === satoshi &&
+      String(item?.scriptPk || '').toLowerCase() === scriptPk
+    );
+    return { balance: [], available };
+  }
+}
+
 
 async function addressUtxos(request, env, corsHeaders) {
   const url = new URL(request.url);
@@ -947,15 +976,8 @@ async function spendableUtxos(request, env, corsHeaders) {
       continue;
     }
     if (chain === 'fractal') {
-      let alkanes;
-      // This scan starts from all-utxo-data, which can include protocol-asset
-      // outputs. A missing per-outpoint Alkanes endpoint therefore cannot be
-      // treated as an empty balance: fail closed rather than label the UTXO safe.
-      alkanes = await spendableUtxoStage('ALKANES_BALANCE', () =>
-        uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env)
-      );
-      if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
-      if (alkanes.length !== 0) {
+      const alkanesCheck = await alkanesBalanceOrAvailableUtxo(base, address, txid, vout, satoshi, scriptPk, env, 'SCAN');
+      if (alkanesCheck.balance.length !== 0 || !alkanesCheck.available) {
         rejected.hasAlkanes += 1;
         rejectedSats.hasAlkanes += satoshi;
         continue;
@@ -1011,9 +1033,8 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     const runes = await spendableUtxoStage('UTXO_CONFIRM_RUNES', () => uniNetwork(API_BASE, `/v1/indexer/runes/utxo/${txid}/${vout}/balance`, env));
     if (!Array.isArray(runes)) throw new SpendableUtxoError('RUNES_INVALID_RESPONSE');
     if (runes.length !== 0) throw new SpendableUtxoError('UTXO_CONFIRM_HAS_ASSET', 409);
-    const alkanes = await spendableUtxoStage('UTXO_CONFIRM_ALKANES', () => uniNetwork(API_BASE, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env));
-    if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
-    if (alkanes.length !== 0) throw new SpendableUtxoError('UTXO_CONFIRM_HAS_ASSET', 409);
+    const alkanesCheck = await alkanesBalanceOrAvailableUtxo(API_BASE, address, txid, vout, satoshi, scriptPk, env, 'UTXO_CONFIRM');
+    if (alkanesCheck.balance.length !== 0 || !alkanesCheck.available) throw new SpendableUtxoError('UTXO_CONFIRM_HAS_ASSET', 409);
     safeSats += satoshi;
     if (!Number.isSafeInteger(safeSats)) throw new SpendableUtxoError('UTXO_CONFIRM_TOTAL_UNSAFE');
     verified.push({ address, txid, vout, satoshi, scriptPk, height: Number(detail.height), isLowFee: Boolean(detail.isLowFee), isOpInRBF: detail.isOpInRBF, inscriptionsRunesAlkanesChecked: true });
