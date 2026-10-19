@@ -1086,6 +1086,45 @@ test('desktop and mobile accept optional fee metadata omissions with the same Fr
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('reports safe-UTXO rejection reasons without exposing addresses or outpoints', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qdiagnosticstestaddress000000000000000';
+  const valid = { address, txid: 'a'.repeat(64), vout: 0, satoshi: 120000, scriptPk: '0014' + '66'.repeat(20), height: 100, inscriptions: [] };
+  const unconfirmed = { ...valid, txid: 'b'.repeat(64), height: 0 };
+  const inscription = { ...valid, txid: 'c'.repeat(64), inscriptions: [{ id: 'redacted-test-inscription' }] };
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      return Response.json({ code: 0, data: { total: 3, utxo: [valid, unconfirmed, inscription] } });
+    }
+    if (url.pathname === `/v1/indexer/utxo/${valid.txid}/0`) return Response.json({ code: 0, data: { ...valid, isSpent: false } });
+    if (url.pathname.endsWith(`/runes/utxo/${valid.txid}/0/balance`)) return Response.json({ code: 0, data: [] });
+    if (url.pathname.endsWith(`/alkanes/utxo/${valid.txid}/0/balance`)) return new Response('not found', { status: 404 });
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.244' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.utxo.length, 1);
+    assert.equal(data.diagnostics.unconfirmedOrInvalidHeight, 1);
+    assert.equal(data.diagnostics.hasInscriptionOrUnknown, 1);
+    assert.equal(data.diagnostics.hasRunes, 0);
+    assert.equal(data.diagnostics.hasAlkanes, 0);
+    const serialized = JSON.stringify(data);
+    const diagnosticJson = JSON.stringify(data.diagnostics);
+    assert.equal(serialized.includes(address), true); // the existing response includes the requested address
+    assert.equal(serialized.includes(valid.txid), true); // only the accepted safe UTXO is returned
+    assert.equal(serialized.includes(unconfirmed.txid), false);
+    assert.equal(serialized.includes(inscription.txid), false);
+    assert.equal(serialized.includes('redacted-test-inscription'), false);
+    assert.equal(diagnosticJson.includes(address), false);
+    assert.equal(diagnosticJson.includes(valid.txid), false);
+    assert.equal(serialized.includes('test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('Worker attests that the exact Fractal PSBT inputs cover payment plus fees', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';

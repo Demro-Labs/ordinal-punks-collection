@@ -122,6 +122,22 @@ export type WorkerSafeUtxoAttestation = {
 type WorkerSafeUtxoConfirmationResponse = Omit<WorkerSafeUtxoAttestation, "sufficient"> & { sufficient: boolean };
 const SPENDABLE_UTXO_PAGE_SIZE = 25;
 const MAX_SPENDABLE_UTXO_PAGES = 20;
+const UTXO_REJECTION_KEYS = [
+  "identityMismatch", "invalidValueOrScript", "unconfirmedOrInvalidHeight", "invalidFlags",
+  "hasInscriptionOrUnknown", "detailMismatch", "spentOrUnknown", "hasRunes", "hasAlkanes",
+] as const;
+type UtxoRejectionDiagnostics = Record<typeof UTXO_REJECTION_KEYS[number], number>;
+const UTXO_REJECTION_LABELS: Record<typeof UTXO_REJECTION_KEYS[number], string> = {
+  identityMismatch: "adresse/outpoint incohérent",
+  invalidValueOrScript: "valeur ou script invalide",
+  unconfirmedOrInvalidHeight: "sortie non confirmée/hauteur invalide",
+  invalidFlags: "métadonnées de sécurité invalides",
+  hasInscriptionOrUnknown: "inscription présente ou statut inconnu",
+  detailMismatch: "détail UTXO incohérent",
+  spentOrUnknown: "sortie dépensée ou état inconnu",
+  hasRunes: "Rune détectée",
+  hasAlkanes: "Alkane détecté",
+};
 
 /** Fetch confirmed, non-asset UTXOs; a low-fee/RBF history does not make a confirmed output replaceable. */
 export async function getSpendableUtxos(network: string, address: string, minimumSats: number, options: { mobile?: boolean; requiredOutpoints?: string[] } = {}): Promise<SpendableUtxo[]> {
@@ -138,12 +154,17 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   let cursor = 0;
   let scannedCount = 0;
   let sourceTotal: number | null = null;
+  const rejectionTotals: UtxoRejectionDiagnostics = {
+    identityMismatch: 0, invalidValueOrScript: 0, unconfirmedOrInvalidHeight: 0, invalidFlags: 0,
+    hasInscriptionOrUnknown: 0, detailMismatch: 0, spentOrUnknown: 0, hasRunes: 0, hasAlkanes: 0,
+  };
   for (let pageNumber = 0; pageNumber < MAX_SPENDABLE_UTXO_PAGES; pageNumber += 1) {
     const query = new URLSearchParams({ chain, address, cursor: String(cursor), size: String(SPENDABLE_UTXO_PAGE_SIZE) });
     if (options.mobile) query.set("mobile", "1");
     type SpendableUtxoPage = {
       chain?: string; address?: string; cursor?: number; nextCursor?: number; total?: number; scannedCount?: number;
       utxo?: Array<Record<string, unknown>>;
+      diagnostics?: Partial<UtxoRejectionDiagnostics>;
     };
     const page: SpendableUtxoPage = await requestJson<SpendableUtxoPage>(`${LIVE_DATA_API_BASE}/api/spendable-utxos?${query}`, 15_000);
     const pageScannedCount = page.scannedCount;
@@ -159,6 +180,20 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     }
     scannedCount += pageScannedCount!;
     sourceTotal = total!;
+    if (page.diagnostics !== undefined) {
+      let rejectedOnPage = 0;
+      for (const key of UTXO_REJECTION_KEYS) {
+        const value = page.diagnostics[key];
+        if (!Number.isSafeInteger(value) || (value as number) < 0) {
+          throw new Error("The Worker returned invalid safe-UTXO rejection diagnostics.");
+        }
+        rejectionTotals[key] += value as number;
+        rejectedOnPage += value as number;
+      }
+      if (rejectedOnPage + page.utxo.length > pageScannedCount!) {
+        throw new Error("The Worker returned inconsistent safe-UTXO rejection diagnostics.");
+      }
+    }
     const safe = page.utxo.filter((item): item is SpendableUtxo =>
       item.address === address && typeof item.txid === "string" && /^[a-f0-9]{64}$/i.test(item.txid) &&
       typeof item.vout === "number" && Number.isSafeInteger(item.vout) && item.vout >= 0 &&
@@ -187,7 +222,12 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   if (safeSats < minimumSats) {
     const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
     const zeroSafeBalanceHint = safeSats === 0 ? " No fee-safe UTXO was found. If this address only has its inscription output, fund the same network address with a separate confirmed BTC/FB output, then refresh; never spend the inscription output as fees." : "";
-    throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.${zeroSafeBalanceHint}`);
+    const rejectionSummary = UTXO_REJECTION_KEYS
+      .filter(key => rejectionTotals[key] > 0)
+      .map(key => `${UTXO_REJECTION_LABELS[key]}: ${rejectionTotals[key]}`)
+      .join("; ");
+    const diagnosticHint = rejectionSummary ? ` Motifs de rejet UniSat/Worker: ${rejectionSummary}.` : "";
+    throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.${diagnosticHint}${zeroSafeBalanceHint}`);
   }
   return collected;
 }
