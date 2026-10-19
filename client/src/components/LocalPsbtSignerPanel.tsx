@@ -13,6 +13,13 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
   const psbtFingerprint = psbt.trim() ? Buffer.from(bitcoin.crypto.sha256(Buffer.from(psbt.trim().toLowerCase(), "utf8"))).toString("hex") : "";
   const ownershipContextKey = psbtFingerprint ? JSON.stringify(["generic-psbt", site, network, addressType, wallet.addresses[addressType].address, psbtFingerprint]) : "";
 
+  const [review, setReview] = useState<LocalPsbtReview | null>(null);
+  const [signed, setSigned] = useState("");
+  const [tx, setTx] = useState<{ rawTxHex: string; txid: string } | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   useEffect(() => {
     setAddressType(initialAddressType);
     setReview(null);
@@ -23,13 +30,6 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
     setError("");
     setMessage("");
   }, [initialAddressType, network]);
-  const [review, setReview] = useState<LocalPsbtReview | null>(null);
-  const [signed, setSigned] = useState("");
-  const [tx, setTx] = useState<{ rawTxHex: string; txid: string } | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
 
   const inspect = async () => {
     setError("");
