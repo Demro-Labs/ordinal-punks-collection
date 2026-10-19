@@ -1109,7 +1109,7 @@ test('desktop and mobile fail closed when the Fractal Alkanes balance endpoint i
       const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25${query}`, { ip }), { UNISAT_API_KEY: 'test-only' });
       const data = await response.json();
       assert.equal(response.status, 503, mode);
-      assert.equal(data.code, 'UTXO_LIST_ALKANES_BALANCE_UNISAT_HTTP_404', mode);
+      assert.equal(data.code, 'ALKANES_BALANCE_UNISAT_HTTP_404', mode);
       assert.equal(Array.isArray(data.utxo), false, mode);
     }
     assert.deepEqual(upstreamMobileModes, [null, null]);
