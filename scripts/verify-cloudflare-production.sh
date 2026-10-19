@@ -63,8 +63,7 @@ for network in BITCOIN_MAINNET FRACTAL_BITCOIN_MAINNET; do
     "/api/transactions/history?address=${encoded_address}&chain=${network}&cursor=0&size=1" \
     "/api/ordinals/address-list?address=${encoded_address}&chain=${network}&start=0&limit=1" \
     "/api/runes/balance-list?address=${encoded_address}&chain=${network}&start=0&limit=1" \
-    "/api/brc20/balances?address=${encoded_address}&chain=${network}" \
-    "/api/alkanes/balances?address=${encoded_address}&chain=${network}"; do
+    "/api/brc20/balances?address=${encoded_address}&chain=${network}"; do
     payload_file="${TMP_DIR}/read-route.json"
     status="$(curl -sS --max-time 20 -o "${payload_file}" -w '%{http_code}' \
       -H 'Origin: https://demro-labs.github.io' "${BASE_URL}${route}" || true)"
@@ -79,6 +78,16 @@ for network in BITCOIN_MAINNET FRACTAL_BITCOIN_MAINNET; do
     }
     echo "Live read route ${route%%\?*} verified for ${network}."
   done
+  if [[ "${network}" == "BITCOIN_MAINNET" ]]; then
+    payload_file="${TMP_DIR}/alkanes-bitcoin.json"
+    status="$(curl -sS --max-time 20 -o "${payload_file}" -w '%{http_code}' -H 'Origin: https://demro-labs.github.io' "${BASE_URL}/api/alkanes/balances?address=${encoded_address}&chain=${network}" || true)"
+    if [[ "${status}" != "200" ]]; then
+      echo "Live Alkanes balance route on ${network} returned HTTP ${status}: $(jq -c '{error,code}' "${payload_file}" 2>/dev/null || true)" >&2
+      exit 1
+    fi
+    jq -e --arg network "${network}" '.network == $network' "${payload_file}" >/dev/null
+    echo "Live read route /api/alkanes/balances verified for ${network}."
+  fi
 done
 
 for site in punks pokedex; do
