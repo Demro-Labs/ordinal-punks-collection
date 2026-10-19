@@ -140,7 +140,7 @@ function normalizeSatoshiValue(item) {
   // the same integer as "value". Accept only exact integer sats, never BTC decimals.
   const raw = item?.satoshi !== undefined && item?.satoshi !== null ? item.satoshi : item?.value;
   if (typeof raw === 'number') return Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
-  if (typeof raw === 'string' && /^\\d+$/.test(raw)) {
+  if (typeof raw === 'string' && /^\d+$/.test(raw)) {
     const value = Number(raw);
     return Number.isSafeInteger(value) && value >= 0 ? value : null;
   }
@@ -670,6 +670,53 @@ async function spendableUtxoStage(stage, operation) {
   } catch (error) {
     if (error instanceof SpendableUtxoError) throw error;
     throw new SpendableUtxoError(`${stage}_${safeUniSatFailureCode(error)}`);
+  }
+}
+
+
+async function addressUtxos(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  const chain = url.searchParams.get('chain') || '';
+  const address = url.searchParams.get('address') || '';
+  const cursor = parseBoundedInteger(url.searchParams.get('cursor'), 0, 1000000);
+  const size = parseBoundedInteger(url.searchParams.get('size'), 25, 25);
+  if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || size === null || size < 1) {
+    return Response.json({ error: 'Invalid active UTXO query.', code: 'INVALID_QUERY' }, { status: 400, headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  }
+  const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
+  try {
+    // all-utxo-data includes address UTXOs that are intentionally absent from available-utxo-data,
+    // such as inscription-bearing outputs. This endpoint is display-only, never spend authorization.
+    const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=${cursor}&size=${size}`, env, { signal: AbortSignal.timeout(10000) });
+    const raw = Array.isArray(source?.utxo) ? source.utxo : null;
+    if (!raw || raw.length > size) throw new Error('Invalid UniSat UTXO response');
+    const utxo = raw.map(item => {
+      const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
+      const vout = Number(item?.vout);
+      const satoshi = normalizeSatoshiValue(item);
+      const rawHeight = item?.height;
+      const height = rawHeight === null || rawHeight === undefined ? null : Number(rawHeight);
+      const scriptPk = typeof item?.scriptPk === 'string' && /^(?:[a-f0-9]{2})+$/i.test(item.scriptPk) ? item.scriptPk.toLowerCase() : null;
+      const inscriptions = Array.isArray(item?.inscriptions)
+        ? item.inscriptions.filter(value => typeof value === 'string' || (value && typeof value === 'object')).map(value => typeof value === 'string' ? value : (typeof value.inscriptionId === 'string' ? value.inscriptionId : 'unknown'))
+        : null;
+      const isSpent = typeof item?.isSpent === 'boolean' ? item.isSpent : null;
+      if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !Number.isSafeInteger(satoshi) || satoshi < 0 ||
+          (height !== null && (!Number.isSafeInteger(height) || height < 0))) return null;
+      return { txid, vout, satoshi, height, scriptPk, inscriptions, isSpent };
+    });
+    if (utxo.some(item => item === null)) throw new Error('Invalid UniSat UTXO item');
+    const sourceCursor = source?.cursor === undefined ? cursor : Number(source.cursor);
+    const sourceTotal = source?.total === undefined ? null : Number(source.total);
+    if (!Number.isSafeInteger(sourceCursor) || sourceCursor !== cursor ||
+        (sourceTotal !== null && (!Number.isSafeInteger(sourceTotal) || sourceTotal < cursor + raw.length))) throw new Error('Inconsistent UniSat UTXO pagination');
+    const nextCursor = cursor + raw.length;
+    const total = sourceTotal ?? nextCursor + (raw.length === size ? 1 : 0);
+    return Response.json({ chain, address, cursor, nextCursor, total, scannedCount: raw.length, utxo, refreshedAt: new Date().toISOString() }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    const code = safeUniSatFailureCode(error);
+    console.warn('Active UTXO lookup failed', { chain, code });
+    return Response.json({ error: 'Les UTXO actifs UniSat sont temporairement indisponibles.', code: `ACTIVE_UTXO_${code}` }, { status: 503, headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
   }
 }
 
@@ -1596,6 +1643,10 @@ export default {
         console.warn('Rune balance lookup failed');
         return Response.json({ error: 'Le solde Rune est temporairement indisponible.' }, { status: 503, headers: noStore });
       }
+    }
+    if (request.method === 'GET' && url.pathname === '/api/address-utxos') {
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
+      return addressUtxos(request, env, headers);
     }
     if (request.method === 'GET' && url.pathname === '/api/spendable-utxos') {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
