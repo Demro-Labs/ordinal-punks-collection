@@ -471,6 +471,26 @@ function normalizeAlkaneInfo(value) {
   };
 }
 
+function normalizeRuneUtxo(value, address, runeid, runeBalances) {
+  const txid = typeof value?.txid === 'string' ? value.txid.toLowerCase() : '';
+  const vout = Number(value?.vout);
+  const satoshi = Number(value?.satoshi);
+  const confirmations = Number(value?.confirmations);
+  if (
+    value?.address !== address || !/^[a-f0-9]{64}$/.test(txid) ||
+    !Number.isSafeInteger(vout) || vout < 0 ||
+    !Number.isSafeInteger(satoshi) || satoshi < 1 ||
+    !Number.isSafeInteger(confirmations) || confirmations < 1 ||
+    !Array.isArray(runeBalances) || runeBalances.length > 100
+  ) return null;
+  const runes = runeBalances.map(item => {
+    if (!item || !validRuneId(item.runeid) || typeof item.amount !== 'string' || !/^\d{1,80}$/.test(item.amount) || BigInt(item.amount) <= 0n) return null;
+    return { runeid: item.runeid, amount: item.amount };
+  });
+  if (runes.some(item => item === null) || !runes.some(item => item.runeid === runeid)) return null;
+  return { txid, vout, satoshi, confirmations, runes };
+}
+
 function normalizeAlkaneUtxo(value, address, alkaneid) {
   const txid = typeof value?.txid === 'string' ? value.txid.toLowerCase() : '';
   const vout = Number(value?.vout);
@@ -520,6 +540,22 @@ async function walletProtocolAssets(request, env, headers) {
       const detail = source.detail.map(normalizeAlkaneInfo);
       if (detail.some(item => item === null || (suffix === 'token-list' ? item.type !== 'token' : item.type !== 'collection'))) throw new Error('Invalid UniSat Alkane metadata item');
       return Response.json({ network: chain, address, start, total: Number(source.total), detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
+    }
+    if (path === '/api/runes/utxo-list') {
+      const runeid = url.searchParams.get('runeid') || '';
+      if (!validRuneId(runeid)) return Response.json({ error: 'Identifiant Rune invalide.' }, { status: 400, headers: noStore });
+      const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/runes/${encodeURIComponent(runeid)}/utxo?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
+      if (Number(source?.start) !== start || !Number.isSafeInteger(Number(source?.total)) || Number(source.total) < 0 || !Array.isArray(source?.utxo) || source.utxo.length > limit) throw new Error('Invalid UniSat Rune UTXO response');
+      const utxo = await Promise.all(source.utxo.map(async item => {
+        const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
+        const vout = Number(item?.vout);
+        if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0) throw new Error('Invalid Rune outpoint');
+        const balances = await uniNetwork(base, `/v1/indexer/runes/utxo/${txid}/${vout}/balance`, env, { signal: AbortSignal.timeout(8000) });
+        if (!Array.isArray(balances)) throw new Error('Incomplete per-outpoint Rune balance');
+        return normalizeRuneUtxo(item, address, runeid, balances);
+      }));
+      if (utxo.some(item => item === null)) throw new Error('Invalid or incomplete UniSat Rune UTXO item');
+      return Response.json({ network: chain, address, runeid, start, total: Number(source.total), utxo, refreshedAt: new Date().toISOString() }, { headers: noStore });
     }
     if (path === '/api/alkanes/utxo-list') {
       const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/alkanes/${encodeURIComponent(alkaneid)}/utxo?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
@@ -1206,7 +1242,7 @@ export default {
         return Response.json({ error: `Les soldes ${isBrc20 ? 'BRC-20' : 'Alkanes'} sont temporairement indisponibles.` }, { status: 503, headers: noStore });
       }
     }
-    if (request.method === 'GET' && ['/api/brc20/balance-list', '/api/alkanes/token-list', '/api/alkanes/collection-list', '/api/alkanes/utxo-list'].includes(url.pathname)) {
+    if (request.method === 'GET' && ['/api/brc20/balance-list', '/api/alkanes/token-list', '/api/alkanes/collection-list', '/api/alkanes/utxo-list', '/api/runes/utxo-list'].includes(url.pathname)) {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
       return walletProtocolAssets(request, env, headers);
     }

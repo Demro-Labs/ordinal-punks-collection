@@ -542,6 +542,9 @@ test('returns one current Fractal Rune balance and rejects invalid Rune queries 
     const invalid = await worker.fetch(makeRequest(`/api/runes/balance?address=${address}&runeid=bad`, { ip: '192.0.2.77' }), { UNISAT_API_KEY: 'test-only' });
     assert.equal(invalid.status, 400);
     assert.equal(upstreamCalls, 0);
+    const invalidRune = await worker.fetch(makeRequest(`/api/runes/utxo-list?chain=FRACTAL_BITCOIN_MAINNET&address=${address}&runeid=bad`, { ip: '192.0.2.66' }), { UNISAT_API_KEY: 'fractal-test-only' });
+    assert.equal(invalidRune.status, 400);
+    assert.equal(upstreamCalls, 0);
     const response = await worker.fetch(makeRequest(`/api/runes/balance?address=${address}&runeid=840000%3A3`, { ip: '192.0.2.76' }), { UNISAT_API_KEY: 'test-only' });
     const data = await response.json();
     assert.equal(response.status, 200);
@@ -617,6 +620,12 @@ test('routes BRC-20 and Alkanes wallet inventory through the selected network se
     if (url.pathname.endsWith('/alkanes/2%3A1/utxo')) {
       return Response.json({ code: 0, data: { start: 0, total: 1, utxo: [{ address, txid: 'a'.repeat(64), vout: 0, satoshi: 546, confirmations: 3, alkanes: [{ alkaneid: '2:1', amount: '1500', type: 'token' }] }] } });
     }
+    if (url.pathname.endsWith('/runes/1%3A1/utxo')) {
+      return Response.json({ code: 0, data: { start: 0, total: 1, utxo: [{ address, txid: 'b'.repeat(64), vout: 1, satoshi: 1200, confirmations: 4, runes: [{ runeid: '1:1', amount: '250' }] }] } });
+    }
+    if (url.pathname.includes('/runes/utxo/') && url.pathname.endsWith('/1/balance')) {
+      return Response.json({ code: 0, data: [{ runeid: '1:1', amount: '250' }] });
+    }
     throw new Error(`Unexpected wallet protocol URL: ${url}`);
   };
   try {
@@ -646,8 +655,13 @@ test('routes BRC-20 and Alkanes wallet inventory through the selected network se
     assert.equal(utxoResponse.status, 200);
     assert.equal(utxos.utxo[0].amount, '1500');
     assert.equal(utxos.utxo[0].confirmations, 3);
-    assert.deepEqual(authHeaders, ['Bearer bitcoin-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only']);
-    for (const result of [brc20, tokens, collections, utxos]) {
+    const runeResponse = await worker.fetch(makeRequest(`/api/runes/utxo-list?chain=FRACTAL_BITCOIN_MAINNET&address=${address}&runeid=1%3A1`, { ip: '192.0.2.65' }), { UNISAT_API_KEY: 'fractal-test-only' });
+    const runeUtxos = await runeResponse.json();
+    assert.equal(runeResponse.status, 200);
+    assert.equal(runeUtxos.runeid, '1:1');
+    assert.deepEqual(runeUtxos.utxo[0].runes, [{ runeid: '1:1', amount: '250' }]);
+    assert.deepEqual(authHeaders, ['Bearer bitcoin-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only']);
+    for (const result of [brc20, tokens, collections, utxos, runeUtxos]) {
       assert.equal(JSON.stringify(result).includes('test-only'), false);
     }
   } finally { globalThis.fetch = previousFetch; }
