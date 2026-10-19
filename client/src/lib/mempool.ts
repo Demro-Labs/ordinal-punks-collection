@@ -129,7 +129,8 @@ const UTXO_REJECTION_KEYS = [
 type UtxoRejectionDiagnostics = Record<typeof UTXO_REJECTION_KEYS[number], number>;
 const UTXO_REJECTION_LABELS: Record<typeof UTXO_REJECTION_KEYS[number], string> = {
   identityMismatch: "adresse/outpoint incohérent",
-  invalidValueOrScript: "valeur ou script invalide",
+  invalidValue: "valeur inférieure à 600 sats ou invalide",
+  invalidScript: "script de sortie absent ou hexadécimal invalide",
   unconfirmedOrInvalidHeight: "sortie non confirmée/hauteur invalide",
   invalidFlags: "métadonnées de sécurité invalides",
   hasInscriptionOrUnknown: "inscription présente ou statut inconnu",
