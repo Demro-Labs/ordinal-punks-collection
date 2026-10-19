@@ -13,6 +13,23 @@ export type RuneBalance = {
 
 export type FractalRuneBalance = RuneBalance;
 
+export type RuneUtxo = {
+  txid: string;
+  vout: number;
+  satoshi: number;
+  confirmations: number;
+  runes: Array<{ runeid: string; amount: string }>;
+};
+export type RuneUtxoPage = {
+  network: RuneNetwork;
+  address: string;
+  runeid: string;
+  start: number;
+  total: number;
+  utxo: RuneUtxo[];
+  refreshedAt: string;
+};
+
 export type RuneBalancePage = {
   network: RuneNetwork;
   address: string;
@@ -225,4 +242,42 @@ export function parseRuneAmountToBaseUnits(
     (fraction ? BigInt(fraction.padEnd(divisibility, "0")) : BigInt(0));
   if (raw <= BigInt(0) || raw > BigInt(balance)) return null;
   return raw.toString();
+}
+
+
+/** Fetch the exact Rune-bearing UTXOs from the read-only Worker indexer; this never calls a wallet provider. */
+export async function fetchRuneUtxoPage(
+  address: string,
+  network: RuneNetwork,
+  runeid: string,
+  start = 0,
+  limit = 25,
+): Promise<RuneUtxoPage> {
+  if (
+    !["BITCOIN_MAINNET", "FRACTAL_BITCOIN_MAINNET"].includes(network) ||
+    !/^[A-Za-z0-9]{14,100}$/.test(address) ||
+    !/^\d{1,20}:\d{1,20}$/.test(runeid) ||
+    !Number.isSafeInteger(start) || start < 0 || start > 10_000 ||
+    !Number.isSafeInteger(limit) || limit < 1 || limit > 25
+  ) throw new Error("Invalid Rune UTXO query.");
+  const query = new URLSearchParams({ address, chain: network, runeid, start: String(start), limit: String(limit) });
+  const result = await requestJson<Partial<RuneUtxoPage>>(`${LIVE_DATA_API_BASE}/api/runes/utxo-list?${query}`);
+  if (
+    result.network !== network || result.address !== address || result.runeid !== runeid ||
+    result.start !== start || !Number.isSafeInteger(result.total) || (result.total ?? -1) < 0 ||
+    !Array.isArray(result.utxo) || result.utxo.length > limit || typeof result.refreshedAt !== "string"
+  ) throw new Error("The Worker returned an invalid Rune UTXO page.");
+  const utxo = result.utxo.map(item => {
+    if (!item || !/^[a-f0-9]{64}$/.test(item.txid) ||
+      !Number.isSafeInteger(item.vout) || item.vout < 0 ||
+      !Number.isSafeInteger(item.satoshi) || item.satoshi < 1 ||
+      !Number.isSafeInteger(item.confirmations) || item.confirmations < 1 ||
+      !Array.isArray(item.runes) || item.runes.length < 1 || item.runes.length > 100 ||
+      item.runes.some(rune => !rune || !/^\d{1,20}:\d{1,20}$/.test(rune.runeid) || !/^\d{1,80}$/.test(rune.amount) || BigInt(rune.amount) <= 0n)
+    ) return null;
+    if (!item.runes.some(rune => rune.runeid === runeid)) return null;
+    return { txid: item.txid, vout: item.vout, satoshi: item.satoshi, confirmations: item.confirmations, runes: item.runes.map(rune => ({ runeid: rune.runeid, amount: rune.amount })) };
+  });
+  if (utxo.some(item => item === null)) throw new Error("The Worker returned an unsafe or incomplete Rune UTXO.");
+  return { network, address, runeid, start, total: result.total!, utxo: utxo as RuneUtxo[], refreshedAt: result.refreshedAt };
 }
