@@ -9,7 +9,7 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
   wallet: OrdiWalletRecord;
   network: OrdiNetwork;
   selectedAddressType: AddressType;
-  onSelectAddressType: (type: AddressType) => void;
+  onSelectAddressType?: (type: AddressType) => void;
 }) {
   const [rows, setRows] = useState<ScanRow[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -69,7 +69,7 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
           <p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#718092]">{row.address || "Adresse absente"}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {row.address && <button type="button" onClick={() => void copyAddress(row.address)} className="inline-flex min-h-9 items-center gap-1 border border-[#3b434d] px-2 font-mono text-[9px] text-[#9ea7b3]">{copied === row.address ? <Check size={12} /> : <Copy size={12} />} Copier l’adresse</button>}
-            {!row.error && <button type="button" onClick={() => onSelectAddressType(row.type)} disabled={selectedAddressType === row.type} className="min-h-9 border border-[#d99a54]/70 px-2 font-mono text-[9px] text-[#f2bd63] disabled:opacity-40">{selectedAddressType === row.type ? "Adresse sélectionnée" : "Utiliser cette adresse"}</button>}
+            {!row.error && onSelectAddressType && <button type="button" onClick={() => onSelectAddressType(row.type)} disabled={selectedAddressType === row.type} className="min-h-9 border border-[#d99a54]/70 px-2 font-mono text-[9px] text-[#f2bd63] disabled:opacity-40">{selectedAddressType === row.type ? "Adresse sélectionnée" : "Utiliser cette adresse"}</button>}
           </div>
           {row.error && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">{row.error}</p>}
         </div>;
