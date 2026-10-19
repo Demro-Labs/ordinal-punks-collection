@@ -678,7 +678,8 @@ async function spendableUtxos(request, env, corsHeaders) {
   // correctly rejected asset-bearing outputs. Never include addresses or outpoints here.
   const rejected = {
     identityMismatch: 0,
-    invalidValueOrScript: 0,
+    invalidValue: 0,
+    invalidScript: 0,
     unconfirmedOrInvalidHeight: 0,
     invalidFlags: 0,
     hasInscriptionOrUnknown: 0,
@@ -700,8 +701,12 @@ async function spendableUtxos(request, env, corsHeaders) {
       rejected.identityMismatch += 1;
       continue;
     }
-    if (!Number.isSafeInteger(satoshi) || satoshi < 600 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk)) {
-      rejected.invalidValueOrScript += 1;
+    if (!Number.isSafeInteger(satoshi) || satoshi < 600) {
+      rejected.invalidValue += 1;
+      continue;
+    }
+    if (!/^(?:[a-f0-9]{2})+$/.test(scriptPk)) {
+      rejected.invalidScript += 1;
       continue;
     }
     if (!Number.isSafeInteger(height) || height <= 0) {

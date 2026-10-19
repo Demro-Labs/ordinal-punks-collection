@@ -123,13 +123,14 @@ type WorkerSafeUtxoConfirmationResponse = Omit<WorkerSafeUtxoAttestation, "suffi
 const SPENDABLE_UTXO_PAGE_SIZE = 25;
 const MAX_SPENDABLE_UTXO_PAGES = 20;
 const UTXO_REJECTION_KEYS = [
-  "identityMismatch", "invalidValueOrScript", "unconfirmedOrInvalidHeight", "invalidFlags",
+  "identityMismatch", "invalidValue", "invalidScript", "unconfirmedOrInvalidHeight", "invalidFlags",
   "hasInscriptionOrUnknown", "detailMismatch", "spentOrUnknown", "hasRunes", "hasAlkanes",
 ] as const;
 type UtxoRejectionDiagnostics = Record<typeof UTXO_REJECTION_KEYS[number], number>;
 const UTXO_REJECTION_LABELS: Record<typeof UTXO_REJECTION_KEYS[number], string> = {
   identityMismatch: "adresse/outpoint incohérent",
-  invalidValueOrScript: "valeur ou script invalide",
+  invalidValue: "valeur inférieure à 600 sats ou invalide",
+  invalidScript: "script de sortie absent ou hexadécimal invalide",
   unconfirmedOrInvalidHeight: "sortie non confirmée/hauteur invalide",
   invalidFlags: "métadonnées de sécurité invalides",
   hasInscriptionOrUnknown: "inscription présente ou statut inconnu",
@@ -155,7 +156,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   let scannedCount = 0;
   let sourceTotal: number | null = null;
   const rejectionTotals: UtxoRejectionDiagnostics = {
-    identityMismatch: 0, invalidValueOrScript: 0, unconfirmedOrInvalidHeight: 0, invalidFlags: 0,
+    identityMismatch: 0, invalidValue: 0, invalidScript: 0, unconfirmedOrInvalidHeight: 0, invalidFlags: 0,
     hasInscriptionOrUnknown: 0, detailMismatch: 0, spentOrUnknown: 0, hasRunes: 0, hasAlkanes: 0,
   };
   for (let pageNumber = 0; pageNumber < MAX_SPENDABLE_UTXO_PAGES; pageNumber += 1) {
