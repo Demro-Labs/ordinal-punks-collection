@@ -52,8 +52,11 @@ for collection in opunk pokedex; do
   echo "Market API verified for ${collection}."
 done
 
-# Exercise the UniSat-backed read routes that previously failed across both sites.
+# Exercise the UniSat-backed read routes that are meaningful for a freshly generated address.
 # A fresh address avoids wallet-specific assumptions and these GETs cannot sign or broadcast.
+# Do not probe BRC-20 transferable inscriptions here: this address has no token history,
+# and Fractal BRC-20 requires 6–12 character tickers (unlike Bitcoin, where ORDI is valid).
+# The successful transferable route and documented /info fallback are covered by Worker unit tests.
 for network in BITCOIN_MAINNET FRACTAL_BITCOIN_MAINNET; do
   encoded_address="${test_address}"
   for route in \
@@ -61,7 +64,6 @@ for network in BITCOIN_MAINNET FRACTAL_BITCOIN_MAINNET; do
     "/api/ordinals/address-list?address=${encoded_address}&chain=${network}&start=0&limit=1" \
     "/api/runes/balance-list?address=${encoded_address}&chain=${network}&start=0&limit=1" \
     "/api/brc20/balances?address=${encoded_address}&chain=${network}" \
-    "/api/brc20/transferable?address=${encoded_address}&ticker=ordi&chain=${network}" \
     "/api/alkanes/balances?address=${encoded_address}&chain=${network}"; do
     payload_file="${TMP_DIR}/read-route.json"
     status="$(curl -sS --max-time 20 -o "${payload_file}" -w '%{http_code}' \
