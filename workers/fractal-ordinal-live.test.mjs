@@ -1265,6 +1265,53 @@ for (const config of [
   });
 }
 
+test('retries Fractal inscription orders with the same-network fallback key after a non-quota 403', async () => {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    const auth = new Headers(init.headers).get('Authorization');
+    if (url.pathname.endsWith('/v1/indexer/fees/recommended')) return Response.json({ code: 0, data: { halfHourFee: 6 } });
+    if (url.origin === 'https://mempool.fractalbitcoin.io') return Response.json({ halfHourFee: 5 });
+    if (!url.pathname.startsWith('/v5/inscribe/')) throw new Error(`Unexpected upstream URL: ${url}`);
+    calls.push({ path: url.pathname, auth });
+    if (auth === 'Bearer fractal-primary-test-only') {
+      return Response.json({ code: 1001, msg: 'key access denied' }, { status: 403 });
+    }
+    assert.equal(auth, 'Bearer fractal-fallback-test-only');
+    if (url.pathname === '/v5/inscribe/order/estimate-fee') return Response.json({ code: 0, data: { payableAmount: 25000 } });
+    if (url.pathname === '/v5/inscribe/order/create') return Response.json({ code: 0, data: { orderId: 'fallback-order-test', status: 'pending', payAddress: 'bc1qtestaddress0000000000000000000000000', amount: 25000 } });
+    throw new Error(`Unexpected V5 inscription route: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest('/api/inscribe/order', {
+      method: 'POST',
+      ip: '192.0.2.198',
+      body: JSON.stringify({
+        chain: 'FRACTAL_BITCOIN_MAINNET',
+        protocol: { type: 'brc20', operation: 'deploy', ticker: 'test', max: '21000000', limit: '1000', decimals: 18 },
+        receiver: 'bc1qtestaddress0000000000000000000000000',
+        refundAddress: 'bc1qtestaddress0000000000000000000000000',
+        userAddress: 'bc1qtestaddress0000000000000000000000000',
+        userPubkey: '02' + 'a'.repeat(64),
+        feeRate: 5,
+        outputValue: 546,
+      }),
+    }), {
+      UNISAT_API_KEY: 'fractal-primary-test-only',
+      UNISAT_API_KEY_FALLBACK: 'fractal-fallback-test-only',
+    });
+    const data = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(data));
+    assert.equal(data.orderId, 'fallback-order-test');
+    assert.deepEqual(calls.map(call => call.auth), [
+      'Bearer fractal-primary-test-only', 'Bearer fractal-fallback-test-only',
+      'Bearer fractal-primary-test-only', 'Bearer fractal-fallback-test-only',
+    ]);
+    assert.equal(JSON.stringify(data).includes('test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('identifies UniSat quota exhaustion returned as HTTP 403 code -2005', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
