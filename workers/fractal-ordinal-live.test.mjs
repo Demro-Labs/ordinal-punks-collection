@@ -759,6 +759,35 @@ test('rejects unlisted browser origins', async () => {
   assert.equal(response.headers.get('access-control-allow-origin'), null);
 });
 
+test.each([
+  ['Chrome/Edge', 'chrome-extension://abcdefghijklmnopabcdefghijklmnop'],
+  ['Firefox', 'moz-extension://12345678-1234-1234-1234-123456789abc'],
+])('allows Local Vault %s origins for transaction preflight and protected routes', async (_browser, origin) => {
+  const preflight = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'OPTIONS', origin }), {});
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-origin'), origin);
+
+  const confirmation = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', {
+    method: 'POST',
+    origin,
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  }), {});
+  assert.notEqual(confirmation.status, 403, 'extension origin must pass the origin gate');
+});
+
+test('continues rejecting malformed extension origins and unlisted web origins', async () => {
+  for (const origin of [
+    'chrome-extension://not-a-valid-extension-id',
+    'moz-extension://not-a-uuid',
+    'https://attacker.example',
+  ]) {
+    const response = await worker.fetch(makeRequest('/api/market?collectionId=opunk', { origin }), {});
+    assert.equal(response.status, 403, origin);
+    assert.equal(response.headers.get('access-control-allow-origin'), null, origin);
+  }
+});
+
 test('supports CORS preflight only for an allowed origin', async () => {
   const response = await worker.fetch(makeRequest('/api/market', { method: 'OPTIONS' }), {});
   assert.equal(response.status, 204);
