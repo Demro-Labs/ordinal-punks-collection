@@ -25,7 +25,7 @@ function compare(a: string, b: string) {
 }
 function dataUrl(value: string) { return "data:application/json;base64," + btoa(value); }
 
-export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, site, onCreated }: { wallet: OrdiWalletRecord; network: OrdiNetwork; addressType: AddressType; site: Site; onCreated: (id: string, recipient: string) => void }) {
+export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, site, onCreated, completedInscriptionId }: { wallet: OrdiWalletRecord; network: OrdiNetwork; addressType: AddressType; site: Site; onCreated: (id: string, recipient: string) => void; completedInscriptionId: string }) {
   const account = wallet.addresses[addressType], address = account.address;
   const [balances, setBalances] = useState<Brc20Balance[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,6 +68,12 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
       setMessage(saved.paymentStarted ? "Ordre restauré. Ne payez pas une seconde fois; vérifiez d’abord son état." : "Ordre non payé restauré.");
     } catch { /* Ignore malformed local progress. */ }
   }, [site, network, address, addressType, ticker]);
+  useEffect(() => {
+    if (!completedInscriptionId || !order || order.inscriptionId !== completedInscriptionId) return;
+    try { localStorage.removeItem(keyFor(order.site, order.network, order.address, order.ticker)); } catch { /* Storage is optional. */ }
+    setOrder(null); setPlan(null); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setAmount(""); setRecipient(""); setProofKey(null);
+    setMessage("Le transfert de l’inscription a été diffusé. Actualisez les soldes avant de préparer le transfert suivant.");
+  }, [completedInscriptionId, order]);
   function saveOrder(next: Order) {
     setOrder(next);
     try { localStorage.setItem(keyFor(next.site, next.network, next.address, next.ticker), JSON.stringify(next)); } catch { /* In-memory flow remains available. */ }
