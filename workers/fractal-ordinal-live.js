@@ -751,6 +751,17 @@ async function addressUtxos(request, env, corsHeaders) {
   }
 }
 
+function minimumSpendableSatsForScript(scriptPk) {
+  const script = typeof scriptPk === 'string' ? scriptPk.toLowerCase() : '';
+  // Bitcoin Core-style dust floors for standard output templates. The transaction
+  // builder still estimates the real fee and verifies aggregate input sufficiency.
+  if (/^0014[a-f0-9]{40}$/.test(script)) return 294; // P2WPKH
+  if (/^(?:0020[a-f0-9]{64}|5120[a-f0-9]{64})$/.test(script)) return 330; // P2WSH / P2TR
+  if (/^a914[a-f0-9]{40}87$/.test(script)) return 540; // P2SH
+  if (/^76a914[a-f0-9]{40}88$/.test(script)) return 546; // P2PKH
+  return 600; // Unknown/non-standard script: keep the conservative floor.
+}
+
 async function spendableUtxos(request, env, corsHeaders) {
   const url = new URL(request.url);
   const chain = url.searchParams.get('chain') || '';
@@ -794,12 +805,12 @@ async function spendableUtxos(request, env, corsHeaders) {
       rejected.identityMismatch += 1;
       continue;
     }
-    if (!Number.isSafeInteger(satoshi) || satoshi < 600) {
-      rejected.invalidValue += 1;
-      continue;
-    }
     if (!/^(?:[a-f0-9]{2})+$/.test(scriptPk)) {
       rejected.invalidScript += 1;
+      continue;
+    }
+    if (!Number.isSafeInteger(satoshi) || satoshi < minimumSpendableSatsForScript(scriptPk)) {
+      rejected.invalidValue += 1;
       continue;
     }
     if (!Number.isSafeInteger(height) || height <= 0) {
@@ -898,7 +909,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     const satoshi = normalizeSatoshiValue(candidate);
     const scriptPk = typeof candidate?.scriptPk === 'string' ? candidate.scriptPk.toLowerCase() : '';
     const key = `${txid}:${vout}`;
-    if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !Number.isSafeInteger(satoshi) || satoshi < 600 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) || seen.has(key)) {
+    if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) || !Number.isSafeInteger(satoshi) || satoshi < minimumSpendableSatsForScript(scriptPk) || seen.has(key)) {
       throw new SpendableUtxoError('UTXO_CONFIRM_INVALID_CANDIDATE', 400);
     }
     seen.add(key);
