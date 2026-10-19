@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, RefreshCw, Send, ShieldCheck } from "lucide-react";
-import { UniSatRunesSendPanel } from "@/components/UniSatRunesSendPanel";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
 import { fetchAddressOrdinals, type AddressOrdinal, type OrdinalNetwork } from "@/lib/ordinals";
 import { broadcastLocalOrdinalTransfer, prepareLocalOrdinalTransfer, signLocalOrdinalTransfer, type LocalOrdinalPlan } from "@/lib/local-ordinal-transfer";
@@ -14,14 +13,12 @@ export function LocalVaultAssetPanel({
   site,
   wallet,
   addressType,
-  onTransferRequest,
 }: {
   address: string;
   network: OrdinalNetwork;
   site: SiteName;
   wallet: OrdiWalletRecord;
   addressType: AddressType;
-  onTransferRequest: () => void;
 }) {
   const [items, setItems] = useState<AddressOrdinal[]>([]);
   const [loading, setLoading] = useState(false);
@@ -94,10 +91,10 @@ export function LocalVaultAssetPanel({
       <div><p className="font-mono text-[9px] uppercase tracking-[.18em] text-[#9fe0bd]">Local Vault asset bridge</p><h2 id="local-vault-assets-title" className="mt-1 font-display text-xl text-[#f3efe5]">Live Ordinals &amp; Runes</h2><p className="mt-1 font-mono text-[10px] leading-5 text-[#9ea7b3]">{network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin"} · address-scoped · refresh every 60s</p></div>
       <div className="flex gap-2"><button type="button" onClick={() => void load()} disabled={loading || busy} className="inline-flex min-h-10 items-center gap-1 border border-[#3b434d] px-3 font-mono text-[9px] uppercase text-[#9fe0bd] disabled:opacity-40"><RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh</button><a href={explorer} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-1 border border-[#3b434d] px-3 font-mono text-[9px] uppercase text-[#d9d3c6]">UniSat <ExternalLink size={12} /></a></div>
     </div>
-    {error && <div className="mt-3 break-words border border-[#a45e54]/50 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#e6a69b]" role="alert"><p>{error}</p><p className="mt-2 text-[#d9d3c6]">Index live indisponible. La signature locale est bloquée jusqu’au rétablissement des données complètes.</p><button type="button" onClick={onTransferRequest} className="mt-2 min-h-10 border border-[#d99a54] px-3 font-mono text-[9px] uppercase text-[#f2bd63]">Open UniSat tools</button></div>}
+    {error && <div className="mt-3 break-words border border-[#a45e54]/50 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#e6a69b]" role="alert"><p>{error}</p><p className="mt-2 text-[#d9d3c6]">Index live indisponible. La signature locale est bloquée jusqu’au rétablissement des données complètes.</p></div>}
     <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
       <article className="min-w-0 border border-[#2c323a] bg-[#0b0f13] p-3"><div className="flex items-center justify-between"><h3 className="font-mono text-[10px] uppercase text-[#f2bd63]">Ordinals / inscriptions</h3><span className="font-mono text-[9px] text-[#718092]">{items.length}</span></div>{!loading && !error && items.length === 0 && <p className="mt-2 font-mono text-[10px] text-[#718092]">No indexed inscriptions for this vault address.</p>}{items.length > 0 && <div className="mt-2 max-h-64 space-y-2 overflow-y-auto">{items.map(item => <div key={item.inscriptionId} className={`border p-2 ${selected === item.inscriptionId ? "border-[#f2bd63]" : "border-[#2c323a]"}`}><p className="break-all font-mono text-[9px] text-[#d9d3c6]">{item.inscriptionNumber != null ? `#${item.inscriptionNumber} · ` : ""}{item.inscriptionId}</p><p className="mt-1 break-all font-mono text-[9px] text-[#718092]">{item.location ?? "Location unavailable"}</p><button type="button" onClick={() => chooseInscription(item)} disabled={!item.location || busy} className="mt-2 inline-flex min-h-9 items-center gap-1 border border-[#d99a54] px-2 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-40"><Send size={11} /> Select for local transfer</button></div>)}</div>}</article>
-      <article className="min-w-0 border border-[#2c323a] bg-[#0b0f13] p-3"><h3 className="font-mono text-[10px] uppercase text-[#d7a9ff]">Runes transfer · BTC / FB</h3><p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Soldes Runes en lecture live. Ordi Local Vault ne signe pas encore les transferts Runes : l’envoi passe par UniSat. Le compte et le réseau UniSat actifs doivent correspondre exactement à cette adresse du coffre.</p><button type="button" onClick={onTransferRequest} className="mt-2 min-h-10 border border-[#d99a54] px-3 font-mono text-[9px] uppercase text-[#f2bd63]">Open UniSat tools</button><UniSatRunesSendPanel site={site} address={address} chain={{ enum: network }} onWalletRefresh={() => void load()} /></article>
+      <article className="min-w-0 border border-[#2c323a] bg-[#0b0f13] p-3"><h3 className="font-mono text-[10px] uppercase text-[#d7a9ff]">Runes transfer · BTC / FB</h3><p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Local Vault mode: Runes signing is intentionally unavailable until a protocol-aware local PSBT builder and validator are enabled. This panel will not request signatures from UniSat or route this operation to another wallet. No transaction has been prepared or signed.</p><p className="mt-2 font-mono text-[9px] leading-4 text-[#718092]">Use only the native BTC/FB local transfer and verified Ordinal transfer paths until dedicated Runes safety checks are implemented.</p></article>
     </div>
     {selectedItem && <div className="mt-3 border border-[#d99a54]/40 bg-[#10151a] p-3 sm:p-4" aria-labelledby="local-ordinal-transfer-title">
       <div className="flex items-center gap-2 text-[#f2bd63]"><ShieldCheck size={15} /><h3 id="local-ordinal-transfer-title" className="font-mono text-[10px] uppercase tracking-[.14em]">Ordinal transfer · Local Vault</h3></div>
