@@ -123,7 +123,7 @@ type WorkerSafeUtxoConfirmationResponse = Omit<WorkerSafeUtxoAttestation, "suffi
 const SPENDABLE_UTXO_PAGE_SIZE = 25;
 const MAX_SPENDABLE_UTXO_PAGES = 20;
 const UTXO_REJECTION_KEYS = [
-  "identityMismatch", "invalidValueOrScript", "unconfirmedOrInvalidHeight", "invalidFlags",
+  "identityMismatch", "invalidValue", "invalidScript", "unconfirmedOrInvalidHeight", "invalidFlags",
   "hasInscriptionOrUnknown", "detailMismatch", "spentOrUnknown", "hasRunes", "hasAlkanes",
 ] as const;
 type UtxoRejectionDiagnostics = Record<typeof UTXO_REJECTION_KEYS[number], number>;
