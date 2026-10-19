@@ -36,6 +36,9 @@ jobs:
       - name: Type-check
         run: pnpm check
 
+      - name: Run client unit tests
+        run: pnpm exec vitest run client/src/lib
+
       - name: Check shared Worker syntax
         run: node --check workers/fractal-ordinal-live.js
 
