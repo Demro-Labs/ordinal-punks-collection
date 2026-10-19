@@ -120,8 +120,8 @@ export async function prepareLocalRuneTransfer(p: { network: OrdiNetwork; wallet
   const recipientScript = scriptFor(recipient);
   let feeInputs: SpendableUtxo[] = [], feeSats = 0, changeSats = 0;
   for (const candidate of feeCandidates) {
+    if (selected.length + feeInputs.length + 1 > MAX_INPUTS) break;
     feeInputs.push(candidate);
-    if (selected.length + feeInputs.length > MAX_INPUTS) break;
     const vsize = 10 + (p.addressType === "legacy" ? 0 : 1) + (selected.length + feeInputs.length) * INPUT_VBYTES[p.addressType] + [runestone,recipientScript,sourceScript].reduce((n,s) => n + 8 + varIntSize(s.length) + s.length, 0);
     const fee = Math.ceil(vsize * rate);
     const totalSats = selected.reduce((n,x)=>n+x.satoshi,0) + feeInputs.reduce((n,x)=>n+x.satoshi,0);
