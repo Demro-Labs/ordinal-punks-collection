@@ -22,17 +22,17 @@ export type LocalRuneTransferPlan = {
 const outpoint = (txid: string, vout: number) => `${txid.toLowerCase()}:${vout}`;
 const varIntSize = (n: number) => n < 0xfd ? 1 : n <= 0xffff ? 3 : 5;
 function encodeVarint(n: bigint): Buffer {
-  if (n < 0n) throw new Error("Unsigned Runestone varint expected.");
+  if (n < BigInt(0)) throw new Error("Unsigned Runestone varint expected.");
   const bytes: number[] = [];
-  while (n >= 0x80n) { bytes.push(Number(n & 0x7fn) | 0x80); n >>= 7n; }
+  while (n >= BigInt(0x80)) { bytes.push(Number(n & BigInt(0x7f)) | 0x80); n >>= BigInt(7); }
   bytes.push(Number(n));
   return Buffer.from(bytes);
 }
 export function buildLocalRunestoneScript(runeid: string, amount: string, change: string) {
-  if (!/^\d{1,20}:\d{1,20}$/.test(runeid) || !/^\d{1,80}$/.test(amount) || !/^\d{1,80}$/.test(change) || BigInt(amount) <= 0n) throw new Error("Invalid Rune ID or amount.");
+  if (!/^\d{1,20}:\d{1,20}$/.test(runeid) || !/^\d{1,80}$/.test(amount) || !/^\d{1,80}$/.test(change) || BigInt(amount) <= BigInt(0)) throw new Error("Invalid Rune ID or amount.");
   const [blockText, txText] = runeid.split(":");
-  const fields = [0n, BigInt(blockText), BigInt(txText), BigInt(amount), 1n];
-  if (BigInt(change) > 0n) fields.push(0n, 0n, BigInt(change), 2n);
+  const fields = [BigInt(0), BigInt(blockText), BigInt(txText), BigInt(amount), BigInt(1)];
+  if (BigInt(change) > BigInt(0)) fields.push(BigInt(0), BigInt(0), BigInt(change), BigInt(2));
   return Buffer.from(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, bitcoin.opcodes.OP_13, Buffer.concat(fields.map(encodeVarint))]));
 }
 function scriptFor(address: string) { return Buffer.from(bitcoin.address.toOutputScript(address, NET)); }
@@ -102,10 +102,10 @@ export async function prepareLocalRuneTransfer(p: { network: OrdiNetwork; wallet
   if (ordinalIndex.detail.length !== ordinalIndex.total || ordinalIndex.detail.some(x => !x.location)) throw new Error("Ordinal index incomplete; Rune UTXOs cannot be proven inscription-free.");
   const inscribed = new Set(ordinalIndex.detail.map(x => x.location!.split(":").slice(0, 2).join(":").toLowerCase()));
   const safeRunes = utxos.filter(x => !inscribed.has(outpoint(x.txid, x.vout)) && x.confirmations > 0 && x.runes.length === 1 && x.runes[0].runeid === p.runeid);
-  const indexed = safeRunes.reduce((n, x) => n + BigInt(x.runes[0].amount), 0n);
+  const indexed = safeRunes.reduce((n, x) => n + BigInt(x.runes[0].amount), BigInt(0));
   if (indexed !== BigInt(balance.amount)) throw new Error("Rune balance and asset-safe UTXO sum disagree; signing is blocked.");
   const selected: RuneUtxo[] = [];
-  let runeTotal = 0n;
+  let runeTotal = BigInt(0);
   for (const x of [...safeRunes].sort((a,b) => BigInt(a.runes[0].amount) > BigInt(b.runes[0].amount) ? -1 : 1)) {
     selected.push(x); runeTotal += BigInt(x.runes[0].amount);
     if (runeTotal >= BigInt(amountBaseUnits)) break;
@@ -139,7 +139,7 @@ export async function prepareLocalRuneTransfer(p: { network: OrdiNetwork; wallet
     const rawTx = p.addressType === "legacy" ? await getMempoolRawTransaction(p.network, x.txid) : undefined;
     addInput(psbt, { txid:x.txid,vout:x.vout,satoshi:x.satoshi,scriptPk:x.scriptPk,rawTx }, p.addressType, pub);
   }
-  psbt.addOutput({ script: runestone, value: 0n });
+  psbt.addOutput({ script: runestone, value: BigInt(0) });
   psbt.addOutput({ address: recipient, value: BigInt(DUST) });
   psbt.addOutput({ address: account.address, value: BigInt(changeSats) });
   return { network:p.network,addressType:p.addressType,sourceAddress:account.address,recipient,runeid:p.runeid,runeName:balance.spacedRune,divisibility:balance.divisibility,amount:p.amount,amountBaseUnits,inputSats:selected.reduce((n,x)=>n+x.satoshi,0)+feeInputs.reduce((n,x)=>n+x.satoshi,0),outputSats:DUST+changeSats,feeSats,feeRateSatVb:rate,runeChangeBaseUnits:runeChange.toString(),runeInputs:selected,feeInputs:feeInputs.map(({txid,vout,satoshi,scriptPk})=>({txid,vout,satoshi,scriptPk})),psbtHex:psbt.toHex(),runestoneHex:runestone.toString("hex"),ownedOrdinals:ordinalIndex.detail };
@@ -161,7 +161,7 @@ async function assertCurrent(plan: LocalRuneTransferPlan) {
     const live = safe.find(y=>outpoint(y.txid,y.vout)===outpoint(x.txid,x.vout));
     if (!live || live.satoshi!==x.satoshi || live.scriptPk.toLowerCase()!==x.scriptPk.toLowerCase()) throw new Error("Fee UTXO is no longer safe.");
   }
-  const indexed = utxos.filter(x=>!inscribed.has(outpoint(x.txid,x.vout))&&x.runes.length===1&&x.runes[0].runeid===plan.runeid).reduce((n,x)=>n+BigInt(x.runes[0].amount),0n);
+  const indexed = utxos.filter(x=>!inscribed.has(outpoint(x.txid,x.vout))&&x.runes.length===1&&x.runes[0].runeid===plan.runeid).reduce((n,x)=>n+BigInt(x.runes[0].amount),BigInt(0));
   if (indexed!==BigInt(balance.amount)) throw new Error("Rune balance and UTXO index disagree.");
 }
 export async function signLocalRuneTransfer(plan: LocalRuneTransferPlan, wallet: OrdiWalletRecord) {
