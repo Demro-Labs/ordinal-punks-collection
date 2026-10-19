@@ -273,7 +273,7 @@ export async function fetchRuneUtxoPage(
       !Number.isSafeInteger(item.satoshi) || item.satoshi < 1 ||
       !Number.isSafeInteger(item.confirmations) || item.confirmations < 1 ||
       !Array.isArray(item.runes) || item.runes.length < 1 || item.runes.length > 100 ||
-      item.runes.some(rune => !rune || !/^\d{1,20}:\d{1,20}$/.test(rune.runeid) || !/^\d{1,80}$/.test(rune.amount) || BigInt(rune.amount) <= 0n)
+      item.runes.some(rune => !rune || !/^\d{1,20}:\d{1,20}$/.test(rune.runeid) || !/^\d{1,80}$/.test(rune.amount) || BigInt(rune.amount) <= BigInt(0))
     ) return null;
     if (!item.runes.some(rune => rune.runeid === runeid)) return null;
     return { txid: item.txid, vout: item.vout, satoshi: item.satoshi, confirmations: item.confirmations, runes: item.runes.map(rune => ({ runeid: rune.runeid, amount: rune.amount })) };
