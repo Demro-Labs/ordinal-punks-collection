@@ -18,7 +18,7 @@ const MAX_UTXOS = 500;
 const short = (value: string) => `${value.slice(0, 10)}…${value.slice(-8)}`;
 function explainUtxoFailure(cause: unknown) {
   const raw = cause instanceof Error ? cause.message : "Impossible de récupérer les UTXO actifs.";
-  const code = raw.match(/\\[([A-Z0-9_]+)\\]/)?.[1] ?? "";
+  const code = raw.match(/\[([A-Z0-9_]+)\]/)?.[1] ?? "";
   if (code.includes("UNISAT_KEY_MISSING")) return "Clé API UniSat Fractal absente côté serveur. Configurez le secret UNISAT_API_KEY dans le Worker, puis vérifiez son autorisation.";
   if (code.includes("UNISAT_BITCOIN_API_KEY_MISSING")) return "Clé API UniSat Bitcoin absente côté serveur. Configurez le secret UNISAT_BITCOIN_API dans le Worker; la clé Fractal ne remplace pas la clé Bitcoin.";
   if (code.includes("UNISAT_RATE_LIMITED")) return "UniSat a refusé la requête pour quota/limitation. Réduisez les rafraîchissements et vérifiez le quota et les droits de la clé; réessayez plus tard.";
