@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, RefreshCw, ShieldCheck, Wallet } from "lucide-react";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
+import { LocalVaultSafeBalanceDiscovery } from "@/components/LocalVaultSafeBalanceDiscovery";
 import { fetchProtocolBalances, type Brc20Balance } from "@/lib/protocol-balances";
 import { buildBrc20TransferInscription } from "@/lib/brc20-transfer-flow";
 import { getRecommendedFeeEstimate } from "@/lib/mempool";
