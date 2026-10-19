@@ -156,7 +156,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   let scannedCount = 0;
   let sourceTotal: number | null = null;
   const rejectionTotals: UtxoRejectionDiagnostics = {
-    identityMismatch: 0, invalidValueOrScript: 0, unconfirmedOrInvalidHeight: 0, invalidFlags: 0,
+    identityMismatch: 0, invalidValue: 0, invalidScript: 0, unconfirmedOrInvalidHeight: 0, invalidFlags: 0,
     hasInscriptionOrUnknown: 0, detailMismatch: 0, spentOrUnknown: 0, hasRunes: 0, hasAlkanes: 0,
   };
   for (let pageNumber = 0; pageNumber < MAX_SPENDABLE_UTXO_PAGES; pageNumber += 1) {
