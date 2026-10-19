@@ -1157,6 +1157,25 @@ test('fails closed when a protocol balance response is missing or malformed', as
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('identifies UniSat quota exhaustion returned as HTTP 403 code -2005', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  globalThis.fetch = async (input, init = {}) => {
+    assert.equal(new URL(String(input)).origin, 'https://open-api.unisat.io');
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer bitcoin-test-only');
+    return Response.json({ code: -2005, msg: 'request limit exceeded' }, { status: 403 });
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=bitcoin&address=${address}&cursor=0&size=25`, { ip: '192.0.2.236' }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(data.code, 'UTXO_LIST_UNISAT_RATE_LIMITED');
+    assert.match(data.error, /quota\/rate limit reached/i);
+    assert.equal(JSON.stringify(data).includes(address), false);
+    assert.equal(JSON.stringify(data).includes('bitcoin-test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('uses the Bitcoin UniSat secret for Bitcoin UTXOs without sending the Fractal key', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
