@@ -4,7 +4,7 @@ import ecc from "@bitcoinerlab/secp256k1";
 import type { AddressType, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
 import { fetchAddressOrdinals, type AddressOrdinal } from "@/lib/ordinals";
 import { LIVE_DATA_API_BASE } from "@/lib/live";
-import { getMempoolConfig, getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
+import { getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
 import { buildOrdinalTransferPsbt, extractAndVerifySignedOrdinalTransaction, type OrdinalLocation, type OrdinalTransferPlan, type PreviousOutputRef } from "@/lib/ordinal-transfer-psbt";
 
 const MAX_SAFE_FEE_RATE = 1_000;
