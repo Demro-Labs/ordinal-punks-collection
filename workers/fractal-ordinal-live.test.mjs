@@ -1289,7 +1289,7 @@ function createAuthStorageMock() {
           const path = new URL(request.url).pathname;
           const body = await request.json();
           if (path === '/challenge/create') {
-            state.challenge = { idHash: body.idHash, site: body.site, address: body.address, addressHash: body.addressHash, network: body.network, origin: body.origin, issuedAt: body.issuedAt, expiresAt: body.expiresAt, usedAt: null };
+            state.challenge = { idHash: body.idHash, site: body.site, address: body.address, addressHash: body.addressHash, network: body.network, contextHash: body.contextHash || '', origin: body.origin, issuedAt: body.issuedAt, expiresAt: body.expiresAt, usedAt: null };
             return Response.json({ created: true });
           }
           if (path === '/rate/ip') {
@@ -1310,7 +1310,7 @@ function createAuthStorageMock() {
             return Response.json({ created: true });
           }
           if (path === '/challenge/consume-ownership') {
-            if (!state.challenge || state.challenge.idHash !== body.idHash || state.challenge.usedAt || state.challenge.expiresAt <= body.now || state.challenge.site !== body.site || state.challenge.address !== body.address || state.challenge.network !== body.network) return Response.json({ created: false }, { status: 409 });
+            if (!state.challenge || state.challenge.idHash !== body.idHash || state.challenge.usedAt || state.challenge.expiresAt <= body.now || state.challenge.site !== body.site || state.challenge.address !== body.address || state.challenge.network !== body.network || (state.challenge.contextHash || '') !== (body.contextHash || '')) return Response.json({ created: false }, { status: 409 });
             state.challenge.usedAt = body.now;
             return Response.json({ created: true });
           }
@@ -1474,6 +1474,46 @@ test('ownership challenges support Bitcoin and Fractal without creating an authe
     assert.equal(state.challenge.network, network);
     assert.equal(state.session, null);
   }
+});
+
+test('ownership proof is cryptographically bound to the transaction context hash', async () => {
+  const { binding, state } = createAuthStorageMock();
+  const address = 'bc1q9vza2e8x573nczrlzms0wvx3gsqjx7vavgkx0l';
+  const network = 'BITCOIN_MAINNET';
+  const contextHash = 'a'.repeat(64);
+  const challengeResponse = await worker.fetch(makeRequest('/api/auth/ownership/challenge', {
+    method: 'POST',
+    ip: '192.0.2.245',
+    body: JSON.stringify({ site: 'punks', address, network, contextHash }),
+  }), { AUTH_STORAGE: binding });
+  const challenge = await challengeResponse.json();
+  assert.equal(challengeResponse.status, 200);
+  assert.equal(challenge.contextHash, contextHash);
+  assert.match(challenge.message, new RegExp('Transaction Context SHA-256: ' + contextHash));
+  assert.equal(state.challenge.contextHash, contextHash);
+
+  const testOnlyPrivateKey = 'L3VFeEujGtevx9w18HD1fhRbCH67Az2dpCymeRE1SoPK6XQtaN2k';
+  const signed = await Signer.signAsync(testOnlyPrivateKey, address, challenge.message);
+  const signature = Buffer.isBuffer(signed) ? signed.toString('base64') : signed;
+  const mismatch = await worker.fetch(makeRequest('/api/auth/ownership/verify', {
+    method: 'POST',
+    ip: '192.0.2.246',
+    body: JSON.stringify({ site: 'punks', challengeId: challenge.challengeId, address, network, contextHash: 'b'.repeat(64), signature }),
+  }), { AUTH_STORAGE: binding });
+  assert.equal(mismatch.status, 401);
+  assert.equal((await mismatch.json()).code, 'AUTH_INVALID_CHALLENGE');
+  assert.equal(state.challenge.usedAt, null);
+  assert.equal(state.session, null);
+
+  const verified = await worker.fetch(makeRequest('/api/auth/ownership/verify', {
+    method: 'POST',
+    ip: '192.0.2.247',
+    body: JSON.stringify({ site: 'punks', challengeId: challenge.challengeId, address, network, contextHash, signature }),
+  }), { AUTH_STORAGE: binding });
+  assert.equal(verified.status, 200);
+  assert.equal((await verified.json()).contextHash, contextHash);
+  assert.notEqual(state.challenge.usedAt, null);
+  assert.equal(state.session, null);
 });
 
 test('ownership verification rejects an invalid BIP-322 signature without consuming the proof or creating a session', async () => {

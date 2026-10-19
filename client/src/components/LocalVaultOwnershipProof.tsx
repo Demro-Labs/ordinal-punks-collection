@@ -7,8 +7,13 @@ import { signLocalOwnershipMessage } from "@/lib/local-vault-ownership";
 import { isWalletExtensionContext } from "@/lib/local-vault-bridge";
 
 type SiteName = "punks" | "pokedex";
-type OwnershipChallenge = { challengeId: string; message: string; expiresAt: string };
+type OwnershipChallenge = { challengeId: string; message: string; expiresAt: string; contextHash: string };
 const API_BASE = (import.meta.env.VITE_LIVE_DATA_URL || "https://fractal-ordinal-live.servostar23.workers.dev/api/live-inscription").replace(/\/api\/live-inscription\/?$/, "");
+
+async function sha256Hex(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
 
 function errorText(cause: unknown) {
   return cause instanceof Error ? cause.message : "The local wallet ownership check could not be completed.";
@@ -59,6 +64,7 @@ export function LocalVaultOwnershipProof({
     }
     setWorking(true);
     try {
+      const contextHash = await sha256Hex(contextKey);
       if (isWalletExtensionContext()) {
         const issuedAt = Date.now();
         const expiresAt = issuedAt + 2 * 60 * 1000;
@@ -73,23 +79,24 @@ export function LocalVaultOwnershipProof({
           `Network: ${network}`,
           `Address: ${address}`,
           "Action: Prove control of this local wallet before a transaction",
+          `Transaction Context SHA-256: ${contextHash}`,
           `Nonce: ${challengeId}`,
           `Issued At: ${new Date(issuedAt).toISOString()}`,
           `Expiration Time: ${new Date(expiresAt).toISOString()}`,
           "This local signature only proves wallet ownership. It does not authorize a payment or transfer; a separate transaction review and signature is required.",
         ].join("\n");
-        setChallenge({ challengeId, message, expiresAt: new Date(expiresAt).toISOString() });
+        setChallenge({ challengeId, message, expiresAt: new Date(expiresAt).toISOString(), contextHash });
         return;
       }
       const response = await fetch(`${API_BASE}/api/auth/ownership/challenge`, {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", cache: "no-store",
-        body: JSON.stringify({ site, address, network }),
+        body: JSON.stringify({ site, address, network, contextHash }),
       });
       const data = await response.json().catch(() => null) as Partial<OwnershipChallenge> & { error?: string } | null;
-      if (!response.ok || typeof data?.challengeId !== "string" || typeof data.message !== "string" || typeof data.expiresAt !== "string") {
+      if (!response.ok || typeof data?.challengeId !== "string" || typeof data.message !== "string" || typeof data.expiresAt !== "string" || data.contextHash !== contextHash) {
         throw new Error(data?.error || "The Worker could not prepare the BIP-322 challenge.");
       }
-      setChallenge({ challengeId: data.challengeId, message: data.message, expiresAt: data.expiresAt });
+      setChallenge({ challengeId: data.challengeId, message: data.message, expiresAt: data.expiresAt, contextHash });
     } catch (cause) {
       setError(errorText(cause));
     } finally {
@@ -115,10 +122,10 @@ export function LocalVaultOwnershipProof({
       } else {
         const response = await fetch(`${API_BASE}/api/auth/ownership/verify`, {
           method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", cache: "no-store",
-          body: JSON.stringify({ site, address, network, challengeId: activeChallenge.challengeId, signature }),
+          body: JSON.stringify({ site, address, network, challengeId: activeChallenge.challengeId, contextHash: activeChallenge.contextHash, signature }),
         });
-        const data = await response.json().catch(() => null) as { verified?: boolean; error?: string } | null;
-        if (!response.ok || data?.verified !== true) throw new Error(data?.error || "The Worker did not validate this ownership proof.");
+        const data = await response.json().catch(() => null) as { verified?: boolean; error?: string; contextHash?: string } | null;
+        if (!response.ok || data?.verified !== true || data.contextHash !== activeChallenge.contextHash) throw new Error(data?.error || "The Worker did not validate this transaction-bound ownership proof.");
       }
       setVerifiedContext(contextKey);
       onVerified(contextKey);
