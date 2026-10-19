@@ -2,7 +2,8 @@ import { Buffer } from "buffer";
 import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
 import type { AddressType, OrdiAddress, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
-import { getMempoolConfig, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
+import { getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
+import { LIVE_DATA_API_BASE } from "@/lib/live";
 
 bitcoin.initEccLib(ecc);
 const NETWORK = bitcoin.networks.bitcoin;
