@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
+import { LocalVaultBrc20TransferPanel } from "@/components/LocalVaultBrc20TransferPanel";
 import { LocalVaultRuneTransferPanel } from "@/components/LocalVaultRuneTransferPanel";
 import { fetchAddressOrdinals, type AddressOrdinal, type OrdinalNetwork } from "@/lib/ordinals";
 import { broadcastLocalOrdinalTransfer, prepareLocalOrdinalTransfer, signLocalOrdinalTransfer, type LocalOrdinalPlan } from "@/lib/local-ordinal-transfer";
@@ -87,6 +88,21 @@ export function LocalVaultAssetPanel({
     finally { setBusy(false); }
   }
   return <section className="mt-4 border border-[#70c7a0]/35 bg-[#101a16] p-3 sm:p-4" aria-labelledby="local-vault-assets-title">
+    <LocalVaultBrc20TransferPanel wallet={wallet} network={network} addressType={addressType} site={site} onCreated={(inscriptionId, target) => {
+      void (async () => {
+        await load();
+        setSelected(inscriptionId);
+        setRecipient(target);
+        setLocalPlan(null);
+        setSigned(null);
+        setConfirmedReview(false);
+        setConfirmedBroadcast(false);
+        setBroadcastAttempted(false);
+        setTransferError("");
+        setOwnershipProofKey(null);
+        setMessage("Transfer inscription selected. Review and sign the separate inscription-send transaction below.");
+      })();
+    }} />
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div><p className="font-mono text-[9px] uppercase tracking-[.18em] text-[#9fe0bd]">Local Vault asset bridge</p><h2 id="local-vault-assets-title" className="mt-1 font-display text-xl text-[#f3efe5]">Live Ordinals &amp; Runes</h2><p className="mt-1 font-mono text-[10px] leading-5 text-[#9ea7b3]">{network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin"} · address-scoped · refresh every 60s</p></div>
       <div className="flex gap-2"><button type="button" onClick={() => void load()} disabled={loading || busy} className="inline-flex min-h-10 items-center gap-1 border border-[#3b434d] px-3 font-mono text-[9px] uppercase text-[#9fe0bd] disabled:opacity-40"><RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh local assets</button></div>
