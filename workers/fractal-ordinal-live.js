@@ -332,13 +332,46 @@ async function uniNetwork(base, path, env, init = {}) {
     // Never forward either UniSat key to an unconfigured upstream host.
     headers.delete('Authorization');
   }
-  const response = await fetch(base + path, {
-    ...init,
-    headers,
-  });
-  if (!response.ok) throw new Error('UniSat upstream returned ' + response.status);
-  const payload = await response.json();
-  if (payload.code !== 0) throw new Error('UniSat upstream rejected the request');
+  const network = isBitcoinApi ? 'bitcoin' : isFractalApi ? 'fractal' : 'other';
+  let response;
+  try {
+    response = await fetch(base + path, {
+      ...init,
+      headers,
+    });
+  } catch (error) {
+    console.warn('UniSat network fetch failed', {
+      network,
+      path,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+    throw new Error('UniSat network request failed');
+  }
+  if (!response.ok) {
+    // Record status and request identifiers only; never log auth headers, addresses, or response bodies.
+    console.warn('UniSat network upstream HTTP error', {
+      network,
+      path,
+      status: response.status,
+      requestId: response.headers.get('x-request-id') || response.headers.get('cf-ray') || null,
+    });
+    throw new Error('UniSat upstream returned ' + response.status);
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    console.warn('UniSat network returned invalid JSON', { network, path, status: response.status });
+    throw new Error('UniSat upstream returned invalid JSON');
+  }
+  if (payload.code !== 0) {
+    console.warn('UniSat network API rejected request', {
+      network,
+      path,
+      code: typeof payload.code === 'number' || typeof payload.code === 'string' ? String(payload.code).slice(0, 32) : 'missing',
+    });
+    throw new Error('UniSat upstream rejected the request');
+  }
   return payload.data;
 }
 
@@ -1511,25 +1544,35 @@ export default {
     if (url.pathname !== '/api/market' && url.pathname !== '/api/live-inscription') {
       return new Response('Not found', { status: 404, headers });
     }
-    if (isRateLimited(request)) {
-      return Response.json({ error: 'Too many requests.' }, {
-        status: 429,
-        headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' },
-      });
-    }
-
     try {
       if (url.pathname === '/api/market') {
         const collectionId = url.searchParams.get('collectionId') || '';
         const start = parseBoundedInteger(url.searchParams.get('start'), 0, MAX_MARKET_OFFSET);
         const limit = parseBoundedInteger(url.searchParams.get('limit'), MAX_PAGE_SIZE, MAX_PAGE_SIZE);
         if (!ALLOWED_COLLECTION_IDS.has(collectionId) || start === null || limit === null || limit < 1) {
+          // Invalid traffic still consumes the request budget to prevent abuse.
+          if (isRateLimited(request)) {
+            return Response.json({ error: 'Too many requests.' }, {
+              status: 429,
+              headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' },
+            });
+          }
           return Response.json({ error: 'Invalid market query.' }, {
             status: 400,
             headers: { ...headers, 'Cache-Control': 'no-store' },
           });
         }
-        return edgeCachedResponse(request, headers, 20, 60, async () => Response.json(await market(collectionId, start, limit, env), { headers }));
+        // Rate-limit only cache misses: cached public market reads must not consume
+        // the same per-IP budget used by wallet and transaction preparation routes.
+        return edgeCachedResponse(request, headers, 60, 300, async () => {
+          if (isRateLimited(request)) {
+            return Response.json({ error: 'Too many requests.' }, {
+              status: 429,
+              headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' },
+            });
+          }
+          return Response.json(await market(collectionId, start, limit, env), { headers });
+        });
       }
 
       const inscriptionId = url.searchParams.get('inscriptionId') || '';
@@ -1544,11 +1587,26 @@ export default {
         return Response.json({ error: 'Unsupported mainnet.' }, { status: 400, headers: { ...headers, 'Cache-Control': 'no-store' } });
       }
       if (url.searchParams.get('refresh') === '1') {
+        if (isRateLimited(request)) {
+          return Response.json({ error: 'Too many requests.' }, {
+            status: 429,
+            headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' },
+          });
+        }
         return Response.json(await inscription(inscriptionId, env, chain), {
           headers: { ...headers, 'Cache-Control': 'no-store', 'X-Edge-Cache': 'BYPASS' },
         });
       }
-      return edgeCachedResponse(request, headers, 120, 300, async () => Response.json(await inscription(inscriptionId, env, chain), { headers }));
+      // Cached public inscription reads bypass the per-IP limit; only cache misses count.
+      return edgeCachedResponse(request, headers, 120, 300, async () => {
+        if (isRateLimited(request)) {
+          return Response.json({ error: 'Too many requests.' }, {
+            status: 429,
+            headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' },
+          });
+        }
+        return Response.json(await inscription(inscriptionId, env, chain), { headers });
+      });
     } catch {
       console.warn('Live API upstream request failed', url.pathname);
       return Response.json({ error: 'Live UniSat data is temporarily unavailable.' }, {
