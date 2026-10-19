@@ -124,7 +124,7 @@ export function LocalVaultOwnershipProof({
           method: "POST", headers: { "Content-Type": "application/json" }, credentials: "omit", cache: "no-store",
           body: JSON.stringify({ site, address, network, challengeId: activeChallenge.challengeId, contextHash: activeChallenge.contextHash, signature }),
         });
-        const data = await response.json().catch(() => null) as { verified?: boolean; error?: string } | null;
+        const data = await response.json().catch(() => null) as { verified?: boolean; error?: string; contextHash?: string } | null;
         if (!response.ok || data?.verified !== true || data.contextHash !== activeChallenge.contextHash) throw new Error(data?.error || "The Worker did not validate this transaction-bound ownership proof.");
       }
       setVerifiedContext(contextKey);
