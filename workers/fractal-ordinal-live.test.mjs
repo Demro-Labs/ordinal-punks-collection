@@ -1631,3 +1631,37 @@ test('rejects invalid live transaction history queries and malformed UniSat rows
     assert.equal(upstreamCalls, 1);
   } finally { globalThis.fetch = previousFetch; }
 });
+
+test('normalizes the documented UniSat inscription-data response for local Ordinal transfers', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const txid = 'a'.repeat(64);
+  const inscriptionId = `${txid}i0`;
+  let requestedPath = '';
+  let authorization = '';
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    requestedPath = url.pathname + url.search;
+    authorization = new Headers(init.headers).get('Authorization') || '';
+    return Response.json({ code: 0, data: {
+      cursor: 0, total: 1,
+      inscription: [{
+        inscriptionId, inscriptionNumber: 42, address, offset: 17, contentType: 'text/plain',
+        utxo: { txid, vout: 2, satoshi: 546, address },
+      }],
+    } });
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/ordinals/address-list?address=${address}&chain=BITCOIN_MAINNET&start=0&limit=50`, { ip: '192.0.2.246' }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(data));
+    assert.equal(requestedPath, `/v1/indexer/address/${address}/inscription-data?cursor=0&size=50`);
+    assert.equal(authorization, 'Bearer bitcoin-test-only');
+    assert.equal(data.network, 'BITCOIN_MAINNET');
+    assert.equal(data.total, 1);
+    assert.deepEqual(data.detail[0], {
+      inscriptionId, inscriptionNumber: 42, location: `${txid}:2:17`,
+      outputValue: 546, contentType: 'text/plain',
+    });
+  } finally { globalThis.fetch = previousFetch; }
+});
