@@ -95,20 +95,22 @@ function setupMocks() {
         ],
       });
     }
-    if (url.startsWith(`${MEMPOOL_API}/api/v1/validate-address/`)) {
+    if (url.startsWith(`${LIVE_DATA_API_BASE}/api/mempool/validate-address?`)) {
+      expect(new URL(url).searchParams.get("chain")).toBe("FRACTAL_BITCOIN_MAINNET");
       return Response.json({ isvalid: true, scriptPubKey: SCRIPT_HEX });
     }
-    if (url.startsWith(`${MEMPOOL_API}/api/tx/`) && url.endsWith("/hex")) {
-      const txid = url.split("/").at(-2)!;
+    if (url.startsWith(`${LIVE_DATA_API_BASE}/api/mempool/tx-hex?`)) {
+      const txid = new URL(url).searchParams.get("txid")!;
       const rawTxHex = rawTransactions.get(txid);
       if (!rawTxHex) throw new Error(`Unexpected transaction ID: ${txid}`);
       return new Response(rawTxHex);
     }
-    if (url === `${MEMPOOL_API}/api/tx` && init.method === "POST") {
+    if (url.startsWith(`${LIVE_DATA_API_BASE}/api/mempool/tx?`) && init.method === "POST") {
+      expect(new URL(url).searchParams.get("chain")).toBe("FRACTAL_BITCOIN_MAINNET");
       broadcastCount += 1;
       const transaction = bitcoin.Transaction.fromHex(String(init.body));
       broadcastSequences = transaction.ins.map(input => input.sequence);
-      return new Response(transaction.getId());
+      return Response.json({ network: FRACTAL_NETWORK, txid: transaction.getId() });
     }
     throw new Error(`Unexpected mocked URL: ${url}`);
   }) as typeof fetch);
