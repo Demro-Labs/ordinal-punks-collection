@@ -55,7 +55,8 @@ export async function getMempoolRawTransaction(network: string, txid: string) {
   const config = getMempoolConfig(network);
   if (!config) throw new Error("No Mempool endpoint is configured for this network.");
   if (!/^[a-f0-9]{64}$/i.test(txid)) throw new Error("The previous transaction id is invalid.");
-  return requestText(`${config.api}/api/tx/${encodeURIComponent(txid)}/hex`);
+  const query = new URLSearchParams({ chain: network, txid });
+  return requestText(`${LIVE_DATA_API_BASE}/api/mempool/tx-hex?${query}`);
 }
 
 export type FeeEstimateSource = { feeRate: number | null; available: boolean };
@@ -89,7 +90,7 @@ export async function getRecommendedFeeEstimate(network: string): Promise<FeeEst
     workerFailure = error instanceof Error ? error.message : "The fee Worker is temporarily unavailable.";
   }
   try {
-    const direct = await requestJson<{ halfHourFee?: number; fastestFee?: number; hourFee?: number; economyFee?: number; minimumFee?: number }>(`${config.api}/api/v1/fees/recommended`);
+    const direct = await requestJson<{ halfHourFee?: number; fastestFee?: number; hourFee?: number; economyFee?: number; minimumFee?: number }>(`${LIVE_DATA_API_BASE}/api/mempool/fees?chain=${encodeURIComponent(network)}`);
     const rawRate = direct.halfHourFee ?? direct.fastestFee ?? direct.hourFee ?? direct.economyFee ?? direct.minimumFee;
     const feeRate = Math.ceil(Number(rawRate));
     if (!Number.isSafeInteger(feeRate) || feeRate < 1 || feeRate > 10_000) throw new Error("Mempool n’a pas retourné un taux de frais valide.");
@@ -223,7 +224,8 @@ export async function confirmFractalSpendableUtxos(address: string, minimumSats:
 export async function validateMempoolAddress(network: string, address: string) {
   const config = getMempoolConfig(network);
   if (!config) throw new Error("Unsupported mainnet network.");
-  const result = await requestJson<{ isvalid?: boolean }>(`${config.api}/api/v1/validate-address/${encodeURIComponent(address)}`);
+  const query = new URLSearchParams({ chain: network, address });
+  const result = await requestJson<{ isvalid?: boolean }>(`${LIVE_DATA_API_BASE}/api/mempool/validate-address?${query}`);
   if (!result.isvalid) throw new Error(`L’adresse destinataire n’est pas valide pour ${config.label}.`);
 }
 
@@ -238,7 +240,8 @@ export async function trackMempoolTransaction(txid: string, network: string, onU
   emit("checking", "Searching for the transaction in Mempool…");
   for (let attempt = 0; attempt < 180; attempt += 1) {
     try {
-      const status = await requestJson<{ confirmed?: boolean; block_height?: number }>(`${config.api}/api/tx/${encodeURIComponent(txid)}/status`, 10_000);
+      const query = new URLSearchParams({ chain: network, txid });
+      const status = await requestJson<{ confirmed?: boolean; block_height?: number }>(`${LIVE_DATA_API_BASE}/api/mempool/tx-status?${query}`, 10_000);
       if (status.confirmed) return emit("confirmed", "Transaction confirmed on-chain.", typeof status.block_height === "number" ? status.block_height : null);
       emit("pending", "Transaction visible dans le mempool, en attente de confirmation.");
     } catch (error) {
