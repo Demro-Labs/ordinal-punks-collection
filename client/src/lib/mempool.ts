@@ -153,7 +153,7 @@ export function minimumSpendableSatsForScript(scriptHex: string): number {
 }
 
 /** Fetch confirmed, non-asset UTXOs; a low-fee/RBF history does not make a confirmed output replaceable. */
-export async function getSpendableUtxos(network: string, address: string, minimumSats: number, options: { mobile?: boolean; requiredOutpoints?: string[] } = {}): Promise<SpendableUtxo[]> {
+export async function getSpendableUtxos(network: string, address: string, minimumSats: number, options: { mobile?: boolean; requiredOutpoints?: string[]; collectAll?: boolean } = {}): Promise<SpendableUtxo[]> {
   const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
   if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0) {
     throw new Error("Invalid network, address, or amount for spendable UTXO verification.");
@@ -222,7 +222,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     if (requiredOutpoints) {
       const byOutpoint = new Map(collected.map(item => [`${item.txid.toLowerCase()}:${item.vout}`, item]));
       if (requiredOutpoints.every(outpoint => byOutpoint.has(outpoint))) return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
-    } else if (safeSats >= minimumSats) return collected;
+    } else if (!options.collectAll && safeSats >= minimumSats) return collected;
     if (pageScannedCount === 0 || nextCursor === total) break;
     cursor = nextCursor!;
   }
@@ -233,7 +233,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     if (missing.length) throw new Error(`The live safe-UTXO index did not verify every exact PSBT input (${missing.join(", ")}). No transaction was signed or broadcast.`);
     return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
   }
-  if (safeSats < minimumSats) {
+  if (!options.collectAll && safeSats < minimumSats) {
     const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
     const zeroSafeBalanceHint = safeSats === 0 ? " No fee-safe UTXO was found. If this address only has its inscription output, fund the same network address with a separate confirmed BTC/FB output, then refresh; never spend the inscription output as fees." : "";
     const rejectionSummary = UTXO_REJECTION_KEYS
