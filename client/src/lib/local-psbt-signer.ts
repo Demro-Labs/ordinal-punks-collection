@@ -196,7 +196,9 @@ function signerForAccount(account: OrdiAddress, type: AddressType) {
   const publicKey = hexBytes(account.publicKey, "Clé publique locale");
   const privateKey = hexBytes(account.privateKey, "Clé privée locale");
   if (publicKey.length !== 33 || privateKey.length !== 32 || !ecc.isPrivate(privateKey) || !Buffer.from(ecc.pointFromScalar(privateKey, true) ?? []).equals(publicKey)) throw new Error("La clé privée locale ne correspond pas à l’adresse examinée.");
-  const baseSigner = { publicKey, sign: (hash: Uint8Array) => Buffer.from(ecc.sign(hash, privateKey)) };
+  // bitcoinjs-lib supplies Uint8Array hashes; normalize all secp256k1 inputs to this
+  // app's Buffer implementation before crossing the ECC adapter boundary.
+  const baseSigner = { publicKey, sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(privateKey))) };
   if (type !== "taproot") return baseSigner;
   const parityAdjustedKey = publicKey[0] === 3 ? Buffer.from(ecc.privateNegate(privateKey)) : privateKey;
   const tapTweak = bitcoin.crypto.taggedHash("TapTweak", bitcoin.toXOnly(publicKey));
@@ -204,7 +206,7 @@ function signerForAccount(account: OrdiAddress, type: AddressType) {
   if (!tweakedPrivateKey) throw new Error("Impossible de dériver la clé Taproot signataire.");
   const tweakedPublicKey = ecc.pointFromScalar(tweakedPrivateKey, true);
   if (!tweakedPublicKey) throw new Error("Impossible de dériver la clé publique Taproot signataire.");
-  return { publicKey: Buffer.from(tweakedPublicKey), sign: (hash: Uint8Array) => Buffer.from(ecc.sign(hash, tweakedPrivateKey)), signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(hash, tweakedPrivateKey)) };
+  return { publicKey: Buffer.from(tweakedPublicKey), sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(tweakedPrivateKey))), signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(tweakedPrivateKey))) };
 }
 
 export async function signLocalPsbt(psbtHex: string, wallet: OrdiWalletRecord, review: LocalPsbtReview) {
@@ -228,8 +230,8 @@ export async function finalizeLocalPsbt(signedPsbtHex: string, wallet: OrdiWalle
   assertSameReview({ ...current, psbtHex: review.psbtHex }, review);
   const psbt = parsePsbt(signedPsbtHex);
   const signatureVerifier = review.addressType === "taproot"
-    ? (publicKey: Uint8Array, hash: Uint8Array, signature: Uint8Array) => ecc.verifySchnorr(hash, publicKey, signature)
-    : (publicKey: Uint8Array, hash: Uint8Array, signature: Uint8Array) => ecc.verify(hash, publicKey, signature);
+    ? (publicKey: Uint8Array, hash: Uint8Array, signature: Uint8Array) => ecc.verifySchnorr(Buffer.from(hash), Buffer.from(publicKey), Buffer.from(signature))
+    : (publicKey: Uint8Array, hash: Uint8Array, signature: Uint8Array) => ecc.verify(Buffer.from(hash), Buffer.from(publicKey), Buffer.from(signature));
   try { psbt.validateSignaturesOfAllInputs(signatureVerifier); psbt.finalizeAllInputs(); }
   catch { throw new Error("La signature locale est absente ou invalide; rien n’a été diffusé."); }
   const tx = psbt.extractTransaction(true);
