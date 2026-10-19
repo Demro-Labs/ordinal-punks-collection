@@ -948,17 +948,12 @@ async function spendableUtxos(request, env, corsHeaders) {
     }
     if (chain === 'fractal') {
       let alkanes;
-      try {
-        alkanes = await uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env);
-      } catch (error) {
-        // UniSat's documented available-utxo-data already excludes Alkanes,
-        // but the per-outpoint endpoint is not exposed on some Fractal API
-        // deployments. Both clients may rely on that filtered list on a 404.
-        if (!(error instanceof Error && error.message === 'UniSat upstream returned 404')) {
-          throw new SpendableUtxoError(`ALKANES_BALANCE_${safeUniSatFailureCode(error)}`);
-        }
-        alkanes = [];
-      }
+      // This scan starts from all-utxo-data, which can include protocol-asset
+      // outputs. A missing per-outpoint Alkanes endpoint therefore cannot be
+      // treated as an empty balance: fail closed rather than label the UTXO safe.
+      alkanes = await spendableUtxoStage('ALKANES_BALANCE', () =>
+        uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env)
+      );
       if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
       if (alkanes.length !== 0) {
         rejected.hasAlkanes += 1;
