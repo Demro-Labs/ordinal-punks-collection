@@ -1146,7 +1146,7 @@ test('reports safe-UTXO rejection reasons without exposing addresses or outpoint
     assert.equal(data.diagnostics.hasRunes, 0);
     assert.equal(data.diagnostics.hasAlkanes, 0);
     assert.deepEqual(data.diagnosticsSats, {
-      unconfirmedOrInvalidHeight: 0, invalidFlags: 0, hasInscriptionOrUnknown: 0,
+      unconfirmedOrInvalidHeight: 120000, invalidFlags: 0, hasInscriptionOrUnknown: 120000,
       detailMismatch: 0, spentOrUnknown: 0, hasRunes: 0, hasAlkanes: 0,
     });
     const serialized = JSON.stringify(data);
