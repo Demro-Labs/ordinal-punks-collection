@@ -58,10 +58,10 @@ for network in BITCOIN_MAINNET FRACTAL_BITCOIN_MAINNET; do
   encoded_address="${test_address}"
   for route in \
     "/api/transactions/history?address=${encoded_address}&chain=${network}&cursor=0&size=1" \
-    "/api/brc20/balances?address=${encoded_address}&chain=${network}" \
-    "/api/brc20/transferable?address=${encoded_address}&ticker=ordi&chain=${network}" \
     "/api/ordinals/address-list?address=${encoded_address}&chain=${network}&start=0&limit=1" \
     "/api/runes/balance-list?address=${encoded_address}&chain=${network}&start=0&limit=1" \
+    "/api/brc20/balances?address=${encoded_address}&chain=${network}" \
+    "/api/brc20/transferable?address=${encoded_address}&ticker=ordi&chain=${network}" \
     "/api/alkanes/balances?address=${encoded_address}&chain=${network}"; do
     payload_file="${TMP_DIR}/read-route.json"
     status="$(curl -sS --max-time 20 -o "${payload_file}" -w '%{http_code}' \
