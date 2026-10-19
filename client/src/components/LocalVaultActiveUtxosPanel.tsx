@@ -16,6 +16,18 @@ type UtxoPage = { chain: string; address: string; cursor: number; nextCursor: nu
 const PAGE_SIZE = 25;
 const MAX_UTXOS = 500;
 const short = (value: string) => `${value.slice(0, 10)}…${value.slice(-8)}`;
+function explainUtxoFailure(cause: unknown) {
+  const raw = cause instanceof Error ? cause.message : "Impossible de récupérer les UTXO actifs.";
+  const code = raw.match(/\[([A-Z0-9_]+)\]/)?.[1] ?? "";
+  if (code.includes("UNISAT_KEY_MISSING")) return "Clé API UniSat Fractal absente côté serveur. Configurez le secret UNISAT_API_KEY dans le Worker, puis vérifiez son autorisation.";
+  if (code.includes("UNISAT_BITCOIN_API_KEY_MISSING")) return "Clé API UniSat Bitcoin absente côté serveur. Configurez le secret UNISAT_BITCOIN_API dans le Worker; la clé Fractal ne remplace pas la clé Bitcoin.";
+  if (code.includes("UNISAT_RATE_LIMITED")) return "UniSat a refusé la requête pour quota/limitation. Réduisez les rafraîchissements et vérifiez le quota et les droits de la clé; réessayez plus tard.";
+  if (code.includes("UNISAT_HTTP_403")) return "UniSat a refusé l’accès (HTTP 403). Vérifiez la clé et ses droits pour ce réseau, l’accès à l’endpoint et les journaux du Worker (code upstream/request ID). Ne répétez pas les requêtes en boucle.";
+  if (code.includes("UNISAT_HTTP_401")) return "UniSat refuse l’authentification (HTTP 401). Vérifiez la clé API et l’en-tête Authorization côté Worker.";
+  if (code.includes("UNISAT_HTTP_429")) return "UniSat limite les requêtes (HTTP 429). Espacez les appels et réessayez après le délai indiqué.";
+  if (code.includes("UPSTREAM_CONNECTION_OR_RESPONSE")) return "L’API UniSat est inaccessible ou a renvoyé une réponse invalide. Vérifiez l’état du service et les journaux du Worker.";
+  return raw;
+}
 
 export function LocalVaultActiveUtxosPanel({ address, network }: { address: string; network: OrdiNetwork }) {
   const [items, setItems] = useState<ActiveUtxo[]>([]);
@@ -53,7 +65,7 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
       setUpdatedAt(new Date().toISOString());
       if (collected.length === 0 && total > 0) setError("L’indexeur signale des sorties mais n’a renvoyé aucune ligne UTXO valide.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Impossible de récupérer les UTXO actifs.");
+      setError(explainUtxoFailure(cause));
     } finally { setBusy(false); }
   }, [address, network]);
 

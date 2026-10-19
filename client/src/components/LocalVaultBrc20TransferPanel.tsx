@@ -52,7 +52,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
       setBalances(result.brc20);
       if (!ticker && result.brc20.length) { setTicker(result.brc20[0].ticker); setAmount(result.brc20[0].availableBalance); }
       if (result.brc20.length === 0) setMessage("Aucun solde BRC-20 classique indexé pour ce compte et ce réseau.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Impossible de charger les soldes BRC-20."); }
+    } catch (cause) { setBalances([]); setError(cause instanceof Error ? cause.message : "Impossible de charger les soldes BRC-20."); }
     finally { setLoading(false); }
   }
   useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 300_000); return () => window.clearInterval(timer); }, [address, network, ticker]);
@@ -83,8 +83,20 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
     if (!selected || !context || proofKey !== context || !positive(amount) || compare(amount, selected.availableBalance) > 0 || !recipient.trim()) { setError("Choisissez un ticker et un montant disponible, indiquez le destinataire et terminez la preuve BIP-322 locale."); return; }
     if (!/^[a-z0-9]{1,32}$/i.test(ticker)) { setError("Ticker BRC-20 invalide."); return; }
     if (order) { setError("Un ordre existe déjà pour ce ticker. Reprenez-le au lieu d’en créer un autre."); return; }
+    if (loading) { setError("Attendez la fin de l’actualisation des soldes avant de créer un ordre."); return; }
     setBusy(true); setError(""); setMessage("");
     try {
+      // Revalidate the protocol balance immediately before creating the inscription order.
+      // A previously displayed balance is not authorization to spend a BRC-20 amount.
+      const fresh = await fetchProtocolBalances(address, network);
+      if (fresh.network !== network || fresh.address.toLowerCase() !== address.toLowerCase()) {
+        throw new Error("L’indexeur a répondu pour un autre compte ou réseau. Aucun ordre n’a été créé.");
+      }
+      setBalances(fresh.brc20);
+      const freshSelected = fresh.brc20.find(item => item.ticker.toLowerCase() === ticker.toLowerCase());
+      if (!freshSelected || compare(amount, freshSelected.availableBalance) > 0) {
+        throw new Error("Le solde BRC-20 disponible a changé ou n’est plus vérifiable. Actualisez les soldes et vérifiez le montant avant de réessayer.");
+      }
       const estimate = await getRecommendedFeeEstimate(network);
       const feeRate = Math.max(1, Math.ceil(estimate.feeRate));
       const response = await fetch(API + "/api/inscribe/order", { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ receiver: address, refundAddress: address, userAddress: address, userPubkey: account.publicKey, feeRate, outputValue: 546, chain: network, files: [{ filename: "brc20-transfer-" + ticker + ".json", dataURL: dataUrl(buildBrc20TransferInscription(ticker, amount)) }] }) });
@@ -129,6 +141,26 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
     catch (cause) { setError((cause instanceof Error ? cause.message : "Résultat de diffusion incertain.") + " Ne payez pas à nouveau; vérifiez le TXID " + tx.txid + "."); }
     finally { setBusy(false); }
   }
+  async function checkPaymentStatus() {
+    if (!order?.paymentStarted || !order.paymentTxid) return;
+    setBusy(true); setError(""); setMessage("Vérification du TXID du paiement; aucun nouveau paiement ne sera envoyé.");
+    try {
+      const query = new URLSearchParams({ chain: network, txid: order.paymentTxid });
+      const response = await fetch(API + "/api/mempool/tx-status?" + query, { cache: "no-store", headers: { Accept: "application/json" } });
+      const data = await response.json().catch(() => null) as { confirmed?: boolean; block_height?: number; error?: string } | null;
+      if (response.status === 404) {
+        setMessage("Le TXID n’est pas trouvé par l’explorateur pour le moment. Cela ne prouve pas à lui seul que le paiement n’a pas été accepté. Ne payez pas à nouveau; vérifiez le même TXID sur l’explorateur et réessayez cette vérification plus tard.");
+        return;
+      }
+      if (!response.ok || !data || typeof data.confirmed !== "boolean") throw new Error(data?.error || "L’état du TXID n’a pas pu être confirmé.");
+      setMessage(data.confirmed
+        ? "Paiement confirmé dans le bloc " + (Number.isSafeInteger(data.block_height) ? data.block_height : "inconnu") + " · TXID " + order.paymentTxid + ". Vérifiez maintenant l’ordre d’inscription."
+        : "Le TXID est présent dans le mempool mais pas encore confirmé · " + order.paymentTxid + ". Aucun nouveau paiement n’a été envoyé.");
+    } catch (cause) {
+      setError((cause instanceof Error ? cause.message : "Vérification du TXID impossible.") + " Ne payez pas à nouveau tant que le TXID n’a pas été vérifié.");
+    } finally { setBusy(false); }
+  }
+
   async function checkOrder() {
     if (!order || !order.paymentStarted || order.inscriptionId) return;
     setBusy(true); setError(""); setMessage("Vérification de l’ordre existant; aucun nouveau paiement ne sera envoyé.");
@@ -162,6 +194,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
       {review && plan && !order.paymentStarted && <div className="mt-3 border border-[#3b434d] p-3"><p>Entrées: {review.inputCount} · total {review.inputSats.toLocaleString("en-US")} sats · frais {review.feeSats.toLocaleString("en-US")} sats · change {plan.changeSats.toLocaleString("en-US")} sats.</p><p className="break-all">Destination: {order.payAddress} · montant exact {order.payAmount.toLocaleString("en-US")} sats.</p><label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} className="mt-1" /><span>Je confirme le réseau, l’adresse de paiement, le montant exact et les frais séparés. Signer dans le coffre local.</span></label><button type="button" onClick={() => void signPayment()} disabled={busy || !confirmed} className="mt-3 min-h-11 w-full bg-[#d99a54] px-3 uppercase text-[#0b0f13] disabled:opacity-40">{busy ? "Signature…" : "Signer localement"}</button></div>}
       {signed && !tx && !order.paymentStarted && <button type="button" onClick={() => void finalizePayment()} disabled={busy} className="mt-3 min-h-11 w-full border border-[#3b434d] px-3 uppercase">{busy ? "Finalisation…" : "Vérifier la transaction signée"}</button>}
       {tx && !order.paymentStarted && <div className="mt-3 border border-[#e0b45f]/40 p-3"><p className="break-all">TXID: {tx.txid}</p><button type="button" onClick={() => void broadcastPayment()} disabled={busy} className="mt-3 min-h-11 w-full bg-[#d99a54] px-3 uppercase text-[#0b0f13] disabled:opacity-40">{busy ? "Diffusion…" : "Diffuser le paiement de l’inscription"}</button></div>}
+      {order.paymentStarted && order.paymentTxid && <button type="button" onClick={() => void checkPaymentStatus()} disabled={busy} className="mt-3 min-h-11 w-full border border-[#3b434d] px-3 uppercase disabled:opacity-40">{busy ? "Vérification…" : "Vérifier le TXID du paiement (sans paiement)"}</button>}
       {order.paymentStarted && !order.inscriptionId && <button type="button" onClick={() => void checkOrder()} disabled={busy} className="mt-3 min-h-11 w-full border border-[#d99a54] px-3 uppercase disabled:opacity-40">{busy ? "Vérification…" : "Vérifier l’ordre / inscription (sans paiement)"}</button>}
       {order.inscriptionId && <button type="button" onClick={() => onCreated(order.inscriptionId, order.recipient)} className="mt-3 min-h-11 w-full border border-[#70c7a0] px-3 uppercase text-[#70c7a0]">Sélectionner l’inscription pour l’envoyer</button>}
       {!order.paymentStarted && <button type="button" onClick={discardOrder} disabled={busy} className="mt-2 w-full text-left uppercase text-[#a45e54]">Supprimer le brouillon non payé</button>}
