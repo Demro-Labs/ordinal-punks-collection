@@ -204,6 +204,20 @@ describe("Mempool fee fallback and Legacy transaction routing", () => {
     expect(urls[1]).toBe(`${LIVE_DATA_API_BASE}/api/mempool/fees?chain=${encodeURIComponent(network)}`);
   });
 
+  it.each(["BITCOIN_MAINNET", "FRACTAL_BITCOIN_MAINNET"])("uses a valid fallback fee when halfHourFee is present but invalid for %s", async network => {
+    const urls: string[] = [];
+    installWindowAndFetch(async input => {
+      const url = String(input);
+      urls.push(url);
+      if (new URL(url).pathname === "/api/fees/recommended") return Response.json({ error: "Worker unavailable" }, { status: 503 });
+      return Response.json({ halfHourFee: 0, fastestFee: 5, hourFee: 2, minimumFee: 1 });
+    });
+    const estimate = await getRecommendedFeeEstimate(network);
+    expect(estimate.feeRate).toBe(5);
+    expect(estimate.network).toBe(network);
+    expect(urls).toHaveLength(2);
+  });
+
   it.each([
     { network: "BITCOIN_MAINNET", endpoint: "https://mempool.space" },
     { network: "FRACTAL_BITCOIN_MAINNET", endpoint: "https://mempool.fractalbitcoin.io" },
