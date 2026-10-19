@@ -269,8 +269,6 @@ async function createChallenge(request, env, headers) {
   const site = siteForRequest(siteName, request);
   if (!LOGIN_NETWORKS.has(body.network)) throw new AuthError('AUTH_INVALID_NETWORK', 400);
   if (!isValidAddress(body.address)) throw new AuthError('AUTH_INVALID_ADDRESS', 400);
-  const contextHash = body.contextHash === undefined ? '' : body.contextHash;
-  if (typeof contextHash !== 'string' || (contextHash !== '' && !/^[a-f0-9]{64}$/.test(contextHash))) throw new AuthError('AUTH_INVALID_CONTEXT', 400);
   const expiresAt = now + CHALLENGE_TTL_MS;
   const challengeId = randomToken();
   const idHash = await sha256Hex(challengeId);
@@ -353,6 +351,8 @@ async function createOwnershipChallenge(request, env, headers) {
   const site = siteForRequest(siteName, request);
   if (!OWNERSHIP_NETWORKS.has(body.network)) throw new AuthError('AUTH_INVALID_OWNERSHIP_NETWORK', 400);
   if (!isValidAddress(body.address)) throw new AuthError('AUTH_INVALID_ADDRESS', 400);
+  const contextHash = body.contextHash === undefined ? '' : body.contextHash;
+  if (typeof contextHash !== 'string' || (contextHash !== '' && !/^[a-f0-9]{64}$/.test(contextHash))) throw new AuthError('AUTH_INVALID_CONTEXT', 400);
   const expiresAt = now + CHALLENGE_TTL_MS;
   const challengeId = randomToken();
   const idHash = await sha256Hex(challengeId);
@@ -477,7 +477,7 @@ export class AuthStorage {
   constructor(ctx) {
     this.ctx = ctx;
     const sql = this.ctx.storage.sql;
-    sql.exec('CREATE TABLE IF NOT EXISTS auth_challenges (id_hash TEXT PRIMARY KEY, site TEXT NOT NULL, address TEXT NOT NULL, address_hash TEXT NOT NULL, network TEXT NOT NULL, context_hash TEXT NOT NULL DEFAULT \'\', origin TEXT NOT NULL, issued_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)');
+    sql.exec("CREATE TABLE IF NOT EXISTS auth_challenges (id_hash TEXT PRIMARY KEY, site TEXT NOT NULL, address TEXT NOT NULL, address_hash TEXT NOT NULL, network TEXT NOT NULL, context_hash TEXT NOT NULL DEFAULT '', origin TEXT NOT NULL, issued_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)");
     try { sql.exec("ALTER TABLE auth_challenges ADD COLUMN context_hash TEXT NOT NULL DEFAULT ''"); } catch { /* already migrated */ }
     sql.exec('CREATE INDEX IF NOT EXISTS auth_challenges_expiry_idx ON auth_challenges(expires_at)');
     sql.exec('CREATE TABLE IF NOT EXISTS auth_sessions (token_hash TEXT PRIMARY KEY, site TEXT NOT NULL, address TEXT NOT NULL, network TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)');
@@ -545,8 +545,8 @@ export class AuthStorage {
 
     if (url.pathname === '/challenge/consume-ownership') {
       const result = this.ctx.storage.transactionSync(() => {
-        const row = sql.exec('SELECT site, address, network, expires_at AS expiresAt, used_at AS usedAt FROM auth_challenges WHERE id_hash = ?', body.idHash).toArray()[0];
-        if (!row || row.usedAt || Number(row.expiresAt) <= Number(body.now) || row.site !== body.site || row.address !== body.address || row.network !== body.network) return { created: false };
+        const row = sql.exec('SELECT site, address, network, context_hash AS contextHash, expires_at AS expiresAt, used_at AS usedAt FROM auth_challenges WHERE id_hash = ?', body.idHash).toArray()[0];
+        if (!row || row.usedAt || Number(row.expiresAt) <= Number(body.now) || row.site !== body.site || row.address !== body.address || row.network !== body.network || (row.contextHash ?? '') !== (body.contextHash || '')) return { created: false };
         sql.exec('UPDATE auth_challenges SET used_at = ? WHERE id_hash = ? AND used_at IS NULL AND expires_at > ?', body.now, body.idHash, body.now);
         const changed = Number(sql.exec('SELECT changes() AS changes').toArray()[0]?.changes || 0);
         return { created: changed === 1 };
