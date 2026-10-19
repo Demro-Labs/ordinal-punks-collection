@@ -351,16 +351,17 @@ async function uniNetwork(base, path, env, init = {}) {
   const headers = new Headers(init.headers || {});
   headers.set('Accept', 'application/json');
   headers.set('Content-Type', 'application/json');
-  if (isFractalApi) {
-    if (!env.UNISAT_API_KEY) throw new Error('UniSat server binding is missing');
-    headers.set('Authorization', 'Bearer ' + env.UNISAT_API_KEY);
-  } else if (isBitcoinApi) {
-    if (!env.UNISAT_BITCOIN_API) throw new Error('Bitcoin UniSat server binding is missing');
-    headers.set('Authorization', 'Bearer ' + env.UNISAT_BITCOIN_API);
-  } else {
-    // Never forward either UniSat key to an unconfigured upstream host.
-    headers.delete('Authorization');
+
+  const primaryKey = isFractalApi ? env.UNISAT_API_KEY : isBitcoinApi ? env.UNISAT_BITCOIN_API : null;
+  const fallbackKey = isFractalApi ? env.UNISAT_API_KEY_FALLBACK : isBitcoinApi ? env.UNISAT_BITCOIN_API_FALLBACK : null;
+  const apiKeys = isFractalApi || isBitcoinApi
+    ? [primaryKey, fallbackKey].filter((key, index, values) => typeof key === 'string' && key.length > 0 && values.indexOf(key) === index)
+    : [null];
+  if ((isFractalApi || isBitcoinApi) && apiKeys.length === 0) {
+    throw new Error(isFractalApi ? 'UniSat server binding is missing' : 'Bitcoin UniSat server binding is missing');
   }
+  if (!isFractalApi && !isBitcoinApi) headers.delete('Authorization');
+
   const network = isBitcoinApi ? 'bitcoin' : isFractalApi ? 'fractal' : 'other';
   // Cache only successful, read-only indexer lookups at the edge to conserve UniSat quotas.
   // Never cache UTXO/spend-state, fee estimates, transaction data, or inscription-order routes:
@@ -383,56 +384,81 @@ async function uniNetwork(base, path, env, init = {}) {
       // Cache is an optimization only; continue with the live provider on any cache failure.
     }
   }
-  let response;
-  try {
-    response = await fetch(base + path, {
-      ...init,
-      headers,
-    });
-  } catch (error) {
-    console.warn('UniSat network fetch failed', {
-      network,
-      path,
-      errorName: error instanceof Error ? error.name : 'UnknownError',
-    });
-    throw new Error('UniSat network request failed');
-  }
-  if (!response.ok) {
-    // UniSat reports quota exhaustion as HTTP 403 with API code -2005 on some plans.
-    // Inspect only the documented numeric/string code; never log response bodies, addresses, or auth headers.
-    let upstreamCode = null;
-    try {
-      const payload = await response.clone().json();
-      if (typeof payload?.code === 'number' || typeof payload?.code === 'string') {
-        upstreamCode = String(payload.code).slice(0, 32);
-      }
-    } catch {}
-    console.warn('UniSat network upstream HTTP error', {
-      network,
-      path,
-      status: response.status,
-      upstreamCode,
-      requestId: response.headers.get('x-request-id') || response.headers.get('cf-ray') || null,
-    });
-    if (response.status === 403 && upstreamCode === '-2005') {
-      throw new Error('UniSat API quota exceeded');
-    }
-    throw new Error('UniSat upstream returned ' + response.status);
-  }
+
   let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    console.warn('UniSat network returned invalid JSON', { network, path, status: response.status });
-    throw new Error('UniSat upstream returned invalid JSON');
+  let response;
+  for (let keyIndex = 0; keyIndex < apiKeys.length; keyIndex += 1) {
+    const requestHeaders = new Headers(headers);
+    if (apiKeys[keyIndex]) requestHeaders.set('Authorization', 'Bearer ' + apiKeys[keyIndex]);
+    let currentResponse;
+    try {
+      currentResponse = await fetch(base + path, { ...init, headers: requestHeaders });
+    } catch (error) {
+      console.warn('UniSat network fetch failed', {
+        network,
+        path,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      throw new Error('UniSat network request failed');
+    }
+
+    let upstreamCode = null;
+    if (!currentResponse.ok) {
+      try {
+        const errorPayload = await currentResponse.clone().json();
+        if (typeof errorPayload?.code === 'number' || typeof errorPayload?.code === 'string') {
+          upstreamCode = String(errorPayload.code).slice(0, 32);
+        }
+      } catch {}
+    }
+
+    if (currentResponse.status === 403 && upstreamCode === '-2005' && keyIndex + 1 < apiKeys.length) {
+      // Retry quota exhaustion only with an explicitly configured fallback key for the same network.
+      // Never cross-use Bitcoin and Fractal credentials, and never expose either key to the client.
+      console.warn('UniSat API quota exceeded; trying configured same-network fallback key', {
+        network,
+        path,
+        requestId: currentResponse.headers.get('x-request-id') || currentResponse.headers.get('cf-ray') || null,
+      });
+      continue;
+    }
+
+    if (!currentResponse.ok) {
+      console.warn('UniSat network upstream HTTP error', {
+        network,
+        path,
+        status: currentResponse.status,
+        upstreamCode,
+        requestId: currentResponse.headers.get('x-request-id') || currentResponse.headers.get('cf-ray') || null,
+      });
+      if (currentResponse.status === 403 && upstreamCode === '-2005') {
+        throw new Error('UniSat API quota exceeded');
+      }
+      throw new Error('UniSat upstream returned ' + currentResponse.status);
+    }
+
+    try {
+      payload = await currentResponse.json();
+    } catch {
+      console.warn('UniSat network returned invalid JSON', { network, path, status: currentResponse.status });
+      throw new Error('UniSat upstream returned invalid JSON');
+    }
+    const payloadCode = typeof payload?.code === 'number' || typeof payload?.code === 'string' ? String(payload.code) : 'missing';
+    if (payloadCode === '-2005' && keyIndex + 1 < apiKeys.length) {
+      console.warn('UniSat API quota exceeded; trying configured same-network fallback key', { network, path });
+      continue;
+    }
+    if (payload.code !== 0) {
+      console.warn('UniSat network API rejected request', { network, path, code: payloadCode.slice(0, 32) });
+      if (payloadCode === '-2005') throw new Error('UniSat API quota exceeded');
+      throw new Error('UniSat upstream rejected the request');
+    }
+    response = currentResponse;
+    break;
   }
-  if (payload.code !== 0) {
-    console.warn('UniSat network API rejected request', {
-      network,
-      path,
-      code: typeof payload.code === 'number' || typeof payload.code === 'string' ? String(payload.code).slice(0, 32) : 'missing',
-    });
-    throw new Error('UniSat upstream rejected the request');
+
+  if (!response || !payload || payload.code !== 0) {
+    throw new Error('UniSat API quota exceeded');
   }
   if (edgeCache && cacheKey) {
     try {
