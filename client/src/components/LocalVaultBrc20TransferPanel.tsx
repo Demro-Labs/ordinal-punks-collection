@@ -52,7 +52,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
       setBalances(result.brc20);
       if (!ticker && result.brc20.length) { setTicker(result.brc20[0].ticker); setAmount(result.brc20[0].availableBalance); }
       if (result.brc20.length === 0) setMessage("Aucun solde BRC-20 classique indexé pour ce compte et ce réseau.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Impossible de charger les soldes BRC-20."); }
+    } catch (cause) { setBalances([]); setError(cause instanceof Error ? cause.message : "Impossible de charger les soldes BRC-20."); }
     finally { setLoading(false); }
   }
   useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 300_000); return () => window.clearInterval(timer); }, [address, network, ticker]);
@@ -83,8 +83,20 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
     if (!selected || !context || proofKey !== context || !positive(amount) || compare(amount, selected.availableBalance) > 0 || !recipient.trim()) { setError("Choisissez un ticker et un montant disponible, indiquez le destinataire et terminez la preuve BIP-322 locale."); return; }
     if (!/^[a-z0-9]{1,32}$/i.test(ticker)) { setError("Ticker BRC-20 invalide."); return; }
     if (order) { setError("Un ordre existe déjà pour ce ticker. Reprenez-le au lieu d’en créer un autre."); return; }
+    if (loading) { setError("Attendez la fin de l’actualisation des soldes avant de créer un ordre."); return; }
     setBusy(true); setError(""); setMessage("");
     try {
+      // Revalidate the protocol balance immediately before creating the inscription order.
+      // A previously displayed balance is not authorization to spend a BRC-20 amount.
+      const fresh = await fetchProtocolBalances(address, network);
+      if (fresh.network !== network || fresh.address.toLowerCase() !== address.toLowerCase()) {
+        throw new Error("L’indexeur a répondu pour un autre compte ou réseau. Aucun ordre n’a été créé.");
+      }
+      setBalances(fresh.brc20);
+      const freshSelected = fresh.brc20.find(item => item.ticker.toLowerCase() === ticker.toLowerCase());
+      if (!freshSelected || compare(amount, freshSelected.availableBalance) > 0) {
+        throw new Error("Le solde BRC-20 disponible a changé ou n’est plus vérifiable. Actualisez les soldes et vérifiez le montant avant de réessayer.");
+      }
       const estimate = await getRecommendedFeeEstimate(network);
       const feeRate = Math.max(1, Math.ceil(estimate.feeRate));
       const response = await fetch(API + "/api/inscribe/order", { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ receiver: address, refundAddress: address, userAddress: address, userPubkey: account.publicKey, feeRate, outputValue: 546, chain: network, files: [{ filename: "brc20-transfer-" + ticker + ".json", dataURL: dataUrl(buildBrc20TransferInscription(ticker, amount)) }] }) });
