@@ -60,7 +60,7 @@ describe("prepareLocalNativeTransfer", () => {
       const psbt = bitcoin.Psbt.fromHex(plan.psbtHex, { network: bitcoin.networks.bitcoin });
       expect(plan).toMatchObject({ network, addressType: type, sourceAddress: wallet.addresses[type].address, amountSats: 50_000, feeRateSatVb: 2, changeSats: expect.any(Number) });
       expect(psbt.inputCount).toBe(1);
-      expect(getSpendableUtxos).toHaveBeenLastCalledWith(network, wallet.addresses[type].address, expect.any(Number));
+      expect(getSpendableUtxos).toHaveBeenLastCalledWith(network, wallet.addresses[type].address, 1, { collectAll: true });
       if (type === "legacy") expect(psbt.data.inputs[0].nonWitnessUtxo).toBeDefined();
       if (type === "nested-segwit") expect(psbt.data.inputs[0].redeemScript).toBeDefined();
       if (type === "native-segwit") expect(psbt.data.inputs[0].witnessUtxo).toBeDefined();
