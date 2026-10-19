@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Buffer } from "buffer";
+import * as bitcoin from "bitcoinjs-lib";
 import { CheckCircle2, ShieldCheck } from "lucide-react";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
 import { broadcastLocalPsbt, finalizeLocalPsbt, reviewLocalPsbt, signLocalPsbt, type LocalPsbtReview } from "@/lib/local-psbt-signer";
@@ -8,7 +10,8 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
   const [psbt, setPsbt] = useState("");
   const [addressType, setAddressType] = useState<AddressType>(initialAddressType);
   const [ownershipProofKey, setOwnershipProofKey] = useState<string | null>(null);
-  const ownershipContextKey = psbt.trim() ? JSON.stringify(["generic-psbt", site, network, addressType, wallet.addresses[addressType].address, psbt.trim().toLowerCase()]) : "";
+  const psbtFingerprint = psbt.trim() ? Buffer.from(bitcoin.crypto.sha256(Buffer.from(psbt.trim().toLowerCase(), "utf8"))).toString("hex") : "";
+  const ownershipContextKey = psbtFingerprint ? JSON.stringify(["generic-psbt", site, network, addressType, wallet.addresses[addressType].address, psbtFingerprint]) : "";
   const [review, setReview] = useState<LocalPsbtReview | null>(null);
   const [signed, setSigned] = useState("");
   const [tx, setTx] = useState<{ rawTxHex: string; txid: string } | null>(null);
@@ -83,7 +86,7 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
 
   return <section className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3 sm:mt-5 sm:p-4" aria-labelledby="local-psbt-title">
     <div className="flex items-center gap-2 text-[#f2bd63]"><ShieldCheck size={16} /><h3 id="local-psbt-title" className="font-mono text-[10px] uppercase tracking-[.14em]">Local PSBT signer</h3></div>
-    <p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Generic native BTC only: this signer verifies every exact input against live confirmed, asset-free UTXOs and checks standard address outputs. It refuses Ordinals, BRC-20, Runes, Alkanes and OP_RETURN protocol transactions. Only the public address/outpoints are queried; private keys never leave this device.</p>
+    <p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Standard native BTC/FB only: this signer verifies every exact input against live confirmed, asset-free UTXOs and checks standard address outputs. It refuses Ordinals, BRC-20, Runes, Alkanes and OP_RETURN protocol transactions. Only the public address/outpoints are queried; private keys never leave this device.</p>
     <label className="mt-3 block font-mono text-[9px] uppercase tracking-[.12em] text-[#9ea7b3]" htmlFor="local-psbt-address-type">Source account type</label>
     <select id="local-psbt-address-type" aria-label="Local Vault source address type" value={addressType} onChange={event => { setAddressType(event.target.value as AddressType); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setOwnershipProofKey(null); setError(""); setMessage(""); }} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-sm text-[#f3efe5]">{ADDRESS_SPECS.map(item => <option key={item.type} value={item.type}>{item.label}</option>)}</select>
     <p className="mt-1 break-all font-mono text-[9px] text-[#718092]">Local source: {wallet.addresses[addressType].address}</p>
