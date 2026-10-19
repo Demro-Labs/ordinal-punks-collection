@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, Send, ShieldCheck } from "lucide-react";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
+import { LocalVaultSafeBalanceDiscovery } from "@/components/LocalVaultSafeBalanceDiscovery";
 import { broadcastLocalPsbt, finalizeLocalPsbt, signLocalPsbt, reviewLocalPsbt, type LocalPsbtReview } from "@/lib/local-psbt-signer";
 import { prepareLocalNativeTransfer, type LocalNativeTransferPlan } from "@/lib/local-native-transfer";
 import { describeFeeSources, getRecommendedFeeEstimate, getMempoolConfig, trackMempoolTransaction, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
@@ -87,6 +88,7 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
       {ADDRESS_SPECS.map(item => <option key={item.type} value={item.type}>{item.label}</option>)}
     </select>
     <p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#718092]">Source : {account.label} · {account.address}</p>
+    <LocalVaultSafeBalanceDiscovery wallet={wallet} network={network} selectedAddressType={addressType} onSelectAddressType={nextType => { reset(); onAddressTypeChange(nextType); }} />
     <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_12rem_auto]">
       <input aria-label={`Adresse ${asset} destinataire`} value={recipient} onChange={event => { setRecipient(event.target.value); reset(); }} placeholder="Adresse destinataire" className="min-h-11 min-w-0 border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-base text-[#f3efe5] placeholder:text-[#718092] sm:text-sm" />
       <input aria-label={`Montant ${asset}`} inputMode="decimal" value={amount} onChange={event => { setAmount(event.target.value); reset(); }} placeholder={`Montant ${asset}`} className="min-h-11 border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-base text-[#f3efe5] placeholder:text-[#718092] sm:text-sm" />
