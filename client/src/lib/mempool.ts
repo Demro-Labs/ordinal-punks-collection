@@ -148,7 +148,7 @@ export function minimumSpendableSatsForScript(scriptHex: string): number {
   if (/^0014[a-f0-9]{40}$/.test(script)) return 294; // P2WPKH
   if (/^(?:0020[a-f0-9]{64}|5120[a-f0-9]{64})$/.test(script)) return 330; // P2WSH / P2TR
   if (/^a914[a-f0-9]{40}87$/.test(script)) return 540; // P2SH
-  if (/^76a914[a-f0-9]{40}88$/.test(script)) return 546; // P2PKH
+  if (/^76a914[a-f0-9]{40}88ac$/.test(script)) return 546; // P2PKH
   return 600; // Unknown/non-standard script: keep conservative floor.
 }
 
@@ -232,6 +232,11 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     const missing = requiredOutpoints.filter(outpoint => !byOutpoint.has(outpoint));
     if (missing.length) throw new Error(`The live safe-UTXO index did not verify every exact PSBT input (${missing.join(", ")}). No transaction was signed or broadcast.`);
     return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
+  }
+  // Never silently return a partial set when collectAll reaches the 500-output scan cap.
+  // An incomplete scan could omit fee UTXOs and misstate the address's safe balance.
+  if (options.collectAll && sourceTotal !== null && scannedCount < sourceTotal) {
+    throw new Error(`Safe UTXO scan is incomplete: verified ${scannedCount} of ${sourceTotal} address outputs (scan cap ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). No transaction was signed or broadcast.`);
   }
   if (!options.collectAll && safeSats < minimumSats) {
     const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
