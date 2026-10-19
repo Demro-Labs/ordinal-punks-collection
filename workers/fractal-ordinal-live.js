@@ -1517,6 +1517,13 @@ export default {
         const start = parseBoundedInteger(url.searchParams.get('start'), 0, MAX_MARKET_OFFSET);
         const limit = parseBoundedInteger(url.searchParams.get('limit'), MAX_PAGE_SIZE, MAX_PAGE_SIZE);
         if (!ALLOWED_COLLECTION_IDS.has(collectionId) || start === null || limit === null || limit < 1) {
+          // Invalid traffic still consumes the request budget to prevent abuse.
+          if (isRateLimited(request)) {
+            return Response.json({ error: 'Too many requests.' }, {
+              status: 429,
+              headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' },
+            });
+          }
           return Response.json({ error: 'Invalid market query.' }, {
             status: 400,
             headers: { ...headers, 'Cache-Control': 'no-store' },
