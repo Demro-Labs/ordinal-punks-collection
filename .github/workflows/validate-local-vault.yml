@@ -32,6 +32,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Type check
         run: pnpm run check
+      - name: Test protocol UTXO safety guards
+        run: pnpm exec vitest run client/src/lib/protocol-utxo-safety.test.ts
       - name: Build website
         run: pnpm run build
         env:
