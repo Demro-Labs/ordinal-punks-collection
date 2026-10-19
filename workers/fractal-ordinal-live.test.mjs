@@ -623,7 +623,7 @@ test('routes BRC-20 and Alkanes wallet inventory through the selected network se
     if (url.pathname.endsWith('/runes/1%3A1/utxo')) {
       return Response.json({ code: 0, data: { start: 0, total: 1, utxo: [{ address, txid: 'b'.repeat(64), vout: 1, satoshi: 1200, confirmations: 4, runes: [{ runeid: '1:1', amount: '250' }] }] } });
     }
-    if (url.pathname.endsWith('/runes/utxo/${'b'.repeat(64)}/1/balance')) {
+    if (url.pathname.includes('/runes/utxo/') && url.pathname.endsWith('/1/balance')) {
       return Response.json({ code: 0, data: [{ runeid: '1:1', amount: '250' }] });
     }
     throw new Error(`Unexpected wallet protocol URL: ${url}`);
