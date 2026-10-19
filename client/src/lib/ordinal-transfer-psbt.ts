@@ -9,7 +9,17 @@ if (!globalWithBuffer.Buffer) globalWithBuffer.Buffer = Buffer;
 bitcoin.initEccLib(ecc);
 
 const MAINNET = bitcoin.networks.bitcoin;
-export const MIN_SAFE_OUTPUT_SATS = 1_200;
+// General lower bound for native SegWit outputs. Use script-specific dust floors below.
+export const MIN_SAFE_OUTPUT_SATS = 294;
+
+export function minimumSafeOutputSatsForScript(scriptHex: string): number {
+  const script = typeof scriptHex === "string" ? scriptHex.toLowerCase() : "";
+  if (/^0014[a-f0-9]{40}$/.test(script)) return 294; // P2WPKH
+  if (/^(?:0020[a-f0-9]{64}|5120[a-f0-9]{64})$/.test(script)) return 330; // P2WSH / P2TR
+  if (/^a914[a-f0-9]{40}87$/.test(script)) return 540; // P2SH
+  if (/^76a914[a-f0-9]{40}88ac$/.test(script)) return 546; // P2PKH
+  return 600; // Unknown/non-standard script: conservative floor.
+}
 const MAX_FEE_RATE_SAT_VB = 1_000;
 const MAX_INPUTS = 20;
 export const RBF_SEQUENCE = 0xfffffffd;
@@ -411,7 +421,7 @@ export function buildOrdinalTransferPsbt(params: {
   );
   const changeScript = decodeHex(params.changeScriptHex, "change script");
   const recipientOutputSats = Math.max(
-    MIN_SAFE_OUTPUT_SATS,
+    minimumSafeOutputSatsForScript(params.recipientScriptHex),
     location.offsetSats + 1
   );
   if (!Number.isSafeInteger(recipientOutputSats))
@@ -435,7 +445,7 @@ export function buildOrdinalTransferPsbt(params: {
       ]) * params.feeRateSatVb
     );
     const possibleChange = totalInputSats - recipientOutputSats - feeWithChange;
-    if (possibleChange >= MIN_SAFE_OUTPUT_SATS) {
+    if (possibleChange >= minimumSafeOutputSatsForScript(params.changeScriptHex)) {
       chosenFeeInputs = selected;
       changeOutputSats = possibleChange;
       feeSats = feeWithChange;
@@ -486,7 +496,7 @@ export function buildOrdinalTransferPsbt(params: {
       scriptHex: params.changeScriptHex.toLowerCase(),
       valueSats: changeOutputSats,
     });
-  if (outputs.some(output => output.valueSats < MIN_SAFE_OUTPUT_SATS)) {
+  if (outputs.some(output => output.valueSats < minimumSafeOutputSatsForScript(output.scriptHex))) {
     throw new Error(
       "The prototype would create a dust output; refusing to construct the PSBT."
     );
@@ -654,7 +664,7 @@ export function extractAndVerifySignedOrdinalTransaction(
         "UniSat changed a reviewed transaction output; refusing to broadcast."
       );
     }
-    if (Number(actual.value) < MIN_SAFE_OUTPUT_SATS)
+    if (Number(actual.value) < minimumSafeOutputSatsForScript(expected.scriptHex))
       throw new Error(
         "The signed transaction contains a dust output; refusing to broadcast."
       );
