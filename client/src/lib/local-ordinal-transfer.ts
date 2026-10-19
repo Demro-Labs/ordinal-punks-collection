@@ -79,8 +79,11 @@ export async function prepareLocalOrdinalTransfer(params: {
   if (!Number.isSafeInteger(feeRateSatVb) || feeRateSatVb < 1 || feeRateSatVb > MAX_SAFE_FEE_RATE) throw new Error("Le taux de frais live est hors limites; aucun PSBT n’a été préparé.");
   const recipientScriptHex = Buffer.from(bitcoin.address.toOutputScript(recipient, bitcoin.networks.bitcoin)).toString("hex");
   const changeScriptHex = Buffer.from(bitcoin.address.toOutputScript(account.address, bitcoin.networks.bitcoin)).toString("hex");
-  const requiredSafeSats = Math.max(1_200, Math.ceil(feeRateSatVb * 500) + 1_200);
-  const safeFeeUtxos = await getSpendableUtxos(network, account.address, requiredSafeSats);
+  // Fetch confirmed, asset-free fee candidates first; the PSBT builder below computes
+  // the actual fee from the exact input/output scripts and refuses unsafe dust/change.
+  // A fixed 500-vbyte reserve incorrectly rejected small but valid UTXO sets before
+  // the transaction could be evaluated (e.g. 1,092 safe sats at 1 sat/vB).
+  const safeFeeUtxos = await getSpendableUtxos(network, account.address, 1);
   const ownedInscriptions = live.detail;
   const location = inscription.location.split(":");
   const inscriptionTxid = location[0];
