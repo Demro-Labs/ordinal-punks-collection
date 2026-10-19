@@ -112,7 +112,7 @@ export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSe
     </div>
     {balanceError && <p className="mt-2 font-mono text-[9px] text-[#e0b45f]" role="status">{balanceError}</p>}
 
-    <LocalVaultActiveUtxosPanel address={session.addresses[session.activeAddressType].address} network={session.network} />
+    <div className="mt-3 grid gap-3 xl:grid-cols-2"><LocalVaultActiveUtxosPanel address={session.addresses[session.activeAddressType].address} network="BITCOIN_MAINNET" /><LocalVaultActiveUtxosPanel address={session.addresses[session.activeAddressType].address} network="FRACTAL_BITCOIN_MAINNET" /></div>
 
     <div className="mt-3 border border-[#2c323a] bg-[#10151a] p-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-mono text-[9px] uppercase tracking-[.12em] text-[#d9d3c6]">Recent activity · {session.activeAddressType.replaceAll("-", " ")}</h4>{updatedAt && <p className="font-mono text-[8px] text-[#718092]">Updated {new Date(updatedAt).toLocaleTimeString()}</p>}</div>
