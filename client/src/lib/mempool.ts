@@ -129,6 +129,7 @@ const UTXO_REJECTION_KEYS = [
   "hasInscriptionOrUnknown", "detailMismatch", "spentOrUnknown", "hasRunes", "hasAlkanes",
 ] as const;
 type UtxoRejectionDiagnostics = Record<typeof UTXO_REJECTION_KEYS[number], number>;
+type UtxoRejectionSats = Record<"unconfirmedOrInvalidHeight" | "invalidFlags" | "hasInscriptionOrUnknown" | "detailMismatch" | "spentOrUnknown" | "hasRunes" | "hasAlkanes", number>;
 const UTXO_REJECTION_LABELS: Record<typeof UTXO_REJECTION_KEYS[number], string> = {
   identityMismatch: "adresse/outpoint incohérent",
   invalidValue: "montant inférieur au seuil standard du script ou invalide",
@@ -171,6 +172,10 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     identityMismatch: 0, invalidValue: 0, invalidScript: 0, unconfirmedOrInvalidHeight: 0, invalidFlags: 0,
     hasInscriptionOrUnknown: 0, detailMismatch: 0, spentOrUnknown: 0, hasRunes: 0, hasAlkanes: 0,
   };
+  const rejectionSatsTotals: UtxoRejectionSats = {
+    unconfirmedOrInvalidHeight: 0, invalidFlags: 0, hasInscriptionOrUnknown: 0,
+    detailMismatch: 0, spentOrUnknown: 0, hasRunes: 0, hasAlkanes: 0,
+  };
   for (let pageNumber = 0; pageNumber < MAX_SPENDABLE_UTXO_PAGES; pageNumber += 1) {
     const query = new URLSearchParams({ chain, address, cursor: String(cursor), size: String(SPENDABLE_UTXO_PAGE_SIZE) });
     if (options.mobile) query.set("mobile", "1");
@@ -178,6 +183,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       chain?: string; address?: string; cursor?: number; nextCursor?: number; total?: number; scannedCount?: number;
       utxo?: Array<Record<string, unknown>>;
       diagnostics?: Partial<UtxoRejectionDiagnostics>;
+      diagnosticsSats?: Partial<UtxoRejectionSats>;
     };
     const page: SpendableUtxoPage = await requestJson<SpendableUtxoPage>(`${LIVE_DATA_API_BASE}/api/spendable-utxos?${query}`, 15_000);
     const pageScannedCount = page.scannedCount;
@@ -205,6 +211,15 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       }
       if (rejectedOnPage + page.utxo.length > pageScannedCount!) {
         throw new Error("The Worker returned inconsistent safe-UTXO rejection diagnostics.");
+      }
+    }
+    if (page.diagnosticsSats !== undefined) {
+      for (const key of Object.keys(rejectionSatsTotals) as (keyof UtxoRejectionSats)[]) {
+        const value = page.diagnosticsSats[key];
+        if (!Number.isSafeInteger(value) || (value as number) < 0) {
+          throw new Error("The Worker returned invalid safe-UTXO rejected-value diagnostics.");
+        }
+        rejectionSatsTotals[key] += value as number;
       }
     }
     const safe = page.utxo.filter((item): item is SpendableUtxo =>
@@ -246,7 +261,12 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       .map(key => `${UTXO_REJECTION_LABELS[key]}: ${rejectionTotals[key]}`)
       .join("; ");
     const diagnosticHint = rejectionSummary ? ` Motifs de rejet UniSat/Worker: ${rejectionSummary}.` : "";
-    throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} UniSat address outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}; protocol-asset outputs are checked and excluded from fee inputs). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.${diagnosticHint}${zeroSafeBalanceHint}`);
+    const rejectedValueSummary = (Object.keys(rejectionSatsTotals) as (keyof UtxoRejectionSats)[])
+      .filter(key => rejectionSatsTotals[key] > 0)
+      .map(key => `${UTXO_REJECTION_LABELS[key]}: ${rejectionSatsTotals[key].toLocaleString("en-US")} sats`)
+      .join("; ");
+    const rejectedValueHint = rejectedValueSummary ? ` Valeur des sorties rejetées par motif: ${rejectedValueSummary}.` : "";
+    throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} UniSat address outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}; protocol-asset outputs are checked and excluded from fee inputs). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.${diagnosticHint}${rejectedValueHint}${zeroSafeBalanceHint}`);
   }
   return collected;
 }
