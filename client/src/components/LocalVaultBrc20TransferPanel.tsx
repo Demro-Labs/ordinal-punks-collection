@@ -141,6 +141,26 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
     catch (cause) { setError((cause instanceof Error ? cause.message : "Résultat de diffusion incertain.") + " Ne payez pas à nouveau; vérifiez le TXID " + tx.txid + "."); }
     finally { setBusy(false); }
   }
+  async function checkPaymentStatus() {
+    if (!order?.paymentStarted || !order.paymentTxid) return;
+    setBusy(true); setError(""); setMessage("Vérification du TXID du paiement; aucun nouveau paiement ne sera envoyé.");
+    try {
+      const query = new URLSearchParams({ chain: network, txid: order.paymentTxid });
+      const response = await fetch(API + "/api/mempool/tx-status?" + query, { cache: "no-store", headers: { Accept: "application/json" } });
+      const data = await response.json().catch(() => null) as { confirmed?: boolean; block_height?: number; error?: string } | null;
+      if (response.status === 404) {
+        setMessage("Le TXID n’est pas trouvé par l’explorateur pour le moment. Cela ne prouve pas à lui seul que le paiement n’a pas été accepté. Ne payez pas à nouveau; vérifiez le même TXID sur l’explorateur et réessayez cette vérification plus tard.");
+        return;
+      }
+      if (!response.ok || !data || typeof data.confirmed !== "boolean") throw new Error(data?.error || "L’état du TXID n’a pas pu être confirmé.");
+      setMessage(data.confirmed
+        ? "Paiement confirmé dans le bloc " + (Number.isSafeInteger(data.block_height) ? data.block_height : "inconnu") + " · TXID " + order.paymentTxid + ". Vérifiez maintenant l’ordre d’inscription."
+        : "Le TXID est présent dans le mempool mais pas encore confirmé · " + order.paymentTxid + ". Aucun nouveau paiement n’a été envoyé.");
+    } catch (cause) {
+      setError((cause instanceof Error ? cause.message : "Vérification du TXID impossible.") + " Ne payez pas à nouveau tant que le TXID n’a pas été vérifié.");
+    } finally { setBusy(false); }
+  }
+
   async function checkOrder() {
     if (!order || !order.paymentStarted || order.inscriptionId) return;
     setBusy(true); setError(""); setMessage("Vérification de l’ordre existant; aucun nouveau paiement ne sera envoyé.");
@@ -174,6 +194,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
       {review && plan && !order.paymentStarted && <div className="mt-3 border border-[#3b434d] p-3"><p>Entrées: {review.inputCount} · total {review.inputSats.toLocaleString("en-US")} sats · frais {review.feeSats.toLocaleString("en-US")} sats · change {plan.changeSats.toLocaleString("en-US")} sats.</p><p className="break-all">Destination: {order.payAddress} · montant exact {order.payAmount.toLocaleString("en-US")} sats.</p><label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} className="mt-1" /><span>Je confirme le réseau, l’adresse de paiement, le montant exact et les frais séparés. Signer dans le coffre local.</span></label><button type="button" onClick={() => void signPayment()} disabled={busy || !confirmed} className="mt-3 min-h-11 w-full bg-[#d99a54] px-3 uppercase text-[#0b0f13] disabled:opacity-40">{busy ? "Signature…" : "Signer localement"}</button></div>}
       {signed && !tx && !order.paymentStarted && <button type="button" onClick={() => void finalizePayment()} disabled={busy} className="mt-3 min-h-11 w-full border border-[#3b434d] px-3 uppercase">{busy ? "Finalisation…" : "Vérifier la transaction signée"}</button>}
       {tx && !order.paymentStarted && <div className="mt-3 border border-[#e0b45f]/40 p-3"><p className="break-all">TXID: {tx.txid}</p><button type="button" onClick={() => void broadcastPayment()} disabled={busy} className="mt-3 min-h-11 w-full bg-[#d99a54] px-3 uppercase text-[#0b0f13] disabled:opacity-40">{busy ? "Diffusion…" : "Diffuser le paiement de l’inscription"}</button></div>}
+      {order.paymentStarted && order.paymentTxid && <button type="button" onClick={() => void checkPaymentStatus()} disabled={busy} className="mt-3 min-h-11 w-full border border-[#3b434d] px-3 uppercase disabled:opacity-40">{busy ? "Vérification…" : "Vérifier le TXID du paiement (sans paiement)"}</button>}
       {order.paymentStarted && !order.inscriptionId && <button type="button" onClick={() => void checkOrder()} disabled={busy} className="mt-3 min-h-11 w-full border border-[#d99a54] px-3 uppercase disabled:opacity-40">{busy ? "Vérification…" : "Vérifier l’ordre / inscription (sans paiement)"}</button>}
       {order.inscriptionId && <button type="button" onClick={() => onCreated(order.inscriptionId, order.recipient)} className="mt-3 min-h-11 w-full border border-[#70c7a0] px-3 uppercase text-[#70c7a0]">Sélectionner l’inscription pour l’envoyer</button>}
       {!order.paymentStarted && <button type="button" onClick={discardOrder} disabled={busy} className="mt-2 w-full text-left uppercase text-[#a45e54]">Supprimer le brouillon non payé</button>}
