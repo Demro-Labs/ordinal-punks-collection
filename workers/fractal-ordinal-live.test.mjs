@@ -1113,11 +1113,14 @@ test('reports safe-UTXO rejection reasons without exposing addresses or outpoint
     assert.equal(data.diagnostics.hasRunes, 0);
     assert.equal(data.diagnostics.hasAlkanes, 0);
     const serialized = JSON.stringify(data);
-    assert.equal(serialized.includes(address), true); // existing response includes the requested address
+    const diagnosticJson = JSON.stringify(data.diagnostics);
+    assert.equal(serialized.includes(address), true); // the existing response includes the requested address
     assert.equal(serialized.includes(valid.txid), true); // only the accepted safe UTXO is returned
     assert.equal(serialized.includes(unconfirmed.txid), false);
     assert.equal(serialized.includes(inscription.txid), false);
     assert.equal(serialized.includes('redacted-test-inscription'), false);
+    assert.equal(diagnosticJson.includes(address), false);
+    assert.equal(diagnosticJson.includes(valid.txid), false);
     assert.equal(serialized.includes('test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
 });
