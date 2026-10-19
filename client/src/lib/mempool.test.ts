@@ -82,6 +82,22 @@ describe("getSpendableUtxos", () => {
     expect(result[0]).toMatchObject({ isLowFee: true, height: 100, inscriptionsRunesAlkanesChecked: true });
   });
 
+  it("collects all safe UTXOs for exact PSBT fee calculation instead of enforcing a fixed reserve", async () => {
+    const cursors: number[] = [];
+    installWindowAndFetch(async input => {
+      const url = new URL(String(input));
+      const cursor = Number(url.searchParams.get("cursor"));
+      cursors.push(cursor);
+      const utxo = cursor === 0
+        ? [makeSafeUtxo({ txid: "a".repeat(64), satoshi: 600 })]
+        : [makeSafeUtxo({ txid: "b".repeat(64), satoshi: 492 })];
+      return Response.json({ chain: "fractal", address: ADDRESS, cursor, nextCursor: cursor + 1, total: 2, scannedCount: 1, utxo });
+    });
+    const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1, { collectAll: true });
+    expect(cursors).toEqual([0, 1]);
+    expect(result.reduce((sum, item) => sum + item.satoshi, 0)).toBe(1_092);
+  });
+
   it("keeps paging until every exact PSBT outpoint is verified", async () => {
     const cursors: number[] = [];
     installWindowAndFetch(async input => {
