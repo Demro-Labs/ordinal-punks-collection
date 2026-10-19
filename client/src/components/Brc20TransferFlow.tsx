@@ -10,7 +10,7 @@ import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 import { sendOrdinalInscriptionWithCustomPsbt, type UniSatCustomTransferProvider } from "@/lib/custom-ordinal-transfer";
 import { isMobileUniSatDevice } from "@/lib/mobile-context";
-import { sendNativeUniSatBitcoinPayment } from "@/lib/native-unisat-actions";
+import { ensureNativePaymentBalance, sendNativeUniSatBitcoinPayment } from "@/lib/native-unisat-actions";
 import { loadOwnedInscriptionsForMobileTransfer } from "@/lib/brc20-mobile-inscriptions";
 import type { OrdinalTransferPlan } from "@/lib/ordinal-transfer-psbt";
 import type { ProtocolNetwork } from "@/lib/protocol-balances";
@@ -127,6 +127,7 @@ export function Brc20TransferFlow({
   const [busyAction, setBusyAction] = useState<BusyAction>("");
   const [message, setMessage] = useState("");
   const [feeRate, setFeeRate] = useState(initialProgress?.feeRate || 1);
+  const [paymentPreflight, setPaymentPreflight] = useState<{ orderId: string; expiresAt: number } | null>(null);
   const chainLabel = network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin";
   const ownershipContextKey = recipient.trim() && validDecimal(amountToTransfer)
     ? JSON.stringify(["brc20-transfer", kind, site, address, network, ticker, recipient.trim(), amountToTransfer])
@@ -214,6 +215,7 @@ export function Brc20TransferFlow({
     setAmountToTransfer(restored?.amount || amount);
     setValidatedRecipient(restored?.recipient || "");
     setFeeRate(restored?.feeRate || 1);
+    setPaymentPreflight(null);
     setConfirmed(false);
     setOwnershipProofKey(null);
     setOwnershipProofVersion(value => value + 1);
@@ -324,8 +326,28 @@ export function Brc20TransferFlow({
     if (!confirmed || !ownershipContextKey || ownershipProofKey !== ownershipContextKey || validatedRecipient !== recipient.trim()) {
       setMessage("Confirm the recipient, verify the address, and complete the ownership proof before payment."); return;
     }
+    // Verify confirmed, asset-free funds before opening the wallet approval prompt.
+    // Keep preflight separate from approval so UniSat Mobile retains its user gesture.
+    if (!paymentPreflight || paymentPreflight.orderId !== current.orderId || Date.now() >= paymentPreflight.expiresAt) {
+      setBusyAction("preparing");
+      setMessage("Checking confirmed, asset-free UTXOs for the inscription payment and network fees. No payment has been requested.");
+      void ensureNativePaymentBalance(network, address, current.payAmount, current.feeRate, "inscribe-payment", { mobile: isMobileUniSatDevice() })
+        .then(() => {
+          if (progressRef.current?.orderId !== current.orderId || progressRef.current.paymentTxid) return;
+          setPaymentPreflight({ orderId: current.orderId, expiresAt: Date.now() + 60_000 });
+          setMessage("Safe-UTXO preflight passed. Tap “Pay to create inscription” again within 60 seconds to open UniSat approval.");
+        })
+        .catch(cause => {
+          const detail = cause instanceof Error ? cause.message : String(cause);
+          setPaymentPreflight(null);
+          setMessage(`Payment blocked before wallet approval. No payment was sent. ${detail} Keep this existing order; do not create another one. After funding a separate confirmed UTXO without Ordinals, Runes or Alkanes, rerun this check. UniSat UTXO tool: https://unisat.io/utxo`);
+        })
+        .finally(() => setBusyAction(""));
+      return;
+    }
     const attempted: Brc20TransferProgress = { ...current, recipient: recipient.trim(), paymentStarted: true };
     storeProgress(attempted);
+    setPaymentPreflight(null);
     setBusyAction("paying");
     setMessage(`Approve the ${current.payAmount.toLocaleString()} sats payment in UniSat to create the transferable inscription.`);
     let paymentRequest: Promise<string | { txid?: string }>;
