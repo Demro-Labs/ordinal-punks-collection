@@ -108,6 +108,22 @@ function buildFor(
 }
 
 describe("experimental Ordinal PSBT constructor", () => {
+  it("uses BIP-174 PSBT v0 metadata and a version-2 unsigned transaction", () => {
+    const plan = buildFor("native-segwit");
+    const psbt = bitcoin.Psbt.fromHex(plan.psbtHex, { network: NETWORK });
+    // PSBT v0 carries the unsigned transaction in the global map; transaction version is separate.
+    expect(psbt.data.globalMap.unsignedTx).toBeTruthy();
+    expect(psbt.data.globalMap.unsignedTx!.tx.version).toBe(2);
+    expect(psbt.inputCount).toBe(plan.inputs.length);
+    psbt.data.inputs.forEach((input, index) => {
+      if (plan.inputs[index].spendType === "legacy") {
+        expect(input.nonWitnessUtxo).toBeTruthy();
+      } else {
+        expect(input.witnessUtxo).toBeTruthy();
+      }
+    });
+  });
+
   it.each(Object.keys(outputScripts) as SpendType[])(
     "validates and finalizes a real %s signature without changing the plan",
     spendType => {

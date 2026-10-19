@@ -501,6 +501,9 @@ export function buildOrdinalTransferPsbt(params: {
     );
   }
 
+  // BIP-174 PSBT v0 is deliberate: this transfer fixes every input and output before signing.
+  // setVersion(2) below is the Bitcoin transaction version, not the PSBT format version.
+  // BIP-370 PSBT v2 is unnecessary here because no inputs/outputs are added after handoff.
   const psbt = new bitcoin.Psbt({ network: MAINNET });
   psbt.setVersion(2);
   for (const input of inputs) addPsbtInput(psbt, input, RBF_SEQUENCE);
