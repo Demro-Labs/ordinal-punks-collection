@@ -1545,7 +1545,7 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/api/brc20-prog/activation/broadcast') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
-      if (!ALLOWED_ORIGINS.has(origin)) return Response.json({ error: 'Origine non autorisée pour diffuser une activation BRC2.0.' }, { status: 403, headers: noStore });
+      if (!isAllowedOrigin(origin)) return Response.json({ error: 'Origine non autorisée pour diffuser une activation BRC2.0.' }, { status: 403, headers: noStore });
       if (isRateLimited(request) || isBrc20ProgActivationRateLimited(request)) return Response.json({ error: 'Trop de tentatives de diffusion. Réessayez dans une minute.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       return broadcastBrc20ProgActivation(request, headers);
     }
@@ -1725,7 +1725,7 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/api/spendable-utxos/confirm') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
-      if (!ALLOWED_ORIGINS.has(origin)) return Response.json({ error: 'Origine non autorisée pour confirmer les UTXO.' }, { status: 403, headers: noStore });
+      if (!isAllowedOrigin(origin)) return Response.json({ error: 'Origine non autorisée pour confirmer les UTXO.' }, { status: 403, headers: noStore });
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       try { return await confirmSpendableUtxos(request, env, headers); } catch (error) {
         const failure = error instanceof SpendableUtxoError ? error : new SpendableUtxoError('UTXO_CONFIRM_FAILED');
@@ -1736,7 +1736,7 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/api/inscribe/order') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
-      if (!ALLOWED_ORIGINS.has(origin)) return Response.json({ error: 'Origine non autorisée pour créer une commande.' }, { status: 403, headers: noStore });
+      if (!isAllowedOrigin(origin)) return Response.json({ error: 'Origine non autorisée pour créer une commande.' }, { status: 403, headers: noStore });
       if (isRateLimited(request) || isInscribeRateLimited(request)) return Response.json({ error: 'Trop de commandes. Réessayez dans une minute.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       if (!(request.headers.get('Content-Type') || '').toLowerCase().includes('application/json')) return Response.json({ error: 'Content-Type JSON requis.' }, { status: 415, headers: noStore });
       const contentLength = Number(request.headers.get('Content-Length') || 0);
@@ -1750,7 +1750,7 @@ export default {
     }
     if (request.method === 'POST' && url.pathname === '/api/inscribe/order/cancel') {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
-      if (!ALLOWED_ORIGINS.has(origin)) return Response.json({ error: 'Origine non autorisée pour annuler une commande.' }, { status: 403, headers: noStore });
+      if (!isAllowedOrigin(origin)) return Response.json({ error: 'Origine non autorisée pour annuler une commande.' }, { status: 403, headers: noStore });
       if (isRateLimited(request) || isInscribeRateLimited(request)) return Response.json({ error: 'Trop de commandes. Réessayez dans une minute.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       if (!(request.headers.get('Content-Type') || '').toLowerCase().includes('application/json')) return Response.json({ error: 'Content-Type JSON requis.' }, { status: 415, headers: noStore });
       return await cancelInscribeOrder(request, env, headers);
