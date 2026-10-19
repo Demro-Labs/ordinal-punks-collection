@@ -1470,7 +1470,7 @@ test('ownership challenges support Bitcoin and Fractal without creating an authe
     assert.equal(result.network, network);
     assert.match(result.message, new RegExp(`Network: ${network}`));
     assert.match(result.message, /does not authorize, sign, or broadcast a payment or transfer/i);
-    assert.match(result.message, /A separate UniSat transaction approval is required/i);
+    assert.match(result.message, /A separate transaction review and signature is required/i);
     assert.equal(state.challenge.network, network);
     assert.equal(state.session, null);
   }

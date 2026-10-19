@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, Send, ShieldCheck } from "lucide-react";
+import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
 import { broadcastLocalPsbt, finalizeLocalPsbt, signLocalPsbt, reviewLocalPsbt, type LocalPsbtReview } from "@/lib/local-psbt-signer";
 import { prepareLocalNativeTransfer, type LocalNativeTransferPlan } from "@/lib/local-native-transfer";
 import { describeFeeSources, getRecommendedFeeEstimate, getMempoolConfig, trackMempoolTransaction, type FeeEstimate, type MempoolReceipt } from "@/lib/mempool";
@@ -8,7 +9,7 @@ import { ADDRESS_SPECS, type AddressType, type OrdiNetwork, type OrdiWalletRecor
 function assetLabel(network: OrdiNetwork) { return network === "BITCOIN_MAINNET" ? "BTC" : "FB"; }
 function formatAsset(sats: number, asset: string) { return `${(sats / 100_000_000).toLocaleString("en-US", { minimumFractionDigits: 8, maximumFractionDigits: 8 })} ${asset}`; }
 
-export function LocalNativeTransferPanel({ wallet, network, onDone }: { wallet: OrdiWalletRecord; network: OrdiNetwork; onDone?: () => void }) {
+export function LocalNativeTransferPanel({ wallet, network, site = "pokedex", onDone }: { wallet: OrdiWalletRecord; network: OrdiNetwork; site?: "punks" | "pokedex"; onDone?: () => void }) {
   const asset = assetLabel(network);
   const [addressType, setAddressType] = useState<AddressType>("native-segwit");
   const account = wallet.addresses[addressType];
@@ -24,6 +25,10 @@ export function LocalNativeTransferPanel({ wallet, network, onDone }: { wallet: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [ownershipProofKey, setOwnershipProofKey] = useState<string | null>(null);
+  const ownershipContextKey = recipient.trim() && amount.trim()
+    ? JSON.stringify(["native-transfer", network, account.address, addressType, recipient.trim(), amount.trim()])
+    : "";
 
   useEffect(() => {
     setPlan(null); setReview(null); setSigned(""); setTx(null); setReceipt(null); setConfirmed(false); setError(""); setMessage("");
@@ -33,6 +38,7 @@ export function LocalNativeTransferPanel({ wallet, network, onDone }: { wallet: 
   const reset = () => { setPlan(null); setReview(null); setSigned(""); setTx(null); setReceipt(null); setConfirmed(false); setMessage(""); };
 
   const prepare = async () => {
+    if (!ownershipContextKey || ownershipProofKey !== ownershipContextKey) { setError("Complete the local BIP-322 ownership proof for this source account, recipient, amount, and network before preparing the transfer."); return; }
     setBusy(true); setError(""); setMessage(""); reset();
     try {
       const next = await prepareLocalNativeTransfer(network, wallet, addressType, recipient, amount);
@@ -44,7 +50,7 @@ export function LocalNativeTransferPanel({ wallet, network, onDone }: { wallet: 
   };
 
   const sign = async () => {
-    if (!plan || !review || !confirmed) return;
+    if (!plan || !review || !confirmed || ownershipProofKey !== ownershipContextKey) return;
     setBusy(true); setError("");
     try { setSigned(await signLocalPsbt(plan.psbtHex, wallet, review)); setMessage("Signature créée localement. La transaction n’est pas encore diffusée."); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "La signature locale a échoué."); }
@@ -76,6 +82,7 @@ export function LocalNativeTransferPanel({ wallet, network, onDone }: { wallet: 
   return <section className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3 sm:mt-5 sm:p-4" aria-labelledby="local-native-transfer-title">
     <div className="flex items-center gap-2 text-[#f2bd63]"><Send size={15} /><h3 id="local-native-transfer-title" className="font-mono text-[10px] uppercase tracking-[.14em]">Send {asset} · Local Vault</h3></div>
     <p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Paiement natif {asset} depuis Legacy, Nested SegWit, Native SegWit ou Taproot : les UTXO confirmés sans Ordinal, Rune ou Alkane sont vérifiés en direct, puis la transaction est signée dans le coffre local. Les clés privées ne quittent jamais cet appareil.</p>
+    <LocalVaultOwnershipProof key={ownershipContextKey || "native-proof-empty"} site={site} network={network} wallet={wallet} addressType={addressType} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />
     <label className="mt-3 block font-mono text-[9px] uppercase tracking-[.12em] text-[#9ea7b3]" htmlFor="local-native-source-type">Type d’adresse source</label>
     <select id="local-native-source-type" aria-label="Type d’adresse source" value={addressType} onChange={event => { reset(); setAddressType(event.target.value as AddressType); }} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-sm text-[#f3efe5]">
       {ADDRESS_SPECS.map(item => <option key={item.type} value={item.type}>{item.label}</option>)}
