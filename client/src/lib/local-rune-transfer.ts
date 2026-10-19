@@ -51,13 +51,18 @@ async function allRuneUtxos(address: string, network: OrdiNetwork, runeid: strin
 function signerFor(account: OrdiWalletRecord["addresses"][AddressType], type: AddressType) {
   const pub = Buffer.from(account.publicKey, "hex"), priv = Buffer.from(account.privateKey, "hex");
   if (pub.length !== 33 || priv.length !== 32 || !ecc.isPrivate(priv) || !Buffer.from(ecc.pointFromScalar(priv, true) ?? []).equals(pub)) throw new Error("Local private key does not match the selected account.");
-  if (type !== "taproot") return { publicKey: pub, sign: (h: Uint8Array) => Buffer.from(ecc.sign(h, priv)) };
-  const adjusted = pub[0] === 3 ? Buffer.from(ecc.privateNegate(priv)) : priv;
-  const tweaked = ecc.privateAdd(adjusted, bitcoin.crypto.taggedHash("TapTweak", bitcoin.toXOnly(pub)));
+  // bitcoinjs-lib may supply Uint8Array hashes; normalize every ECC boundary to Buffer.
+  if (type !== "taproot") return { publicKey: pub, sign: (h: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(h), Buffer.from(priv))) };
+  const adjusted = pub[0] === 3 ? Buffer.from(ecc.privateNegate(Buffer.from(priv))) : Buffer.from(priv);
+  const tweaked = ecc.privateAdd(adjusted, Buffer.from(bitcoin.crypto.taggedHash("TapTweak", bitcoin.toXOnly(pub))));
   if (!tweaked) throw new Error("Taproot key tweak failed.");
-  const tweakedPub = ecc.pointFromScalar(tweaked, true);
+  const tweakedPub = ecc.pointFromScalar(Buffer.from(tweaked), true);
   if (!tweakedPub) throw new Error("Taproot public key derivation failed.");
-  return { publicKey: Buffer.from(tweakedPub), sign: (h: Uint8Array) => Buffer.from(ecc.sign(h, tweaked)), signSchnorr: (h: Uint8Array) => Buffer.from(ecc.signSchnorr(h, tweaked)) };
+  return {
+    publicKey: Buffer.from(tweakedPub),
+    sign: (h: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(h), Buffer.from(tweaked))),
+    signSchnorr: (h: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(h), Buffer.from(tweaked))),
+  };
 }
 function addInput(psbt: bitcoin.Psbt, item: { txid: string; vout: number; satoshi: number; scriptPk: string; rawTx?: string }, type: AddressType, pub: Buffer) {
   const base = { hash: item.txid, index: item.vout, sequence: 0xfffffffd };
@@ -169,7 +174,9 @@ export async function signLocalRuneTransfer(plan: LocalRuneTransferPlan, wallet:
   await assertCurrent(plan);
   const psbt=bitcoin.Psbt.fromHex(plan.psbtHex,{network:NET}), signer=signerFor(wallet.addresses[plan.addressType],plan.addressType);
   psbt.data.inputs.forEach((input,i)=>{ if(input.partialSig?.length||input.tapKeySig||input.tapScriptSig?.length) throw new Error("PSBT already contains signatures."); psbt.signInput(i,signer,plan.addressType==="taproot"?[bitcoin.Transaction.SIGHASH_DEFAULT,bitcoin.Transaction.SIGHASH_ALL]:[bitcoin.Transaction.SIGHASH_ALL]); });
-  const verify=plan.addressType==="taproot"?(key:Uint8Array,h:Uint8Array,s:Uint8Array)=>ecc.verifySchnorr(h,key,s):(key:Uint8Array,h:Uint8Array,s:Uint8Array)=>ecc.verify(h,key,s);
+  const verify=plan.addressType==="taproot"
+    ? (key:Uint8Array,h:Uint8Array,s:Uint8Array)=>ecc.verifySchnorr(Buffer.from(h),Buffer.from(key),Buffer.from(s))
+    : (key:Uint8Array,h:Uint8Array,s:Uint8Array)=>ecc.verify(Buffer.from(h),Buffer.from(key),Buffer.from(s));
   try { psbt.validateSignaturesOfAllInputs(verify); psbt.finalizeAllInputs(); } catch { throw new Error("Local Rune PSBT signature validation failed."); }
   const rawTxHex=psbt.extractTransaction(true).toHex(), tx=validateTx(rawTxHex,plan);
   return {rawTxHex,txid:tx.getId().toLowerCase()};

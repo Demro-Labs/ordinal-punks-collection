@@ -77,30 +77,45 @@ function normalizeBalance(value: unknown): FractalRuneBalance | null {
 }
 
 async function requestJson<T>(url: string): Promise<T> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 10_000);
-  try {
-    const response = await fetch(url, {
-      headers: { Accept: "application/json" },
-      credentials: "omit",
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    const data = (await response.json().catch(() => null)) as
-      | ({ error?: unknown } & Record<string, unknown>)
-      | null;
-    if (!response.ok) {
-      throw new Error(
-        typeof data?.error === "string"
-          ? data.error
-          : `Rune API HTTP ${response.status}`
-      );
+  // Retry one transient upstream throttle only. Never loop indefinitely or hide a depleted quota.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        credentials: "omit",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const data = (await response.json().catch(() => null)) as
+        | ({ error?: unknown; code?: unknown } & Record<string, unknown>)
+        | null;
+      if (!response.ok) {
+        const message = typeof data?.error === "string" ? data.error : `Rune API HTTP ${response.status}`;
+        const retryable = attempt === 0 && (response.status === 429 || response.status === 503)
+          && /rate.?limit|quota|temporar|unavailable/i.test(message);
+        if (retryable) {
+          const retryAfter = Number(response.headers.get("Retry-After"));
+          const delayMs = Number.isFinite(retryAfter) && retryAfter >= 0
+            ? Math.min(3_000, retryAfter * 1_000)
+            : 1_000;
+          window.clearTimeout(timer);
+          await new Promise(resolve => window.setTimeout(resolve, delayMs));
+          continue;
+        }
+        const suffix = response.status === 429 || /quota|rate.?limit/i.test(message)
+          ? " UniSat quota/rate limit may require waiting or configuring a key with available quota."
+          : "";
+        throw new Error(message + suffix);
+      }
+      if (!data) throw new Error("The Rune API returned an invalid response.");
+      return data as T;
+    } finally {
+      window.clearTimeout(timer);
     }
-    if (!data) throw new Error("The Rune API returned an invalid response.");
-    return data as T;
-  } finally {
-    window.clearTimeout(timer);
   }
+  throw new Error("Rune API is still rate-limited after one retry. Wait before refreshing; no transaction was signed.");
 }
 
 export async function fetchRuneBalancePage(
