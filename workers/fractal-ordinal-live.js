@@ -471,7 +471,7 @@ function normalizeAlkaneInfo(value) {
   };
 }
 
-function normalizeRuneUtxo(value, address, runeid) {
+function normalizeRuneUtxo(value, address, runeid, runeBalances) {
   const txid = typeof value?.txid === 'string' ? value.txid.toLowerCase() : '';
   const vout = Number(value?.vout);
   const satoshi = Number(value?.satoshi);
@@ -481,9 +481,9 @@ function normalizeRuneUtxo(value, address, runeid) {
     !Number.isSafeInteger(vout) || vout < 0 ||
     !Number.isSafeInteger(satoshi) || satoshi < 1 ||
     !Number.isSafeInteger(confirmations) || confirmations < 1 ||
-    !Array.isArray(value.runes) || value.runes.length < 1 || value.runes.length > 100
+    !Array.isArray(runeBalances) || runeBalances.length > 100
   ) return null;
-  const runes = value.runes.map(item => {
+  const runes = runeBalances.map(item => {
     if (!item || !validRuneId(item.runeid) || typeof item.amount !== 'string' || !/^\d{1,80}$/.test(item.amount) || BigInt(item.amount) <= 0n) return null;
     return { runeid: item.runeid, amount: item.amount };
   });
@@ -546,8 +546,15 @@ async function walletProtocolAssets(request, env, headers) {
       if (!validRuneId(runeid)) return Response.json({ error: 'Identifiant Rune invalide.' }, { status: 400, headers: noStore });
       const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/runes/${encodeURIComponent(runeid)}/utxo?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
       if (Number(source?.start) !== start || !Number.isSafeInteger(Number(source?.total)) || Number(source.total) < 0 || !Array.isArray(source?.utxo) || source.utxo.length > limit) throw new Error('Invalid UniSat Rune UTXO response');
-      const utxo = source.utxo.map(item => normalizeRuneUtxo(item, address, runeid));
-      if (utxo.some(item => item === null)) throw new Error('Invalid UniSat Rune UTXO item');
+      const utxo = await Promise.all(source.utxo.map(async item => {
+        const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
+        const vout = Number(item?.vout);
+        if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0) throw new Error('Invalid Rune outpoint');
+        const balances = await uniNetwork(base, `/v1/indexer/runes/utxo/${txid}/${vout}/balance`, env, { signal: AbortSignal.timeout(8000) });
+        if (!Array.isArray(balances)) throw new Error('Incomplete per-outpoint Rune balance');
+        return normalizeRuneUtxo(item, address, runeid, balances);
+      }));
+      if (utxo.some(item => item === null)) throw new Error('Invalid or incomplete UniSat Rune UTXO item');
       return Response.json({ network: chain, address, runeid, start, total: Number(source.total), utxo, refreshedAt: new Date().toISOString() }, { headers: noStore });
     }
     if (path === '/api/alkanes/utxo-list') {
