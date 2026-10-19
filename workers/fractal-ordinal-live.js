@@ -1430,13 +1430,13 @@ export default {
         const sourceItems = Array.isArray(source?.inscription) ? source.inscription : source?.detail;
         if (!Number.isSafeInteger(sourceStart) || sourceStart !== start || !Number.isSafeInteger(total) || total < 0 || !Array.isArray(sourceItems) || sourceItems.length > limit) throw new Error('Invalid UniSat Ordinals response');
         const detail = sourceItems.map(item => {
-          const inscriptionId = typeof item?.inscriptionId === 'string' && /^[a-f0-9]{64}i\\d+$/i.test(item.inscriptionId) ? item.inscriptionId.toLowerCase() : null;
+          const inscriptionId = typeof item?.inscriptionId === 'string' && /^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId) ? item.inscriptionId.toLowerCase() : null;
           const utxo = item?.utxo && typeof item.utxo === 'object' ? item.utxo : null;
           const rawLocation = typeof item?.location === 'string' ? item.location : null;
           const txid = typeof utxo?.txid === 'string' && /^[a-f0-9]{64}$/i.test(utxo.txid) ? utxo.txid.toLowerCase() : null;
           const vout = Number(utxo?.vout);
           const offset = Number(item?.offset);
-          const location = rawLocation && /^[a-f0-9]{64}:\\d+:\\d+$/i.test(rawLocation)
+          const location = rawLocation && /^[a-f0-9]{64}:\d+:\d+$/i.test(rawLocation)
             ? rawLocation
             : txid && Number.isSafeInteger(vout) && vout >= 0 && Number.isSafeInteger(offset) && offset >= 0
               ? `${txid}:${vout}:${offset}`
