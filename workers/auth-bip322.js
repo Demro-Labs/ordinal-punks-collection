@@ -170,7 +170,7 @@ function buildChallengeMessage(siteName, address, network, challengeId, issuedAt
   ].join('\n');
 }
 
-function buildOwnershipChallengeMessage(siteName, address, network, challengeId, issuedAt, expiresAt) {
+function buildOwnershipChallengeMessage(siteName, address, network, challengeId, issuedAt, expiresAt, contextHash = '') {
   const site = AUTH_SITES[siteName];
   const networkLabel = network === 'BITCOIN_MAINNET' ? 'Bitcoin mainnet' : 'Fractal Bitcoin mainnet';
   return [
@@ -179,6 +179,7 @@ function buildOwnershipChallengeMessage(siteName, address, network, challengeId,
     `Network: ${network}`,
     `Address: ${address}`,
     'Action: Prove control of this wallet before a transaction',
+    ...(contextHash ? [`Transaction Context SHA-256: ${contextHash}`] : []),
     `Nonce: ${challengeId}`,
     `Issued At: ${new Date(issuedAt).toISOString()}`,
     `Expiration Time: ${new Date(expiresAt).toISOString()}`,
@@ -268,6 +269,8 @@ async function createChallenge(request, env, headers) {
   const site = siteForRequest(siteName, request);
   if (!LOGIN_NETWORKS.has(body.network)) throw new AuthError('AUTH_INVALID_NETWORK', 400);
   if (!isValidAddress(body.address)) throw new AuthError('AUTH_INVALID_ADDRESS', 400);
+  const contextHash = body.contextHash === undefined ? '' : body.contextHash;
+  if (typeof contextHash !== 'string' || (contextHash !== '' && !/^[a-f0-9]{64}$/.test(contextHash))) throw new AuthError('AUTH_INVALID_CONTEXT', 400);
   const expiresAt = now + CHALLENGE_TTL_MS;
   const challengeId = randomToken();
   const idHash = await sha256Hex(challengeId);
@@ -360,6 +363,7 @@ async function createOwnershipChallenge(request, env, headers) {
     address: body.address,
     addressHash,
     network: body.network,
+    contextHash,
     origin: site.origin,
     issuedAt: now,
     expiresAt,
@@ -370,10 +374,11 @@ async function createOwnershipChallenge(request, env, headers) {
   if (!stored?.created) throw new AuthError('AUTH_STORAGE_UNAVAILABLE', 503);
   return Response.json({
     challengeId,
-    message: buildOwnershipChallengeMessage(siteName, body.address, body.network, challengeId, now, expiresAt),
+    message: buildOwnershipChallengeMessage(siteName, body.address, body.network, challengeId, now, expiresAt, contextHash),
     expiresAt: new Date(expiresAt).toISOString(),
     network: body.network,
     site: siteName,
+    contextHash,
     action: 'ownership-proof-only',
   }, { headers: responseHeaders(headers) });
 }
@@ -388,15 +393,17 @@ async function verifyOwnershipChallenge(request, env, headers) {
   const site = siteForRequest(siteName, request);
   if (!OWNERSHIP_NETWORKS.has(body.network)) throw new AuthError('AUTH_INVALID_OWNERSHIP_NETWORK', 400);
   if (!isValidAddress(body.address)) throw new AuthError('AUTH_INVALID_ADDRESS', 400);
+  const contextHash = body.contextHash === undefined ? '' : body.contextHash;
+  if (typeof contextHash !== 'string' || (contextHash !== '' && !/^[a-f0-9]{64}$/.test(contextHash))) throw new AuthError('AUTH_INVALID_CONTEXT', 400);
   if (!isValidChallengeId(body.challengeId)) throw new AuthError('AUTH_INVALID_CHALLENGE', 400);
-  const witness = await decodeWitness(body.signature);
-  if (!witness) throw new AuthError('AUTH_INVALID_SIGNATURE', 400);
   const idHash = await sha256Hex(body.challengeId);
   const challenge = await authStorage(env, 'challenge/get', { idHash });
-  if (!challenge || challenge.site !== siteName || challenge.address !== body.address || challenge.network !== body.network || challenge.origin !== site.origin || challenge.usedAt || Number(challenge.expiresAt) <= now) {
+  if (!challenge || challenge.site !== siteName || challenge.address !== body.address || challenge.network !== body.network || challenge.origin !== site.origin || (challenge.contextHash ?? '') !== contextHash || challenge.usedAt || Number(challenge.expiresAt) <= now) {
     throw new AuthError('AUTH_INVALID_CHALLENGE', 401);
   }
-  const message = buildOwnershipChallengeMessage(siteName, body.address, body.network, body.challengeId, Number(challenge.issuedAt), Number(challenge.expiresAt));
+  const witness = await decodeWitness(body.signature);
+  if (!witness) throw new AuthError('AUTH_INVALID_SIGNATURE', 400);
+  const message = buildOwnershipChallengeMessage(siteName, body.address, body.network, body.challengeId, Number(challenge.issuedAt), Number(challenge.expiresAt), contextHash);
   let valid = false;
   try { valid = await Verifier.verifySignature(body.address, message, witness); } catch { valid = false; }
   if (!valid) throw new AuthError('AUTH_SIGNATURE_REJECTED', 401);
@@ -405,10 +412,11 @@ async function verifyOwnershipChallenge(request, env, headers) {
     site: siteName,
     address: body.address,
     network: body.network,
+    contextHash,
     now: Date.now(),
   });
   if (!consumed?.created) throw new AuthError('AUTH_INVALID_CHALLENGE', 401);
-  return Response.json({ verified: true, site: siteName, address: body.address, network: body.network }, { headers: responseHeaders(headers) });
+  return Response.json({ verified: true, site: siteName, address: body.address, network: body.network, contextHash }, { headers: responseHeaders(headers) });
 }
 
 function readCookie(request, name) {
@@ -469,7 +477,8 @@ export class AuthStorage {
   constructor(ctx) {
     this.ctx = ctx;
     const sql = this.ctx.storage.sql;
-    sql.exec('CREATE TABLE IF NOT EXISTS auth_challenges (id_hash TEXT PRIMARY KEY, site TEXT NOT NULL, address TEXT NOT NULL, address_hash TEXT NOT NULL, network TEXT NOT NULL, origin TEXT NOT NULL, issued_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)');
+    sql.exec('CREATE TABLE IF NOT EXISTS auth_challenges (id_hash TEXT PRIMARY KEY, site TEXT NOT NULL, address TEXT NOT NULL, address_hash TEXT NOT NULL, network TEXT NOT NULL, context_hash TEXT NOT NULL DEFAULT \'\', origin TEXT NOT NULL, issued_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)');
+    try { sql.exec("ALTER TABLE auth_challenges ADD COLUMN context_hash TEXT NOT NULL DEFAULT ''"); } catch { /* already migrated */ }
     sql.exec('CREATE INDEX IF NOT EXISTS auth_challenges_expiry_idx ON auth_challenges(expires_at)');
     sql.exec('CREATE TABLE IF NOT EXISTS auth_sessions (token_hash TEXT PRIMARY KEY, site TEXT NOT NULL, address TEXT NOT NULL, network TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)');
     sql.exec('CREATE INDEX IF NOT EXISTS auth_sessions_expiry_idx ON auth_sessions(expires_at)');
@@ -496,7 +505,7 @@ export class AuthStorage {
           if (Number(row?.count || 0) >= ADDRESS_RATE_LIMIT) return { created: false, code: 'AUTH_ADDRESS_RATE_LIMITED' };
           sql.exec('INSERT INTO auth_address_rates (address_hash, window_start, count) VALUES (?, ?, 1) ON CONFLICT(address_hash, window_start) DO UPDATE SET count = count + 1', body.addressHash, body.rateWindowStart);
         }
-        sql.exec('INSERT INTO auth_challenges (id_hash, site, address, address_hash, network, origin, issued_at, expires_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)', body.idHash, body.site, body.address, body.addressHash, body.network, body.origin, body.issuedAt, body.expiresAt);
+        sql.exec('INSERT INTO auth_challenges (id_hash, site, address, address_hash, network, context_hash, origin, issued_at, expires_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)', body.idHash, body.site, body.address, body.addressHash, body.network, body.contextHash || '', body.origin, body.issuedAt, body.expiresAt);
         return { created: true };
       });
       if (!result.created) return Response.json({ code: result.code }, { status: 429 });
@@ -515,15 +524,15 @@ export class AuthStorage {
     }
 
     if (url.pathname === '/challenge/get') {
-      const row = sql.exec('SELECT site, address, network, origin, issued_at AS issuedAt, expires_at AS expiresAt, used_at AS usedAt FROM auth_challenges WHERE id_hash = ?', body.idHash).toArray()[0];
+      const row = sql.exec('SELECT site, address, network, context_hash AS contextHash, origin, issued_at AS issuedAt, expires_at AS expiresAt, used_at AS usedAt FROM auth_challenges WHERE id_hash = ?', body.idHash).toArray()[0];
       if (!row) return Response.json({ code: 'AUTH_CHALLENGE_NOT_FOUND' }, { status: 404 });
       return Response.json(row);
     }
 
     if (url.pathname === '/challenge/consume') {
       const result = this.ctx.storage.transactionSync(() => {
-        const row = sql.exec('SELECT site, address, network, expires_at AS expiresAt, used_at AS usedAt FROM auth_challenges WHERE id_hash = ?', body.idHash).toArray()[0];
-        if (!row || row.usedAt || Number(row.expiresAt) <= Number(body.now) || row.site !== body.site || row.address !== body.address || row.network !== body.network) return { created: false };
+        const row = sql.exec('SELECT site, address, network, context_hash AS contextHash, expires_at AS expiresAt, used_at AS usedAt FROM auth_challenges WHERE id_hash = ?', body.idHash).toArray()[0];
+        if (!row || row.usedAt || Number(row.expiresAt) <= Number(body.now) || row.site !== body.site || row.address !== body.address || row.network !== body.network || (row.contextHash ?? '') !== (body.contextHash || '')) return { created: false };
         sql.exec('UPDATE auth_challenges SET used_at = ? WHERE id_hash = ? AND used_at IS NULL AND expires_at > ?', body.now, body.idHash, body.now);
         const changed = Number(sql.exec('SELECT changes() AS changes').toArray()[0]?.changes || 0);
         if (changed !== 1) return { created: false };
