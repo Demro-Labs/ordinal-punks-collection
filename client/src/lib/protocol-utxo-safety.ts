@@ -54,14 +54,14 @@ export function assertExactAlkaneUtxos(
   options: { complete: boolean; address: string; alkaneId: string; expectedAmount: string },
 ) {
   const snapshot = validateSnapshot(items, options);
-  if (!/^\d{1,20}:\d{1,20}$/.test(options.alkaneId) || !/^\d{1,80}$/.test(options.expectedAmount) || BigInt(options.expectedAmount) <= 0n) {
+  if (!/^\d{1,20}:\d{1,20}$/.test(options.alkaneId) || !/^\d{1,80}$/.test(options.expectedAmount) || BigInt(options.expectedAmount) <= BigInt(0)) {
     throw new Error("Alkane ID or expected base-unit balance is invalid.");
   }
-  let total = 0n;
+  let total = BigInt(0)
   for (const item of snapshot) {
     if (item.inscriptions.length || item.runes.length || item.alkanes.length !== 1 ||
       item.alkanes[0].id !== options.alkaneId || !/^\d{1,80}$/.test(item.alkanes[0].amount) ||
-      BigInt(item.alkanes[0].amount) <= 0n) {
+      BigInt(item.alkanes[0].amount) <= BigInt(0)) {
       throw new Error("Alkane inputs must contain only the selected Alkane and no inscriptions, Runes, or other Alkanes.");
     }
     total += BigInt(item.alkanes[0].amount);
