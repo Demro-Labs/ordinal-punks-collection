@@ -77,7 +77,6 @@ export async function prepareLocalOrdinalTransfer(params: {
   const fee = await getRecommendedFeeEstimate(network);
   const feeRateSatVb = Math.ceil(fee.feeRate);
   if (!Number.isSafeInteger(feeRateSatVb) || feeRateSatVb < 1 || feeRateSatVb > MAX_SAFE_FEE_RATE) throw new Error("Le taux de frais live est hors limites; aucun PSBT n’a été préparé.");
-  const api = getApi(network).api;
   const recipientScriptHex = Buffer.from(bitcoin.address.toOutputScript(recipient, bitcoin.networks.bitcoin)).toString("hex");
   const changeScriptHex = Buffer.from(bitcoin.address.toOutputScript(account.address, bitcoin.networks.bitcoin)).toString("hex");
   const requiredSafeSats = Math.max(1_200, Math.ceil(feeRateSatVb * 500) + 1_200);
@@ -87,7 +86,7 @@ export async function prepareLocalOrdinalTransfer(params: {
   const inscriptionTxid = location[0];
   if (!/^[a-f0-9]{64}$/i.test(inscriptionTxid)) throw new Error("La position live de l’inscription est invalide.");
   const txids = Array.from(new Set([inscriptionTxid, ...safeFeeUtxos.map(item => item.txid.toLowerCase())]));
-  const rawEntries = await Promise.all(txids.map(async txid => [txid, await loadPreviousTx(api, txid)] as const));
+  const rawEntries = await Promise.all(txids.map(async txid => [txid, await loadPreviousTx(network, txid)] as const));
   const rawTxById = new Map(rawEntries);
   const sourceTxHex = rawTxById.get(inscriptionTxid.toLowerCase());
   if (!sourceTxHex) throw new Error("La transaction source de l’inscription est indisponible.");
