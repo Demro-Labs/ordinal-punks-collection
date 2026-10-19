@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Buffer } from "buffer";
 import * as bitcoin from "bitcoinjs-lib";
 import { CheckCircle2, ShieldCheck } from "lucide-react";
@@ -12,6 +12,17 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
   const [ownershipProofKey, setOwnershipProofKey] = useState<string | null>(null);
   const psbtFingerprint = psbt.trim() ? Buffer.from(bitcoin.crypto.sha256(Buffer.from(psbt.trim().toLowerCase(), "utf8"))).toString("hex") : "";
   const ownershipContextKey = psbtFingerprint ? JSON.stringify(["generic-psbt", site, network, addressType, wallet.addresses[addressType].address, psbtFingerprint]) : "";
+
+  useEffect(() => {
+    setAddressType(initialAddressType);
+    setReview(null);
+    setSigned("");
+    setTx(null);
+    setConfirmed(false);
+    setOwnershipProofKey(null);
+    setError("");
+    setMessage("");
+  }, [initialAddressType, network]);
   const [review, setReview] = useState<LocalPsbtReview | null>(null);
   const [signed, setSigned] = useState("");
   const [tx, setTx] = useState<{ rawTxHex: string; txid: string } | null>(null);
