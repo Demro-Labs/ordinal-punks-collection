@@ -1006,13 +1006,11 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     index,
   }));
   const calls = [];
-  const lowFeeOptions = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     calls.push(url.pathname);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
-      lowFeeOptions.push(url.searchParams.get('withLowFee'));
+    if (url.pathname.endsWith('/all-utxo-data')) {
       return Response.json({ code: 0, data: { total: records.length, utxo: records } });
     }
     const pathParts = url.pathname.split('/');
@@ -1038,7 +1036,6 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     assert.equal(data.utxo[0].isOpInRBF, true);
     assert.equal(data.utxo[0].isLowFee, true);
     assert.equal(data.utxo[0].inscriptionsRunesAlkanesChecked, true);
-    assert.deepEqual(lowFeeOptions, ['true']);
     assert.equal(data.utxo.some(item => item.txid === records[3].txid), false);
     assert.ok(calls.includes(`/v1/indexer/runes/utxo/${records[0].txid}/0/balance`));
     assert.ok(calls.includes(`/v1/indexer/alkanes/utxo/${records[0].txid}/0/balance`));
@@ -1058,9 +1055,8 @@ test('desktop and mobile accept optional fee metadata omissions with the same Fr
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       upstreamMobileModes.push(url.searchParams.get('mobile'));
-      assert.equal(url.searchParams.get('withLowFee'), 'true');
       return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
     }
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false } });
@@ -1095,7 +1091,7 @@ test('reports safe-UTXO rejection reasons without exposing addresses or outpoint
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       return Response.json({ code: 0, data: { total: 3, utxo: [valid, unconfirmed, inscription] } });
     }
     if (url.pathname === `/v1/indexer/utxo/${valid.txid}/0`) return Response.json({ code: 0, data: { ...valid, isSpent: false } });
@@ -1182,7 +1178,7 @@ test('fails closed when a protocol balance response is missing or malformed', as
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
+    if (url.pathname.endsWith('/all-utxo-data')) return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false } });
     if (url.pathname === `/v1/indexer/runes/utxo/${record.txid}/0/balance`) return Response.json({ code: 0, data: null });
     throw new Error(`Unexpected upstream URL: ${url}`);
@@ -1271,7 +1267,7 @@ test('rejects an oversized UniSat page instead of skipping uninspected outpoints
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       const utxo = Array.from({ length: 26 }, (_, index) => ({
         address,
         txid: index.toString(16).padStart(64, '0'),
