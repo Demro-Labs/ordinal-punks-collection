@@ -623,6 +623,9 @@ test('routes BRC-20 and Alkanes wallet inventory through the selected network se
     if (url.pathname.endsWith('/runes/1%3A1/utxo')) {
       return Response.json({ code: 0, data: { start: 0, total: 1, utxo: [{ address, txid: 'b'.repeat(64), vout: 1, satoshi: 1200, confirmations: 4, runes: [{ runeid: '1:1', amount: '250' }] }] } });
     }
+    if (url.pathname.endsWith('/runes/utxo/${'b'.repeat(64)}/1/balance')) {
+      return Response.json({ code: 0, data: [{ runeid: '1:1', amount: '250' }] });
+    }
     throw new Error(`Unexpected wallet protocol URL: ${url}`);
   };
   try {
@@ -657,7 +660,7 @@ test('routes BRC-20 and Alkanes wallet inventory through the selected network se
     assert.equal(runeResponse.status, 200);
     assert.equal(runeUtxos.runeid, '1:1');
     assert.deepEqual(runeUtxos.utxo[0].runes, [{ runeid: '1:1', amount: '250' }]);
-    assert.deepEqual(authHeaders, ['Bearer bitcoin-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only']);
+    assert.deepEqual(authHeaders, ['Bearer bitcoin-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only']);
     for (const result of [brc20, tokens, collections, utxos, runeUtxos]) {
       assert.equal(JSON.stringify(result).includes('test-only'), false);
     }
