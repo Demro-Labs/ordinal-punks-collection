@@ -1770,10 +1770,10 @@ test('lists active address UTXOs separately for Bitcoin and Fractal without trea
     const url = new URL(String(input));
     calls.push({ url: String(url), auth: new Headers(init.headers).get('Authorization') });
     assert.match(url.pathname, /\/v1\/indexer\/address\/.*\/all-utxo-data$/);
-    return Response.json({ cursor: Number(url.searchParams.get('cursor')), total: 2, utxo: [
+    return Response.json({ code: 0, data: { cursor: Number(url.searchParams.get('cursor')), total: 2, utxo: [
       { txid: '11'.repeat(32), vout: 0, satoshi: '1200', height: 100, scriptPk: '0014' + '22'.repeat(20), inscriptions: [], isSpent: false },
       { txid: '33'.repeat(32), vout: 1, satoshi: '546', height: 101, scriptPk: '0014' + '44'.repeat(20), inscriptions: ['inscription-test'], isSpent: false },
-    ] });
+    ] } });
   };
   try {
     const btc = await worker.fetch(makeRequest(`/api/address-utxos?chain=bitcoin&address=${address}&cursor=0&size=25`, { ip: '192.0.2.244' }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
