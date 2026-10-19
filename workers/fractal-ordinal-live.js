@@ -542,9 +542,10 @@ async function walletProtocolAssets(request, env, headers) {
       return Response.json({ network: chain, address, start, total: Number(source.total), detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
     }
     if (path === '/api/runes/utxo-list') {
-      const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/runes/${encodeURIComponent(url.searchParams.get('runeid') || '')}/utxo?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
       const runeid = url.searchParams.get('runeid') || '';
-      if (!validRuneId(runeid) || Number(source?.start) !== start || !Number.isSafeInteger(Number(source?.total)) || Number(source.total) < 0 || !Array.isArray(source?.utxo) || source.utxo.length > limit) throw new Error('Invalid UniSat Rune UTXO response');
+      if (!validRuneId(runeid)) return Response.json({ error: 'Identifiant Rune invalide.' }, { status: 400, headers: noStore });
+      const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/runes/${encodeURIComponent(runeid)}/utxo?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
+      if (Number(source?.start) !== start || !Number.isSafeInteger(Number(source?.total)) || Number(source.total) < 0 || !Array.isArray(source?.utxo) || source.utxo.length > limit) throw new Error('Invalid UniSat Rune UTXO response');
       const utxo = source.utxo.map(item => normalizeRuneUtxo(item, address, runeid));
       if (utxo.some(item => item === null)) throw new Error('Invalid UniSat Rune UTXO item');
       return Response.json({ network: chain, address, runeid, start, total: Number(source.total), utxo, refreshedAt: new Date().toISOString() }, { headers: noStore });
