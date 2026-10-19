@@ -1223,6 +1223,38 @@ test('fails closed when a protocol balance response is missing or malformed', as
   } finally { globalThis.fetch = previousFetch; }
 });
 
+for (const config of [
+  { chain: 'bitcoin', origin: 'https://open-api.unisat.io', primary: 'UNISAT_BITCOIN_API', fallback: 'UNISAT_BITCOIN_API_FALLBACK', address: 'bc1qtestaddress0000000000000000000000000' },
+  { chain: 'fractal', origin: 'https://open-api-fractal.unisat.io', primary: 'UNISAT_API_KEY', fallback: 'UNISAT_API_KEY_FALLBACK', address: 'bc1qtestaddress0000000000000000000000000' },
+]) {
+  test(`falls back to the same-network UniSat key after quota exhaustion on ${config.chain}`, async () => {
+    const previousFetch = globalThis.fetch;
+    const authorizations = [];
+    globalThis.fetch = async (input, init = {}) => {
+      assert.equal(new URL(String(input)).origin, config.origin);
+      const authorization = new Headers(init.headers).get('Authorization');
+      authorizations.push(authorization);
+      if (authorization === 'Bearer primary-test-only') {
+        return Response.json({ code: -2005, msg: 'request limit exceeded' }, { status: 403 });
+      }
+      assert.equal(authorization, 'Bearer fallback-test-only');
+      return Response.json({ code: 0, data: { total: 0, utxo: [] } });
+    };
+    try {
+      const env = {
+        [config.primary]: 'primary-test-only',
+        [config.fallback]: 'fallback-test-only',
+      };
+      const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=${config.chain}&address=${config.address}&cursor=0&size=25`, { ip: config.chain === 'bitcoin' ? '192.0.2.214' : '192.0.2.213' }), env);
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(data.chain, config.chain);
+      assert.deepEqual(authorizations, ['Bearer primary-test-only', 'Bearer fallback-test-only']);
+      assert.equal(JSON.stringify(data).includes('test-only'), false);
+    } finally { globalThis.fetch = previousFetch; }
+  });
+}
+
 test('identifies UniSat quota exhaustion returned as HTTP 403 code -2005', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
