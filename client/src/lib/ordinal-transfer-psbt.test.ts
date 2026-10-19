@@ -7,6 +7,7 @@ import {
   extractAndVerifySignedOrdinalTransaction,
   identifyStandardOutputScript,
   MIN_SAFE_OUTPUT_SATS,
+  minimumSafeOutputSatsForScript,
   RBF_SEQUENCE,
   type PreviousOutputRef,
   type SpendType,
@@ -163,6 +164,12 @@ describe("experimental Ordinal PSBT constructor", () => {
     ).toThrow(/unsupported input signature|invalid signature/i);
   });
 
+  it("uses script-specific dust floors instead of an arbitrary 1,200-sat output floor", () => {
+    expect(minimumSafeOutputSatsForScript("0014" + "11".repeat(20))).toBe(294);
+    expect(minimumSafeOutputSatsForScript("5120" + "22".repeat(32))).toBe(330);
+    expect(minimumSafeOutputSatsForScript("a914" + "33".repeat(20) + "87")).toBe(540);
+    expect(minimumSafeOutputSatsForScript("76a914" + "44".repeat(20) + "88ac")).toBe(546);
+  });
   it.each(Object.keys(outputScripts) as SpendType[])(
     "constructs a dust-safe transfer spending %s",
     spendType => {
@@ -171,7 +178,7 @@ describe("experimental Ordinal PSBT constructor", () => {
       expect(plan.inputs[0].spendType).toBe(spendType);
       expect(plan.recipientOutputSats).toBe(MIN_SAFE_OUTPUT_SATS);
       expect(plan.changeOutputSats).toBeGreaterThanOrEqual(
-        MIN_SAFE_OUTPUT_SATS
+        minimumSafeOutputSatsForScript(plan.outputs[1].scriptHex)
       );
       expect(plan.feeSats).toBeGreaterThan(0);
       expect(psbt.inputCount).toBe(2);
