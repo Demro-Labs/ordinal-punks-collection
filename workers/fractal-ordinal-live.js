@@ -1422,18 +1422,28 @@ export default {
         return Response.json({ error: 'Réseau, adresse ou pagination Ordinals invalide.' }, { status: 400, headers: noStore });
       }
       try {
-        // UniSat's address inscription index is cursor/size based and returns `inscription`,
-        // not `detail`. Accept the legacy shape defensively, but request the documented endpoint.
-        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/inscription-list?cursor=${start}&size=${limit}`, env, { signal: AbortSignal.timeout(8000) });
+        // Use UniSat's documented address inscription endpoint. Its current response nests
+        // the live output in item.utxo and exposes the inscription offset separately.
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/inscription-data?cursor=${start}&size=${limit}`, env, { signal: AbortSignal.timeout(8000) });
         const sourceStart = Number(source?.cursor ?? source?.start);
         const total = Number(source?.total);
         const sourceItems = Array.isArray(source?.inscription) ? source.inscription : source?.detail;
         if (!Number.isSafeInteger(sourceStart) || sourceStart !== start || !Number.isSafeInteger(total) || total < 0 || !Array.isArray(sourceItems) || sourceItems.length > limit) throw new Error('Invalid UniSat Ordinals response');
         const detail = sourceItems.map(item => {
           const inscriptionId = typeof item?.inscriptionId === 'string' && /^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId) ? item.inscriptionId.toLowerCase() : null;
-          const location = typeof item?.location === 'string' && /^[a-f0-9]{64}:\d+:\d+$/i.test(item.location) ? item.location : null;
+          const utxo = item?.utxo && typeof item.utxo === 'object' ? item.utxo : null;
+          const rawLocation = typeof item?.location === 'string' ? item.location : null;
+          const txid = typeof utxo?.txid === 'string' && /^[a-f0-9]{64}$/i.test(utxo.txid) ? utxo.txid.toLowerCase() : null;
+          const vout = Number(utxo?.vout);
+          const offset = Number(item?.offset);
+          const location = rawLocation && /^[a-f0-9]{64}:\d+:\d+$/i.test(rawLocation)
+            ? rawLocation
+            : txid && Number.isSafeInteger(vout) && vout >= 0 && Number.isSafeInteger(offset) && offset >= 0
+              ? `${txid}:${vout}:${offset}`
+              : null;
           const inscriptionNumber = item?.inscriptionNumber === null || item?.inscriptionNumber === undefined ? null : Number(item.inscriptionNumber);
-          const outputValue = item?.outputValue === null || item?.outputValue === undefined ? null : Number(item.outputValue);
+          const rawOutputValue = item?.outputValue ?? utxo?.satoshi;
+          const outputValue = rawOutputValue === null || rawOutputValue === undefined ? null : Number(rawOutputValue);
           if (!inscriptionId) return null;
           return { inscriptionId, inscriptionNumber: Number.isSafeInteger(inscriptionNumber) && inscriptionNumber >= 0 ? inscriptionNumber : null, location, outputValue: Number.isSafeInteger(outputValue) && outputValue >= 0 ? outputValue : null, contentType: typeof item?.contentType === 'string' ? item.contentType : null };
         });
