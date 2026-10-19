@@ -228,7 +228,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       .map(key => `${UTXO_REJECTION_LABELS[key]}: ${rejectionTotals[key]}`)
       .join("; ");
     const diagnosticHint = rejectionSummary ? ` Motifs de rejet UniSat/Worker: ${rejectionSummary}.` : "";
-    throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} UniSat available outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}; protocol-asset outputs are excluded from this fee-safe scan). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.${diagnosticHint}${zeroSafeBalanceHint}`);
+    throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} UniSat address outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}; protocol-asset outputs are checked and excluded from fee inputs). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.${diagnosticHint}${zeroSafeBalanceHint}`);
   }
   return collected;
 }
