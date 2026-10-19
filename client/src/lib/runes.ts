@@ -153,6 +153,32 @@ export async function fetchRuneBalancePage(
   } as RuneBalancePage;
 }
 
+const MAX_LOCAL_VAULT_RUNE_BALANCES = 500;
+const RUNE_BALANCE_PAGE_DELAY_MS = 250;
+
+export async function fetchAllRuneBalancePages(address: string, network: RuneNetwork): Promise<RuneBalancePage> {
+  const first = await fetchRuneBalancePage(address, network, 0, 25);
+  if (first.total > MAX_LOCAL_VAULT_RUNE_BALANCES) {
+    throw new Error(`This address has ${first.total} Rune balances. Local Vault currently verifies up to ${MAX_LOCAL_VAULT_RUNE_BALANCES} balances per address; no transaction was signed.`);
+  }
+  if (first.detail.length !== Math.min(25, first.total)) throw new Error("The Rune index returned an incomplete first page.");
+  const detail = [...first.detail];
+  for (let start = 25; start < first.total; start += 25) {
+    await new Promise(resolve => window.setTimeout(resolve, RUNE_BALANCE_PAGE_DELAY_MS));
+    const page = await fetchRuneBalancePage(address, network, start, 25);
+    if (page.total !== first.total || page.detail.length !== Math.min(25, first.total - start)) {
+      throw new Error("The Rune index changed or returned an incomplete page during local verification. Refresh and retry.");
+    }
+    detail.push(...page.detail);
+  }
+  const ids = new Set<string>();
+  for (const item of detail) {
+    if (ids.has(item.runeid)) throw new Error("The Rune index returned a duplicate Rune ID; local signing is blocked.");
+    ids.add(item.runeid);
+  }
+  return { ...first, start: 0, detail, refreshedAt: new Date().toISOString() };
+}
+
 export function fetchFractalRuneBalancePage(
   address: string,
   start = 0,

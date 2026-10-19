@@ -49,7 +49,7 @@ export function LocalVaultAssetPanel({
   useEffect(() => {
     setItems([]); setSelected(""); setRecipient(""); setLocalPlan(null); setSigned(null);
     void load();
-    const timer = window.setInterval(() => void load(), 60_000);
+    const timer = window.setInterval(() => void load(), 300_000);
     return () => window.clearInterval(timer);
   }, [address, network]);
   const selectedItem = useMemo(() => items.find(item => item.inscriptionId === selected) ?? null, [items, selected]);
