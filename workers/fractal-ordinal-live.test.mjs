@@ -1790,7 +1790,7 @@ test('lists active address UTXOs separately for Bitcoin and Fractal without trea
     assert.equal(fb.status, 200, JSON.stringify(fbData));
     assert.equal(fbData.chain, 'fractal');
     assert.equal(calls[1].auth, 'Bearer fractal-test-only');
-    assert.equal(calls[0].url.includes('open-api.unisat.io'), true);
-    assert.equal(calls[1].url.includes('open-api-fractal.unisat.io'), true);
+    assert.equal(new URL(calls[0].url).hostname, 'open-api.unisat.io');
+    assert.equal(new URL(calls[1].url).hostname, 'open-api-fractal.unisat.io');
   } finally { globalThis.fetch = previousFetch; }
 });
