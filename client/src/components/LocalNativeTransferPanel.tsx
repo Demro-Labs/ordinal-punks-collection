@@ -9,9 +9,8 @@ import { ADDRESS_SPECS, type AddressType, type OrdiNetwork, type OrdiWalletRecor
 function assetLabel(network: OrdiNetwork) { return network === "BITCOIN_MAINNET" ? "BTC" : "FB"; }
 function formatAsset(sats: number, asset: string) { return `${(sats / 100_000_000).toLocaleString("en-US", { minimumFractionDigits: 8, maximumFractionDigits: 8 })} ${asset}`; }
 
-export function LocalNativeTransferPanel({ wallet, network, site = "pokedex", onDone }: { wallet: OrdiWalletRecord; network: OrdiNetwork; site?: "punks" | "pokedex"; onDone?: () => void }) {
+export function LocalNativeTransferPanel({ wallet, network, addressType, onAddressTypeChange, site = "pokedex", onDone }: { wallet: OrdiWalletRecord; network: OrdiNetwork; addressType: AddressType; onAddressTypeChange: (addressType: AddressType) => void; site?: "punks" | "pokedex"; onDone?: () => void }) {
   const asset = assetLabel(network);
-  const [addressType, setAddressType] = useState<AddressType>("native-segwit");
   const account = wallet.addresses[addressType];
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
@@ -33,7 +32,7 @@ export function LocalNativeTransferPanel({ wallet, network, site = "pokedex", on
   useEffect(() => {
     setPlan(null); setReview(null); setSigned(""); setTx(null); setReceipt(null); setConfirmed(false); setError(""); setMessage("");
     void getRecommendedFeeEstimate(network).then(setFeeEstimate).catch(() => setFeeEstimate(null));
-  }, [network]);
+  }, [network, addressType]);
 
   const reset = () => { setPlan(null); setReview(null); setSigned(""); setTx(null); setReceipt(null); setConfirmed(false); setMessage(""); };
 
@@ -84,7 +83,7 @@ export function LocalNativeTransferPanel({ wallet, network, site = "pokedex", on
     <p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Paiement natif {asset} depuis Legacy, Nested SegWit, Native SegWit ou Taproot : les UTXO confirmés sans Ordinal, Rune ou Alkane sont vérifiés en direct, puis la transaction est signée dans le coffre local. Les clés privées ne quittent jamais cet appareil.</p>
     <LocalVaultOwnershipProof key={ownershipContextKey || "native-proof-empty"} site={site} network={network} wallet={wallet} addressType={addressType} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />
     <label className="mt-3 block font-mono text-[9px] uppercase tracking-[.12em] text-[#9ea7b3]" htmlFor="local-native-source-type">Type d’adresse source</label>
-    <select id="local-native-source-type" aria-label="Type d’adresse source" value={addressType} onChange={event => { reset(); setAddressType(event.target.value as AddressType); }} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-sm text-[#f3efe5]">
+    <select id="local-native-source-type" aria-label="Type d’adresse source" value={addressType} onChange={event => { reset(); onAddressTypeChange(event.target.value as AddressType); }} className="mt-1 min-h-11 min-w-0 w-full border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-sm text-[#f3efe5]">
       {ADDRESS_SPECS.map(item => <option key={item.type} value={item.type}>{item.label}</option>)}
     </select>
     <p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#718092]">Source : {account.label} · {account.address}</p>
