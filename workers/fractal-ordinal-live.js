@@ -1374,11 +1374,14 @@ export default {
         return Response.json({ error: 'Réseau, adresse ou pagination Ordinals invalide.' }, { status: 400, headers: noStore });
       }
       try {
-        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/inscriptions?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
-        const sourceStart = Number(source?.start);
+        // UniSat's address inscription index is cursor/size based and returns `inscription`,
+        // not `detail`. Accept the legacy shape defensively, but request the documented endpoint.
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/inscription-list?cursor=${start}&size=${limit}`, env, { signal: AbortSignal.timeout(8000) });
+        const sourceStart = Number(source?.cursor ?? source?.start);
         const total = Number(source?.total);
-        if (!Number.isSafeInteger(sourceStart) || sourceStart !== start || !Number.isSafeInteger(total) || total < 0 || !Array.isArray(source?.detail) || source.detail.length > limit) throw new Error('Invalid UniSat Ordinals response');
-        const detail = source.detail.map(item => {
+        const sourceItems = Array.isArray(source?.inscription) ? source.inscription : source?.detail;
+        if (!Number.isSafeInteger(sourceStart) || sourceStart !== start || !Number.isSafeInteger(total) || total < 0 || !Array.isArray(sourceItems) || sourceItems.length > limit) throw new Error('Invalid UniSat Ordinals response');
+        const detail = sourceItems.map(item => {
           const inscriptionId = typeof item?.inscriptionId === 'string' && /^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId) ? item.inscriptionId.toLowerCase() : null;
           const location = typeof item?.location === 'string' && /^[a-f0-9]{64}:\d+:\d+$/i.test(item.location) ? item.location : null;
           const inscriptionNumber = item?.inscriptionNumber === null || item?.inscriptionNumber === undefined ? null : Number(item.inscriptionNumber);
