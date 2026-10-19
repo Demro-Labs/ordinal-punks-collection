@@ -685,9 +685,9 @@ async function addressUtxos(request, env, corsHeaders) {
   }
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
   try {
-    // utxo-data includes address UTXOs that are intentionally absent from available-utxo-data,
+    // all-utxo-data includes address UTXOs that are intentionally absent from available-utxo-data,
     // such as inscription-bearing outputs. This endpoint is display-only, never spend authorization.
-    const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/utxo-data?cursor=${cursor}&size=${size}`, env, { signal: AbortSignal.timeout(10000) });
+    const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=${cursor}&size=${size}`, env, { signal: AbortSignal.timeout(10000) });
     const raw = Array.isArray(source?.utxo) ? source.utxo : null;
     if (!raw || raw.length > size) throw new Error('Invalid UniSat UTXO response');
     const utxo = raw.map(item => {
