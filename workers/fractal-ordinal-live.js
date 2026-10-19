@@ -348,13 +348,25 @@ async function uniNetwork(base, path, env, init = {}) {
     throw new Error('UniSat network request failed');
   }
   if (!response.ok) {
-    // Record status and request identifiers only; never log auth headers, addresses, or response bodies.
+    // UniSat reports quota exhaustion as HTTP 403 with API code -2005 on some plans.
+    // Inspect only the documented numeric/string code; never log response bodies, addresses, or auth headers.
+    let upstreamCode = null;
+    try {
+      const payload = await response.clone().json();
+      if (typeof payload?.code === 'number' || typeof payload?.code === 'string') {
+        upstreamCode = String(payload.code).slice(0, 32);
+      }
+    } catch {}
     console.warn('UniSat network upstream HTTP error', {
       network,
       path,
       status: response.status,
+      upstreamCode,
       requestId: response.headers.get('x-request-id') || response.headers.get('cf-ray') || null,
     });
+    if (response.status === 403 && upstreamCode === '-2005') {
+      throw new Error('UniSat API quota exceeded');
+    }
     throw new Error('UniSat upstream returned ' + response.status);
   }
   let payload;
@@ -633,6 +645,7 @@ function safeUniSatFailureCode(error) {
   const message = error instanceof Error ? error.message : '';
   if (message === 'UniSat server binding is missing') return 'UNISAT_KEY_MISSING';
   if (message === 'Bitcoin UniSat server binding is missing') return 'UNISAT_BITCOIN_API_KEY_MISSING';
+  if (message === 'UniSat API quota exceeded') return 'UNISAT_RATE_LIMITED';
   const status = message.match(/^UniSat upstream returned (\d{3})$/);
   if (status) return `UNISAT_HTTP_${status[1]}`;
   if (message === 'UniSat upstream rejected the request') return 'UNISAT_REJECTED';
@@ -1527,7 +1540,11 @@ export default {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
       try { return await spendableUtxos(request, env, headers); } catch (error) {
         const failure = error instanceof SpendableUtxoError ? error : new SpendableUtxoError('UTXO_SCAN_FAILED');
-        const message = failure.status === 400 ? 'Invalid spendable UTXO query.' : 'Live UniSat data is temporarily unavailable.';
+        const message = failure.status === 400
+          ? 'Invalid spendable UTXO query.'
+          : failure.code.endsWith('_UNISAT_RATE_LIMITED')
+            ? 'UniSat API quota/rate limit reached. Retry later or configure a UniSat API key with available quota.'
+            : 'Live UniSat data is temporarily unavailable.';
         if (failure.status !== 400) console.warn('Spendable UTXO lookup failed', { chain: url.searchParams.get('chain') || 'unknown', code: failure.code });
         return Response.json({ error: message, code: failure.code }, { status: failure.status, headers: { ...headers, 'Cache-Control': 'no-store' } });
       }
