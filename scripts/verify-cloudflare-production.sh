@@ -52,6 +52,33 @@ for collection in opunk pokedex; do
   echo "Market API verified for ${collection}."
 done
 
+# Exercise the UniSat-backed read routes that previously failed across both sites.
+# A fresh address avoids wallet-specific assumptions and these GETs cannot sign or broadcast.
+for network in BITCOIN_MAINNET FRACTAL_BITCOIN_MAINNET; do
+  encoded_address="${test_address}"
+  for route in \
+    "/api/transactions/history?address=${encoded_address}&chain=${network}&cursor=0&size=1" \
+    "/api/brc20/balances?address=${encoded_address}&chain=${network}" \
+    "/api/brc20/transferable?address=${encoded_address}&ticker=ordi&chain=${network}" \
+    "/api/ordinals/address-list?address=${encoded_address}&chain=${network}&start=0&limit=1" \
+    "/api/runes/balance-list?address=${encoded_address}&chain=${network}&start=0&limit=1" \
+    "/api/alkanes/balances?address=${encoded_address}&chain=${network}"; do
+    payload_file="${TMP_DIR}/read-route.json"
+    status="$(curl -sS --max-time 20 -o "${payload_file}" -w '%{http_code}' \
+      -H 'Origin: https://demro-labs.github.io' "${BASE_URL}${route}" || true)"
+    if [[ "${status}" != "200" ]]; then
+      route_path="${route%%\?*}"
+      echo "Live UniSat read route ${route_path} on ${network} returned HTTP ${status}: $(jq -c '{error,code}' "${payload_file}" 2>/dev/null || true)" >&2
+      exit 1
+    fi
+    jq -e --arg network "${network}" '.network == $network' "${payload_file}" >/dev/null || {
+      echo "Live UniSat read route returned an unexpected network payload for ${network}." >&2
+      exit 1
+    }
+    echo "Live read route ${route%%\?*} verified for ${network}."
+  done
+done
+
 for site in punks pokedex; do
   headers_file="${TMP_DIR}/${site}.headers"
   body_file="${TMP_DIR}/${site}.json"
