@@ -1375,10 +1375,13 @@ export default {
       if (!validWalletAddress(address) || !/^[a-z0-9]{4,6}$/i.test(ticker) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse, ticker BRC-20 classique ou réseau invalide.' }, { status: 400, headers: noStore });
       const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
       try {
-        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/brc20/${encodeURIComponent(ticker)}/info`, env, { signal: AbortSignal.timeout(8000) });
-        const detail = Array.isArray(source?.transferableInscriptions) ? source.transferableInscriptions : [];
-        const normalized = detail.filter(item => typeof item?.inscriptionId === 'string' && /^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId)).map(item => ({ inscriptionId: item.inscriptionId, inscriptionNumber: item.inscriptionNumber ?? null, amount: item.data?.amt ?? '', confirmations: Number(item.confirmations) || 0 }));
-        return Response.json({ network: chain, address, ticker, detail: normalized, refreshedAt: new Date().toISOString() }, { headers: noStore });
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/brc20/${encodeURIComponent(ticker)}/transferable-inscriptions?start=0&limit=100`, env, { signal: AbortSignal.timeout(8000) });
+        const rawDetail = Array.isArray(source?.detail) ? source.detail : source?.detail && typeof source.detail === 'object' ? [source.detail] : [];
+        if (source?.start !== undefined && Number(source.start) !== 0) throw new Error('Invalid UniSat transferable-inscriptions start');
+        if (source?.total !== undefined && (!Number.isSafeInteger(Number(source.total)) || Number(source.total) < 0)) throw new Error('Invalid UniSat transferable-inscriptions total');
+        const normalized = rawDetail.filter(item => typeof item?.inscriptionId === 'string' && /^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId) && typeof item?.data?.amt === 'string' && /^\d+(?:\.\d+)?$/.test(item.data.amt)).map(item => ({ inscriptionId: item.inscriptionId, inscriptionNumber: item.inscriptionNumber ?? null, amount: item.data.amt, confirmations: Number(item.confirmations) || 0 }));
+        if (normalized.length !== rawDetail.length) throw new Error('Invalid UniSat transferable inscription item');
+        return Response.json({ network: chain, address, ticker, total: Number(source?.total ?? normalized.length), detail: normalized, refreshedAt: new Date().toISOString() }, { headers: noStore });
       } catch {
         return Response.json({ error: 'Les inscriptions BRC-20 transférables sont temporairement indisponibles.' }, { status: 503, headers: noStore });
       }
