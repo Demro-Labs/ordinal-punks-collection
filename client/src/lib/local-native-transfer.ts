@@ -83,8 +83,9 @@ export async function prepareLocalNativeTransfer(
   const feeRateSatVb = Math.ceil(estimate.feeRate);
   if (!Number.isSafeInteger(feeRateSatVb) || feeRateSatVb < 1 || feeRateSatVb > MAX_FEE_RATE) throw new Error("Le taux de frais live est invalide; aucun transfert n’a été préparé.");
 
-  const reserve = Math.ceil(estimatedVsize(MAX_INPUTS, addressType, [normalizedRecipient, account.address]) * feeRateSatVb);
-  const utxos = await getSpendableUtxos(network, account.address, amountSats + reserve);
+  // Collect the complete verified safe set, then let selectInputs calculate fees for the actual inputs.
+  // Reserving fees for MAX_INPUTS here rejects fundable transfers when the wallet has less than a 20-input reserve.
+  const utxos = await getSpendableUtxos(network, account.address, 1, { collectAll: true });
   const selected = selectInputs(utxos, amountSats, feeRateSatVb, addressType, normalizedRecipient, account.address);
   for (const utxo of selected) {
     if (utxo.address !== account.address || !Buffer.from(utxo.scriptPk, "hex").equals(sourceScript)) throw new Error("Un UTXO sûr ne correspond pas au script de l’adresse source sélectionnée; aucun transfert n’a été construit.");
