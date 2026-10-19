@@ -55,7 +55,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Impossible de charger les soldes BRC-20."); }
     finally { setLoading(false); }
   }
-  useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 60_000); return () => window.clearInterval(timer); }, [address, network, ticker]);
+  useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 300_000); return () => window.clearInterval(timer); }, [address, network, ticker]);
   useEffect(() => {
     setOrder(null); setPlan(null); setReview(null); setSigned(""); setTx(null); setConfirmed(false);
     if (!ticker) return;
