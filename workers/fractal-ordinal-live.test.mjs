@@ -1068,6 +1068,12 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     assert.equal(data.utxo[0].isLowFee, true);
     assert.equal(data.utxo[0].inscriptionsRunesAlkanesChecked, true);
     assert.equal(data.utxo.some(item => item.txid === records[3].txid), false);
+    assert.equal(data.diagnostics.hasRunes, 1);
+    assert.equal(data.diagnostics.hasAlkanes, 1);
+    assert.equal(data.diagnostics.unconfirmedOrInvalidHeight, 1);
+    assert.equal(data.diagnosticsSats.hasRunes, records[1].satoshi);
+    assert.equal(data.diagnosticsSats.hasAlkanes, records[2].satoshi);
+    assert.equal(data.diagnosticsSats.unconfirmedOrInvalidHeight, records[3].satoshi);
     assert.ok(calls.includes(`/v1/indexer/runes/utxo/${records[0].txid}/0/balance`));
     assert.ok(calls.includes(`/v1/indexer/alkanes/utxo/${records[0].txid}/0/balance`));
     assert.equal(calls.includes(`/v1/indexer/alkanes/utxo/${records[1].txid}/0/balance`), false);
@@ -1139,6 +1145,10 @@ test('reports safe-UTXO rejection reasons without exposing addresses or outpoint
     assert.equal(data.diagnostics.hasInscriptionOrUnknown, 1);
     assert.equal(data.diagnostics.hasRunes, 0);
     assert.equal(data.diagnostics.hasAlkanes, 0);
+    assert.deepEqual(data.diagnosticsSats, {
+      unconfirmedOrInvalidHeight: 0, invalidFlags: 0, hasInscriptionOrUnknown: 0,
+      detailMismatch: 0, spentOrUnknown: 0, hasRunes: 0, hasAlkanes: 0,
+    });
     const serialized = JSON.stringify(data);
     const diagnosticJson = JSON.stringify(data.diagnostics);
     assert.equal(serialized.includes(address), true); // the existing response includes the requested address
