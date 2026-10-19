@@ -113,7 +113,7 @@ describe("experimental Ordinal PSBT constructor", () => {
     const psbt = bitcoin.Psbt.fromHex(plan.psbtHex, { network: NETWORK });
     // PSBT v0 carries the unsigned transaction in the global map; transaction version is separate.
     expect(psbt.data.globalMap.unsignedTx).toBeTruthy();
-    expect(bitcoin.Transaction.fromBuffer(psbt.data.globalMap.unsignedTx!).version).toBe(2);
+    expect(psbt.data.globalMap.unsignedTx!.tx.version).toBe(2);
     expect(psbt.inputCount).toBe(plan.inputs.length);
     psbt.data.inputs.forEach((input, index) => {
       if (plan.inputs[index].spendType === "legacy") {
