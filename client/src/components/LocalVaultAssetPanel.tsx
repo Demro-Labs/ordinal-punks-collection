@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, RefreshCw, Send, ShieldCheck } from "lucide-react";
+import { RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
 import { fetchAddressOrdinals, type AddressOrdinal, type OrdinalNetwork } from "@/lib/ordinals";
 import { broadcastLocalOrdinalTransfer, prepareLocalOrdinalTransfer, signLocalOrdinalTransfer, type LocalOrdinalPlan } from "@/lib/local-ordinal-transfer";
@@ -55,7 +55,6 @@ export function LocalVaultAssetPanel({
   const ownershipContextKey = selectedItem && recipient.trim()
     ? JSON.stringify(["ordinal-transfer", site, network, address, addressType, selectedItem.inscriptionId, recipient.trim()])
     : "";
-  const explorer = network === "BITCOIN_MAINNET" ? "https://unisat.io" : "https://fractal.unisat.io";
   function chooseInscription(item: AddressOrdinal) {
     setSelected(item.inscriptionId); setLocalPlan(null); setSigned(null); setConfirmedReview(false); setConfirmedBroadcast(false); setBroadcastAttempted(false); setTransferError(""); setMessage("");
   }
@@ -89,7 +88,7 @@ export function LocalVaultAssetPanel({
   return <section className="mt-4 border border-[#70c7a0]/35 bg-[#101a16] p-3 sm:p-4" aria-labelledby="local-vault-assets-title">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div><p className="font-mono text-[9px] uppercase tracking-[.18em] text-[#9fe0bd]">Local Vault asset bridge</p><h2 id="local-vault-assets-title" className="mt-1 font-display text-xl text-[#f3efe5]">Live Ordinals &amp; Runes</h2><p className="mt-1 font-mono text-[10px] leading-5 text-[#9ea7b3]">{network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin"} · address-scoped · refresh every 60s</p></div>
-      <div className="flex gap-2"><button type="button" onClick={() => void load()} disabled={loading || busy} className="inline-flex min-h-10 items-center gap-1 border border-[#3b434d] px-3 font-mono text-[9px] uppercase text-[#9fe0bd] disabled:opacity-40"><RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh</button><a href={explorer} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-1 border border-[#3b434d] px-3 font-mono text-[9px] uppercase text-[#d9d3c6]">UniSat <ExternalLink size={12} /></a></div>
+      <div className="flex gap-2"><button type="button" onClick={() => void load()} disabled={loading || busy} className="inline-flex min-h-10 items-center gap-1 border border-[#3b434d] px-3 font-mono text-[9px] uppercase text-[#9fe0bd] disabled:opacity-40"><RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh local assets</button></div>
     </div>
     {error && <div className="mt-3 break-words border border-[#a45e54]/50 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#e6a69b]" role="alert"><p>{error}</p><p className="mt-2 text-[#d9d3c6]">Index live indisponible. La signature locale est bloquée jusqu’au rétablissement des données complètes.</p></div>}
     <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
