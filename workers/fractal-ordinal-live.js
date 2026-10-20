@@ -1050,13 +1050,13 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
       detail?.address !== address || Number(detail?.satoshi) !== candidate.satoshi ||
       String(detail?.scriptPk || '').toLowerCase() !== candidate.scriptPk ||
       !Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0 || detail?.isSpent !== false ||
-      typeof detail?.isOpInRBF !== 'boolean' || !Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0 ||
+      (detail?.isOpInRBF !== undefined && typeof detail.isOpInRBF !== 'boolean') || !Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0 ||
       (detail?.runes !== undefined && (!Array.isArray(detail.runes) || detail.runes.length !== 0)) ||
       (detail?.alkanes !== undefined && (!Array.isArray(detail.alkanes) || detail.alkanes.length !== 0))
     ) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_SPENDABLE', 409);
     safeSats += candidate.satoshi;
     if (!Number.isSafeInteger(safeSats)) throw new SpendableUtxoError('UTXO_CONFIRM_TOTAL_UNSAFE');
-    verified.push({ address, txid: candidate.txid, vout: candidate.vout, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk, height: Number(detail.height), isLowFee: available.isLowFee, isOpInRBF: detail.isOpInRBF, inscriptionsRunesAlkanesChecked: true });
+    verified.push({ address, txid: candidate.txid, vout: candidate.vout, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk, height: Number(detail.height), isLowFee: available.isLowFee, isOpInRBF: typeof detail.isOpInRBF === 'boolean' ? detail.isOpInRBF : available.isOpInRBF, inscriptionsRunesAlkanesChecked: true });
   }
   return Response.json({ chain, address, minimumSats, safeSats, sufficient: safeSats >= minimumSats, verifiedUtxoCount: verified.length, utxo: verified, confirmedAt: new Date().toISOString() }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
