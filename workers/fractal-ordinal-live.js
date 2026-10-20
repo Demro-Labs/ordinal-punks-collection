@@ -1030,10 +1030,10 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
       const alkaneMetadata = item?.alkanes === undefined ? [] : [item.alkanes];
       if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || satoshi === null || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) ||
           !Number.isSafeInteger(height) || height <= 0 || !Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0 ||
-          typeof item?.isLowFee !== 'boolean' || typeof item?.isOpInRBF !== 'boolean' ||
+          typeof item?.isLowFee !== 'boolean' || (item?.isOpInRBF !== undefined && typeof item.isOpInRBF !== 'boolean') ||
           runeMetadata.some(value => !Array.isArray(value) || value.length !== 0) || alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) continue;
       const candidate = candidateByOutpoint.get(key);
-      if (candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: item.isOpInRBF });
+      if (candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: typeof item.isOpInRBF === 'boolean' ? item.isOpInRBF : null });
     }
     const nextCursor = cursor + raw.length;
     if (raw.length === 0 || nextCursor === total) break;
@@ -1061,7 +1061,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     }
     safeSats += candidate.satoshi;
     if (!Number.isSafeInteger(safeSats)) throw new SpendableUtxoError('UTXO_CONFIRM_TOTAL_UNSAFE');
-    verified.push({ address, txid: candidate.txid, vout: candidate.vout, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk, height: Number(detail.height), isLowFee: available.isLowFee, isOpInRBF: typeof detail.isOpInRBF === 'boolean' ? detail.isOpInRBF : available.isOpInRBF, inscriptionsRunesAlkanesChecked: true });
+    verified.push({ address, txid: candidate.txid, vout: candidate.vout, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk, height: Number(detail.height), isLowFee: available.isLowFee, isOpInRBF: typeof detail.isOpInRBF === 'boolean' ? detail.isOpInRBF : typeof available.isOpInRBF === 'boolean' ? available.isOpInRBF : false, inscriptionsRunesAlkanesChecked: true });
   }
   return Response.json({ chain, address, minimumSats, safeSats, sufficient: safeSats >= minimumSats, verifiedUtxoCount: verified.length, utxo: verified, confirmedAt: new Date().toISOString() }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
