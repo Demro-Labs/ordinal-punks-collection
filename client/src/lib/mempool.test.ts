@@ -1,6 +1,6 @@
 import { LIVE_DATA_API_BASE } from "@/lib/live";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { confirmFractalSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, InsufficientSafeUtxosError, minimumSpendableSatsForScript, trackMempoolTransaction, validateMempoolAddress } from "./mempool";
+import { confirmFractalSpendableUtxos, confirmSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, InsufficientSafeUtxosError, minimumSpendableSatsForScript, trackMempoolTransaction, validateMempoolAddress } from "./mempool";
 
 const ADDRESS = "bc1qtestaddress0000000000000000000000000";
 
@@ -262,6 +262,19 @@ describe("confirmFractalSpendableUtxos", () => {
     installWindowAndFetch(async () => Response.json({ chain: "fractal", address: ADDRESS, minimumSats: 10_400, safeSats: 9_000, sufficient: false, verifiedUtxoCount: 1, confirmedAt: new Date().toISOString() }));
     await expect(confirmFractalSpendableUtxos(ADDRESS, 10_400, [{ txid: "a".repeat(64), vout: 0, satoshi: 9_000, scriptPk: "0014" + "11".repeat(20) }]))
       .rejects.toBeInstanceOf(InsufficientSafeUtxosError);
+  });
+});
+
+describe("confirmSpendableUtxos network routing", () => {
+  it("sends Bitcoin Local Vault confirmation to the Worker with the Bitcoin chain key", async () => {
+    installWindowAndFetch(async (input, init = {}) => {
+      expect(String(input)).toBe(`${LIVE_DATA_API_BASE}/api/spendable-utxos/confirm`);
+      const body = JSON.parse(String(init.body));
+      expect(body).toMatchObject({ chain: "bitcoin", address: ADDRESS, minimumSats: 10_400 });
+      return Response.json({ chain: "bitcoin", address: ADDRESS, minimumSats: 10_400, safeSats: 10_500, sufficient: true, verifiedUtxoCount: 1, confirmedAt: new Date().toISOString() });
+    });
+    const result = await confirmSpendableUtxos("BITCOIN_MAINNET", ADDRESS, 10_400, [{ txid: "a".repeat(64), vout: 0, satoshi: 10_500, scriptPk: "0014" + "11".repeat(20) }]);
+    expect(result).toMatchObject({ chain: "bitcoin", sufficient: true, safeSats: 10_500 });
   });
 });
 
