@@ -10,6 +10,8 @@ type ActiveUtxo = {
   height: number | null;
   scriptPk: string | null;
   inscriptions: string[] | null;
+  runes: unknown[] | null;
+  alkanes: unknown[] | null;
   isSpent: boolean | null;
 };
 type UtxoPage = { chain: string; address: string; cursor: number; nextCursor: number; total: number; scannedCount: number; utxo: ActiveUtxo[] };
@@ -75,7 +77,7 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
   const visible = useMemo(() => items.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE), [items, pageIndex]);
   const explorer = network === "BITCOIN_MAINNET" ? "https://mempool.space" : "https://mempool.fractalbitcoin.io";
   const label = network === "BITCOIN_MAINNET" ? "BTC" : "FB";
-  const safeTotal = items.filter(item => item.isSpent === false && (item.height ?? 0) > 0 && item.satoshi >= 600 && Array.isArray(item.inscriptions) && item.inscriptions.length === 0 && Boolean(item.scriptPk)).reduce((sum, item) => sum + item.satoshi, 0);
+  const safeTotal = items.filter(item => item.isSpent === false && (item.height ?? 0) > 0 && item.satoshi >= 600 && Array.isArray(item.inscriptions) && item.inscriptions.length === 0 && Array.isArray(item.runes) && item.runes.length === 0 && Array.isArray(item.alkanes) && item.alkanes.length === 0 && Boolean(item.scriptPk)).reduce((sum, item) => sum + item.satoshi, 0);
   return <section className="mt-3 border border-[#70c7a0]/40 bg-[#0e1513] p-3 sm:p-4" aria-labelledby="active-utxos-title">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h4 id="active-utxos-title" className="font-mono text-[10px] uppercase tracking-[.13em] text-[#9fe0bd]">Active UTXOs · {label}</h4><p className="mt-1 font-mono text-[9px] leading-4 text-[#718092]">Jusqu’à 500 sorties · affichage par pages de 25 · adresse active seulement</p></div>
