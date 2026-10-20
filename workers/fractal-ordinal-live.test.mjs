@@ -1186,7 +1186,7 @@ test('Worker attests that exact BTC and FB PSBT inputs cover payment plus fees',
     const url = new URL(String(input));
     assert.equal(url.origin, expectedOrigin);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { cursor: Number(url.searchParams.get('cursor')), total: 1, utxo: [record] } });
+    if (url.pathname.endsWith('/available-utxo-data')) { const available = { ...record }; delete available.isOpInRBF; return Response.json({ code: 0, data: { cursor: Number(url.searchParams.get('cursor')), total: 1, utxo: [available] } }); }
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/${record.vout}`) { const detail = { ...record }; delete detail.isOpInRBF; return Response.json({ code: 0, data: detail }); }
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
@@ -1234,7 +1234,7 @@ test('Worker refuses an input whose value differs from the current UniSat outpoi
     const body = JSON.stringify({ chain: 'fractal', address, minimumSats: 30000, utxos: [{ txid: record.txid, vout: 0, satoshi: 50000, scriptPk: record.scriptPk }] });
     const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.237', body }), { UNISAT_API_KEY: 'test-only' });
     assert.equal(response.status, 409);
-    assert.equal((await response.json()).code, 'UTXO_CONFIRM_NOT_SPENDABLE');
+    assert.equal((await response.json()).code, 'UTXO_CONFIRM_NOT_IN_AVAILABLE_SET');
     assert.equal(detailLookups, 0);
   } finally { globalThis.fetch = previousFetch; }
 });
@@ -1957,5 +1957,54 @@ test('Alkanes balance route defaults to Bitcoin and rejects unsupported Fractal 
     assert.match(unsupported.error, /only on Bitcoin mainnet/i);
     assert.equal(unsupported.code, 'ALKANES_CHAIN_UNSUPPORTED');
     assert.equal(calls.length, 1, 'unsupported Fractal route must not call UniSat');
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('returns validated total/available UTXO summaries for Bitcoin and Fractal without exposing API keys', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const calls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    calls.push({ url: url.toString(), auth: new Headers(init.headers).get('Authorization') });
+    return Response.json({ code: 0, data: {
+      totalBalance: 9000, totalUtxoCount: 4,
+      availableBalance: 3000, availableUtxoCount: 2,
+      unavailableBalance: 6000, unavailableUtxoCount: 2,
+    } });
+  };
+  try {
+    for (const [chain, host, key] of [
+      ['bitcoin', 'https://open-api.unisat.io', 'bitcoin-summary-test-key'],
+      ['fractal', 'https://open-api-fractal.unisat.io', 'fractal-summary-test-key'],
+    ]) {
+      const response = await worker.fetch(makeRequest(`/api/utxo-balance-summary?chain=${chain}&address=${address}`, { ip: chain === 'bitcoin' ? '192.0.2.231' : '192.0.2.232' }), {
+        UNISAT_API_KEY: 'fractal-summary-test-key',
+        UNISAT_BITCOIN_API: 'bitcoin-summary-test-key',
+      });
+      const data = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(data));
+      assert.equal(data.chain, chain);
+      assert.equal(data.totalUtxoCount, 4);
+      assert.equal(data.availableUtxoCount, 2);
+      assert.equal(data.unavailableUtxoCount, 2);
+      assert.equal(JSON.stringify(data).includes(key), false);
+      assert.equal(calls.at(-1).url, `${host}/v1/indexer/address/${address}/available-balance?withLowFee=true`);
+      assert.equal(calls.at(-1).auth, `Bearer ${key}`);
+    }
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('rejects inconsistent UniSat UTXO summary totals', async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ code: 0, data: {
+    totalBalance: 9000, totalUtxoCount: 4,
+    availableBalance: 3000, availableUtxoCount: 2,
+    unavailableBalance: 5000, unavailableUtxoCount: 2,
+  } });
+  try {
+    const response = await worker.fetch(makeRequest('/api/utxo-balance-summary?chain=fractal&address=bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', { ip: '192.0.2.233' }), { UNISAT_API_KEY: 'fractal-summary-test-key' });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, 'UTXO_SUMMARY_UNISAT_UNAVAILABLE');
   } finally { globalThis.fetch = previousFetch; }
 });
