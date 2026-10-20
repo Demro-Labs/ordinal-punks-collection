@@ -989,7 +989,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
   const address = body?.address;
   const minimumSats = body?.minimumSats;
   const candidates = body?.utxos;
-  if (chain !== 'fractal' || !validWalletAddress(address) || !Number.isSafeInteger(minimumSats) || minimumSats <= 0 || !Array.isArray(candidates) || candidates.length < 1 || candidates.length > MAX_UTXO_CONFIRM_INPUTS) {
+  if (!['fractal', 'bitcoin'].includes(chain) || !validWalletAddress(address) || !Number.isSafeInteger(minimumSats) || minimumSats <= 0 || !Array.isArray(candidates) || candidates.length < 1 || candidates.length > MAX_UTXO_CONFIRM_INPUTS) {
     throw new SpendableUtxoError('INVALID_QUERY', 400);
   }
   const candidateByOutpoint = new Map();
@@ -1004,11 +1004,12 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     }
     candidateByOutpoint.set(key, { txid, vout, satoshi, scriptPk });
   }
+  const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
   const availableByOutpoint = new Map();
   let cursor = 0;
   let sourceTotal = null;
   for (let page = 0; page < 20 && availableByOutpoint.size < candidateByOutpoint.size; page += 1) {
-    const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(API_BASE, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=25&withLowFee=true`, env));
+    const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=25&withLowFee=true`, env));
     const raw = source?.utxo;
     const sourceCursor = Number(source?.cursor);
     const total = Number(source?.total);
@@ -1043,7 +1044,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
   let safeSats = 0;
   for (const [key, candidate] of candidateByOutpoint) {
     const available = availableByOutpoint.get(key);
-    const detail = await spendableUtxoStage('UTXO_CONFIRM_DETAIL', () => uniNetwork(API_BASE, `/v1/indexer/utxo/${candidate.txid}/${candidate.vout}`, env));
+    const detail = await spendableUtxoStage('UTXO_CONFIRM_DETAIL', () => uniNetwork(base, `/v1/indexer/utxo/${candidate.txid}/${candidate.vout}`, env));
     if (
       !available || String(detail?.txid || '').toLowerCase() !== candidate.txid || Number(detail?.vout) !== candidate.vout ||
       detail?.address !== address || Number(detail?.satoshi) !== candidate.satoshi ||

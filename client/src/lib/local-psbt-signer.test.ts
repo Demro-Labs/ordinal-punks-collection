@@ -3,9 +3,10 @@ import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
 import { deriveOrdiWallet, type AddressType } from "./ordi-wallet";
 import { broadcastLocalPsbt, finalizeLocalPsbt, reviewLocalPsbt, signLocalPsbt } from "./local-psbt-signer";
-import { getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
+import { confirmSpendableUtxos, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
 
 vi.mock("@/lib/mempool", () => ({
+  confirmSpendableUtxos: vi.fn(),
   getSpendableUtxos: vi.fn(),
   validateMempoolAddress: vi.fn(),
   getMempoolConfig: vi.fn(() => ({ api: "https://mempool.space", explorer: "https://mempool.space/tx/", label: "Bitcoin" })),
@@ -54,6 +55,15 @@ function makePsbt(type: AddressType = "native-segwit", outputScript?: Uint8Array
 
 beforeEach(() => {
   vi.mocked(getSpendableUtxos).mockResolvedValue([{ address: nativeAccount.address, txid: "12".repeat(32), vout: 0, satoshi: 10_000, scriptPk: nativeScriptHex, height: 100, inscriptionsRunesAlkanesChecked: true, isLowFee: false, isOpInRBF: false, inscriptions: [] }]);
+  vi.mocked(confirmSpendableUtxos).mockImplementation(async (network, address, minimumSats, utxos) => ({
+    chain: network === "BITCOIN_MAINNET" ? "bitcoin" : "fractal",
+    address,
+    minimumSats,
+    safeSats: utxos.reduce((sum, utxo) => sum + utxo.satoshi, 0),
+    sufficient: true,
+    verifiedUtxoCount: utxos.length,
+    confirmedAt: new Date().toISOString(),
+  }));
   vi.mocked(validateMempoolAddress).mockResolvedValue(undefined);
 });
 afterEach(() => vi.clearAllMocks());

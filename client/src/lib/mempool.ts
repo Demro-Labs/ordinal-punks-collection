@@ -114,7 +114,7 @@ export class InsufficientSafeUtxosError extends Error {
   constructor(message: string) { super(message); this.name = "InsufficientSafeUtxosError"; }
 }
 export type WorkerSafeUtxoAttestation = {
-  chain: "fractal";
+  chain: "fractal" | "bitcoin";
   address: string;
   minimumSats: number;
   safeSats: number;
@@ -290,8 +290,9 @@ export async function getSpendableUtxos(network: string, address: string, minimu
 }
 
 /** Recheck the exact PSBT inputs with the Fractal Worker before UniSat is asked to sign or pay. */
-export async function confirmFractalSpendableUtxos(address: string, minimumSats: number, utxos: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk">>): Promise<WorkerSafeUtxoAttestation> {
-  if (!address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0 || !Array.isArray(utxos) || utxos.length < 1 || utxos.length > 20) {
+export async function confirmSpendableUtxos(network: string, address: string, minimumSats: number, utxos: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk">>): Promise<WorkerSafeUtxoAttestation> {
+  const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
+  if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0 || !Array.isArray(utxos) || utxos.length < 1 || utxos.length > 20) {
     throw new Error("The UTXO set to confirm with the Worker is invalid.");
   }
   const result = await requestJson<Partial<WorkerSafeUtxoConfirmationResponse>>(
@@ -301,7 +302,7 @@ export async function confirmFractalSpendableUtxos(address: string, minimumSats:
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chain: "fractal",
+        chain,
         address,
         minimumSats,
         utxos: utxos.map(utxo => ({ txid: utxo.txid, vout: utxo.vout, satoshi: utxo.satoshi, scriptPk: utxo.scriptPk })),
@@ -309,14 +310,18 @@ export async function confirmFractalSpendableUtxos(address: string, minimumSats:
     },
   );
   if (
-    result.chain !== "fractal" || result.address !== address || result.minimumSats !== minimumSats ||
+    result.chain !== chain || result.address !== address || result.minimumSats !== minimumSats ||
     !Number.isSafeInteger(result.safeSats) || !Number.isSafeInteger(result.verifiedUtxoCount) ||
     result.verifiedUtxoCount !== utxos.length || typeof result.sufficient !== "boolean" || typeof result.confirmedAt !== "string"
-  ) throw new Error("The Worker did not return a complete attestation for the selected Fractal UTXOs.");
+  ) throw new Error(`The Worker did not return a complete attestation for the selected ${network} UTXOs.`);
   if (!result.sufficient || result.safeSats! < minimumSats) {
     throw new InsufficientSafeUtxosError(`The Worker confirmed only ${result.safeSats!.toLocaleString("en-US")} safe sats across the PSBT inputs; ${minimumSats.toLocaleString("en-US")} sats are required. No payment can be approved.`);
   }
   return result as WorkerSafeUtxoAttestation;
+}
+
+export async function confirmFractalSpendableUtxos(address: string, minimumSats: number, utxos: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk">>): Promise<WorkerSafeUtxoAttestation> {
+  return confirmSpendableUtxos("FRACTAL_BITCOIN_MAINNET", address, minimumSats, utxos);
 }
 
 export async function validateMempoolAddress(network: string, address: string) {

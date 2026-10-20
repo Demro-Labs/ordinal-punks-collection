@@ -4,7 +4,7 @@ import ecc from "@bitcoinerlab/secp256k1";
 import type { AddressType, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
 import { fetchAddressOrdinals, type AddressOrdinal } from "@/lib/ordinals";
 import { LIVE_DATA_API_BASE } from "@/lib/live";
-import { getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
+import { confirmSpendableUtxos, getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
 import { buildOrdinalTransferPsbt, extractAndVerifySignedOrdinalTransaction, type OrdinalLocation, type OrdinalTransferPlan, type PreviousOutputRef } from "@/lib/ordinal-transfer-psbt";
 
 const MAX_SAFE_FEE_RATE = 1_000;
@@ -55,6 +55,10 @@ async function assertFeeInputsStillSafe(network: OrdiNetwork, address: string, p
       throw new Error("Une entrée de frais n’est plus confirmée et sans actifs pour ce vault; aucune signature ou diffusion.");
     }
   }
+  const feeInputSats = feeInputs.reduce((total, input) => total + input.valueSats, 0);
+  await confirmSpendableUtxos(network, address, feeInputSats, feeInputs.map(input => ({
+    txid: input.txid, vout: input.vout, satoshi: input.valueSats, scriptPk: input.scriptHex,
+  })));
 }
 
 export async function prepareLocalOrdinalTransfer(params: {
