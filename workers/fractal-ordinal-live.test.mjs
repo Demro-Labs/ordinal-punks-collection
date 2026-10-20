@@ -1906,3 +1906,27 @@ test('lists active address UTXOs separately for Bitcoin and Fractal without trea
     assert.equal(new URL(calls[1].url).hostname, 'open-api-fractal.unisat.io');
   } finally { globalThis.fetch = previousFetch; }
 });
+
+test('Alkanes balance route defaults to Bitcoin and rejects unsupported Fractal before UniSat', async () => {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    calls.push(url);
+    assert.equal(url.hostname, 'open-api.unisat.io');
+    assert.match(url.pathname, /\/alkanes\/token-list$/);
+    return Response.json({ code: 0, data: { detail: [] } });
+  };
+  try {
+    const bitcoin = await worker.fetch(makeRequest(`/api/alkanes/balances?address=${address}`, { ip: '192.0.2.246' }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    assert.equal(bitcoin.status, 200);
+    assert.equal((await bitcoin.json()).network, 'BITCOIN_MAINNET');
+    assert.equal(calls.length, 1);
+
+    const fractal = await worker.fetch(makeRequest(`/api/alkanes/balances?address=${address}&chain=FRACTAL_BITCOIN_MAINNET`, { ip: '192.0.2.247' }), { UNISAT_API_KEY: 'fractal-test-only' });
+    assert.equal(fractal.status, 400);
+    assert.match((await fractal.json()).error, /only on Bitcoin mainnet/i);
+    assert.equal(calls.length, 1, 'unsupported Fractal route must not call UniSat');
+  } finally { globalThis.fetch = previousFetch; }
+});
