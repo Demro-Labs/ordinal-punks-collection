@@ -8,7 +8,7 @@ import { getSpendableUtxos } from "@/lib/mempool";
 import { signLocalOrdinalTransfer, type LocalOrdinalPlan } from "@/lib/local-ordinal-transfer";
 
 vi.mock("@/lib/ordinals", () => ({ fetchAddressOrdinals: vi.fn() }));
-vi.mock("@/lib/mempool", () => ({ getSpendableUtxos: vi.fn() }));
+vi.mock("@/lib/mempool", () => ({ confirmSpendableUtxos: vi.fn(), getSpendableUtxos: vi.fn() }));
 const wallet = deriveOrdiWallet("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about");
 const network = "BITCOIN_MAINNET" as const;
 const safeUtxo = (type: AddressType) => {
