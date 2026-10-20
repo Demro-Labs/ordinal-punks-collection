@@ -1,4 +1,5 @@
 import { LIVE_DATA_API_BASE } from "@/lib/live";
+import * as bitcoin from "bitcoinjs-lib";
 
 export type MempoolConfig = { api: string; explorer: string; label: string };
 export type MempoolReceipt = {
@@ -266,7 +267,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       .map(key => `${UTXO_REJECTION_LABELS[key]}: ${rejectionSatsTotals[key].toLocaleString("en-US")} sats`)
       .join("; ");
     const rejectedValueHint = rejectedValueSummary ? ` Valeur des sorties rejetées par motif: ${rejectedValueSummary}.` : "";
-    throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} UniSat address outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}; protocol-asset outputs are checked and excluded from fee inputs). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.${diagnosticHint}${rejectedValueHint}${zeroSafeBalanceHint}`);
+    throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} UniSat available outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}; protocol-asset outputs are excluded from this fee-safe scan). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.${diagnosticHint}${rejectedValueHint}${zeroSafeBalanceHint}`);
   }
   return collected;
 }
@@ -304,9 +305,14 @@ export async function confirmFractalSpendableUtxos(address: string, minimumSats:
 export async function validateMempoolAddress(network: string, address: string) {
   const config = getMempoolConfig(network);
   if (!config) throw new Error("Unsupported mainnet network.");
-  const query = new URLSearchParams({ chain: network, address });
-  const result = await requestJson<{ isvalid?: boolean }>(`${LIVE_DATA_API_BASE}/api/mempool/validate-address?${query}`);
-  if (!result.isvalid) throw new Error(`L’adresse destinataire n’est pas valide pour ${config.label}.`);
+  try {
+    if (typeof address !== "string" || !address.trim() || address.trim().length > 100) throw new Error("Invalid address");
+    // Bitcoin and Fractal mainnet share address encodings. Decode locally so an
+    // explorer/API outage cannot block signing; this does not contact the network.
+    bitcoin.address.toOutputScript(address.trim(), bitcoin.networks.bitcoin);
+  } catch {
+    throw new Error(`L’adresse destinataire n’est pas valide pour ${config.label}.`);
+  }
 }
 
 export async function trackMempoolTransaction(txid: string, network: string, onUpdate?: (receipt: MempoolReceipt) => void) {

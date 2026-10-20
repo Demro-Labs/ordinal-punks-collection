@@ -842,10 +842,10 @@ async function spendableUtxos(request, env, corsHeaders) {
   const requestedSize = parseBoundedInteger(url.searchParams.get('size'), 25, 25);
   if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new SpendableUtxoError('INVALID_QUERY', 400);
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
-  // Discover candidates from the full address UTXO index, not only UniSat's pre-filtered available list.
-  // Every candidate is still independently verified below (confirmed, unspent, script/address match,
-  // no inscriptions, Runes, or Alkanes) before it can be returned as fee-safe.
-  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
+  // UniSat documents available-utxo-data as the spendable set and filters protocol assets
+  // (inscriptions, Runes, Alkanes) and dust there. A user-authorized UniSat unlock can make
+  // an asset UTXO available; the Local Vault still rejects any explicit asset markers below.
+  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}&withLowFee=true`, env));
   if (!Array.isArray(source?.utxo)) throw new SpendableUtxoError('UTXO_LIST_INVALID_RESPONSE');
   const raw = source.utxo;
   if (raw.length > requestedSize) throw new SpendableUtxoError('UTXO_PAGE_OVERSIZED');
@@ -939,27 +939,17 @@ async function spendableUtxos(request, env, corsHeaders) {
       rejectedSats.hasInscriptionOrUnknown += satoshi;
       continue;
     }
-    const runes = await spendableUtxoStage('RUNES_BALANCE', () => uniNetwork(base, `/v1/indexer/runes/utxo/${txid}/${vout}/balance`, env));
-    if (!Array.isArray(runes)) throw new SpendableUtxoError('RUNES_INVALID_RESPONSE');
-    if (runes.length !== 0) {
+    const runeMetadata = [item?.runes, detail?.runes].filter(value => value !== undefined);
+    if (runeMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
       rejected.hasRunes += 1;
       rejectedSats.hasRunes += satoshi;
       continue;
     }
-    if (chain === 'fractal') {
-      let alkanes;
-      // This scan starts from all-utxo-data, which can include protocol-asset
-      // outputs. A missing per-outpoint Alkanes endpoint therefore cannot be
-      // treated as an empty balance: fail closed rather than label the UTXO safe.
-      alkanes = await spendableUtxoStage('ALKANES_BALANCE', () =>
-        uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env)
-      );
-      if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
-      if (alkanes.length !== 0) {
-        rejected.hasAlkanes += 1;
-        rejectedSats.hasAlkanes += satoshi;
-        continue;
-      }
+    const alkaneMetadata = [item?.alkanes, detail?.alkanes].filter(value => value !== undefined);
+    if (alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
+      rejected.hasAlkanes += 1;
+      rejectedSats.hasAlkanes += satoshi;
+      continue;
     }
     checked.push({ address, txid, vout, satoshi, scriptPk, height, isLowFee, isOpInRBF, inscriptions: [], inscriptionsRunesAlkanesChecked: true });
   }
@@ -986,37 +976,70 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
   if (chain !== 'fractal' || !validWalletAddress(address) || !Number.isSafeInteger(minimumSats) || minimumSats <= 0 || !Array.isArray(candidates) || candidates.length < 1 || candidates.length > MAX_UTXO_CONFIRM_INPUTS) {
     throw new SpendableUtxoError('INVALID_QUERY', 400);
   }
-  const seen = new Set();
-  const verified = [];
-  let safeSats = 0;
+  const candidateByOutpoint = new Map();
   for (const candidate of candidates) {
     const txid = typeof candidate?.txid === 'string' ? candidate.txid.toLowerCase() : '';
     const vout = Number(candidate?.vout);
     const satoshi = normalizeSatoshiValue(candidate);
     const scriptPk = typeof candidate?.scriptPk === 'string' ? candidate.scriptPk.toLowerCase() : '';
     const key = `${txid}:${vout}`;
-    if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) || !Number.isSafeInteger(satoshi) || satoshi < minimumSpendableSatsForScript(scriptPk) || seen.has(key)) {
+    if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) || !Number.isSafeInteger(satoshi) || satoshi < minimumSpendableSatsForScript(scriptPk) || candidateByOutpoint.has(key)) {
       throw new SpendableUtxoError('UTXO_CONFIRM_INVALID_CANDIDATE', 400);
     }
-    seen.add(key);
-    const detail = await spendableUtxoStage('UTXO_CONFIRM_DETAIL', () => uniNetwork(API_BASE, `/v1/indexer/utxo/${txid}/${vout}`, env));
+    candidateByOutpoint.set(key, { txid, vout, satoshi, scriptPk });
+  }
+  const availableByOutpoint = new Map();
+  let cursor = 0;
+  let sourceTotal = null;
+  for (let page = 0; page < 20 && availableByOutpoint.size < candidateByOutpoint.size; page += 1) {
+    const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(API_BASE, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=25&withLowFee=true`, env));
+    const raw = source?.utxo;
+    const sourceCursor = Number(source?.cursor);
+    const total = Number(source?.total);
+    if (!Array.isArray(raw) || raw.length > 25 || sourceCursor !== cursor || !Number.isSafeInteger(total) || total < cursor + raw.length) {
+      throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_INVALID_RESPONSE');
+    }
+    sourceTotal = total;
+    for (const item of raw) {
+      if (item?.address !== address) throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_ADDRESS_MISMATCH');
+      const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
+      const vout = Number(item?.vout);
+      const key = `${txid}:${vout}`;
+      if (!candidateByOutpoint.has(key)) continue;
+      const satoshi = normalizeSatoshiValue(item);
+      const scriptPk = typeof item?.scriptPk === 'string' ? item.scriptPk.toLowerCase() : '';
+      const height = Number(item?.height);
+      const runeMetadata = item?.runes === undefined ? [] : [item.runes];
+      const alkaneMetadata = item?.alkanes === undefined ? [] : [item.alkanes];
+      if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || satoshi === null || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) ||
+          !Number.isSafeInteger(height) || height <= 0 || !Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0 ||
+          typeof item?.isLowFee !== 'boolean' || typeof item?.isOpInRBF !== 'boolean' ||
+          runeMetadata.some(value => !Array.isArray(value) || value.length !== 0) || alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) continue;
+      const candidate = candidateByOutpoint.get(key);
+      if (candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: item.isOpInRBF });
+    }
+    const nextCursor = cursor + raw.length;
+    if (raw.length === 0 || nextCursor === total) break;
+    cursor = nextCursor;
+  }
+  if (sourceTotal === null || availableByOutpoint.size !== candidateByOutpoint.size) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_SPENDABLE', 409);
+  const verified = [];
+  let safeSats = 0;
+  for (const [key, candidate] of candidateByOutpoint) {
+    const available = availableByOutpoint.get(key);
+    const detail = await spendableUtxoStage('UTXO_CONFIRM_DETAIL', () => uniNetwork(API_BASE, `/v1/indexer/utxo/${candidate.txid}/${candidate.vout}`, env));
     if (
-      String(detail?.txid || '').toLowerCase() !== txid || Number(detail?.vout) !== vout ||
-      detail?.address !== address || Number(detail?.satoshi) !== satoshi ||
-      String(detail?.scriptPk || '').toLowerCase() !== scriptPk ||
-      !Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0 ||
-      detail?.isSpent !== false || typeof detail?.isOpInRBF !== 'boolean' ||
-      !Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0
+      !available || String(detail?.txid || '').toLowerCase() !== candidate.txid || Number(detail?.vout) !== candidate.vout ||
+      detail?.address !== address || Number(detail?.satoshi) !== candidate.satoshi ||
+      String(detail?.scriptPk || '').toLowerCase() !== candidate.scriptPk ||
+      !Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0 || detail?.isSpent !== false ||
+      typeof detail?.isOpInRBF !== 'boolean' || !Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0 ||
+      (detail?.runes !== undefined && (!Array.isArray(detail.runes) || detail.runes.length !== 0)) ||
+      (detail?.alkanes !== undefined && (!Array.isArray(detail.alkanes) || detail.alkanes.length !== 0))
     ) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_SPENDABLE', 409);
-    const runes = await spendableUtxoStage('UTXO_CONFIRM_RUNES', () => uniNetwork(API_BASE, `/v1/indexer/runes/utxo/${txid}/${vout}/balance`, env));
-    if (!Array.isArray(runes)) throw new SpendableUtxoError('RUNES_INVALID_RESPONSE');
-    if (runes.length !== 0) throw new SpendableUtxoError('UTXO_CONFIRM_HAS_ASSET', 409);
-    const alkanes = await spendableUtxoStage('UTXO_CONFIRM_ALKANES', () => uniNetwork(API_BASE, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env));
-    if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
-    if (alkanes.length !== 0) throw new SpendableUtxoError('UTXO_CONFIRM_HAS_ASSET', 409);
-    safeSats += satoshi;
+    safeSats += candidate.satoshi;
     if (!Number.isSafeInteger(safeSats)) throw new SpendableUtxoError('UTXO_CONFIRM_TOTAL_UNSAFE');
-    verified.push({ address, txid, vout, satoshi, scriptPk, height: Number(detail.height), isLowFee: Boolean(detail.isLowFee), isOpInRBF: detail.isOpInRBF, inscriptionsRunesAlkanesChecked: true });
+    verified.push({ address, txid: candidate.txid, vout: candidate.vout, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk, height: Number(detail.height), isLowFee: available.isLowFee, isOpInRBF: detail.isOpInRBF, inscriptionsRunesAlkanesChecked: true });
   }
   return Response.json({ chain, address, minimumSats, safeSats, sufficient: safeSats >= minimumSats, verifiedUtxoCount: verified.length, utxo: verified, confirmedAt: new Date().toISOString() }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
