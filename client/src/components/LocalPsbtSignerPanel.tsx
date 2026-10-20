@@ -18,6 +18,7 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
   const [tx, setTx] = useState<{ rawTxHex: string; txid: string } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmedBroadcast, setConfirmedBroadcast] = useState(false);
+  const [broadcastAttempted, setBroadcastAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -28,6 +29,7 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
     setTx(null);
     setConfirmed(false);
     setConfirmedBroadcast(false);
+    setBroadcastAttempted(false);
     setOwnershipProofKey(null);
     setError("");
     setMessage("");
@@ -40,6 +42,7 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
     setTx(null);
     setConfirmed(false);
     setConfirmedBroadcast(false);
+    setBroadcastAttempted(false);
     setBusy(true);
     try {
       const nextReview = await reviewLocalPsbt(psbt.trim(), wallet, network);
@@ -86,7 +89,8 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
   };
 
   const broadcast = async () => {
-    if (!review || !tx || !confirmedBroadcast) return;
+    if (!review || !tx || !confirmedBroadcast || broadcastAttempted) return;
+    setBroadcastAttempted(true);
     setBusy(true);
     setError("");
     try {
@@ -104,10 +108,10 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
     <div className="flex items-center gap-2 text-[#f2bd63]"><ShieldCheck size={16} /><h3 id="local-psbt-title" className="font-mono text-[10px] uppercase tracking-[.14em]">Local PSBT signer</h3></div>
     <p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Standard native BTC/FB only: this signer verifies every exact input against live confirmed, asset-free UTXOs and checks standard address outputs. It refuses Ordinals, BRC-20, Runes, Alkanes and OP_RETURN protocol transactions. Only the public address/outpoints are queried; private keys never leave this device.</p>
     <label className="mt-3 block font-mono text-[9px] uppercase tracking-[.12em] text-[#9ea7b3]" htmlFor="local-psbt-address-type">Source account type</label>
-    <select id="local-psbt-address-type" aria-label="Local Vault source address type" value={addressType} onChange={event => { setAddressType(event.target.value as AddressType); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setConfirmedBroadcast(false); setOwnershipProofKey(null); setError(""); setMessage(""); }} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-sm text-[#f3efe5]">{ADDRESS_SPECS.map(item => <option key={item.type} value={item.type}>{item.label}</option>)}</select>
+    <select id="local-psbt-address-type" aria-label="Local Vault source address type" value={addressType} onChange={event => { setAddressType(event.target.value as AddressType); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setConfirmedBroadcast(false); setBroadcastAttempted(false); setOwnershipProofKey(null); setError(""); setMessage(""); }} className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-sm text-[#f3efe5]">{ADDRESS_SPECS.map(item => <option key={item.type} value={item.type}>{item.label}</option>)}</select>
     <p className="mt-1 break-all font-mono text-[9px] text-[#718092]">Local source: {wallet.addresses[addressType].address}</p>
     <label className="sr-only" htmlFor="local-psbt-input">PSBT to sign</label>
-    <textarea id="local-psbt-input" value={psbt} onChange={event => { setPsbt(event.target.value); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setConfirmedBroadcast(false); setOwnershipProofKey(null); setError(""); setMessage(""); }} placeholder="Paste a standard BTC/FB PSBT (no protocol assets)…" className="mt-3 min-h-28 w-full border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-base text-[#f3efe5] placeholder:text-[#718092] sm:text-sm" />
+    <textarea id="local-psbt-input" value={psbt} onChange={event => { setPsbt(event.target.value); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setConfirmedBroadcast(false); setBroadcastAttempted(false); setOwnershipProofKey(null); setError(""); setMessage(""); }} placeholder="Paste a standard BTC/FB PSBT (no protocol assets)…" className="mt-3 min-h-28 w-full border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-base text-[#f3efe5] placeholder:text-[#718092] sm:text-sm" />
     {ownershipContextKey && <LocalVaultOwnershipProof key={ownershipContextKey} site={site} network={network} wallet={wallet} addressType={addressType} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
     <button type="button" onClick={inspect} disabled={!psbt.trim() || busy} className="mt-2 inline-flex min-h-11 w-full items-center justify-center border border-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-40 sm:w-auto">Review PSBT</button>
     {review && <div className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]">
@@ -120,7 +124,7 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
       <button type="button" onClick={sign} disabled={!confirmed || !ownershipContextKey || ownershipProofKey !== ownershipContextKey || busy} className="mt-2 inline-flex min-h-11 w-full items-center justify-center bg-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#0b0d10] disabled:opacity-40 sm:w-auto">{busy ? "Signing…" : "Sign locally"}</button>
     </div>}
     {signed && !tx && <div className="mt-3 border border-[#d99a54]/40 p-3"><p className="font-mono text-[10px] text-[#f2bd63]">PSBT signed in memory; not broadcast.</p><button type="button" onClick={finalize} disabled={busy} className="mt-2 inline-flex min-h-11 w-full items-center justify-center border border-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-40 sm:w-auto">{busy ? "Verifying…" : "Verify signature and prepare broadcast"}</button></div>}
-    {tx && <div className="mt-3 border border-[#d99a54]/60 p-3 font-mono text-[10px] leading-5"><p className="break-all text-[#f2bd63]">Expected TXID: {tx.txid}</p><p className="mt-1 text-[#9ea7b3]">Broadcasting is an irreversible on-chain action. Verify the TXID and network one last time.</p><label className="mt-2 flex min-h-11 items-start gap-2 py-2"><input type="checkbox" checked={confirmedBroadcast} onChange={event => setConfirmedBroadcast(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><span>I confirm this exact TXID and authorize broadcasting it to {network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin mainnet"}.</span></label><button type="button" onClick={() => void broadcast()} disabled={busy || !confirmedBroadcast} className="mt-2 inline-flex min-h-11 w-full items-center justify-center bg-[#d99a54] px-3 py-2 uppercase text-[#0b0d10] disabled:opacity-40 sm:w-auto">{busy ? "Broadcasting…" : "Broadcast via Mempool"}</button></div>}
+    {tx && <div className="mt-3 border border-[#d99a54]/60 p-3 font-mono text-[10px] leading-5"><p className="break-all text-[#f2bd63]">Expected TXID: {tx.txid}</p><p className="mt-1 text-[#9ea7b3]">Broadcasting is an irreversible on-chain action. Verify the TXID and network one last time.</p><label className="mt-2 flex min-h-11 items-start gap-2 py-2"><input type="checkbox" checked={confirmedBroadcast} onChange={event => setConfirmedBroadcast(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><span>I confirm this exact TXID and authorize broadcasting it to {network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin mainnet"}.</span></label><button type="button" onClick={() => void broadcast()} disabled={busy || !confirmedBroadcast || broadcastAttempted} className="mt-2 inline-flex min-h-11 w-full items-center justify-center bg-[#d99a54] px-3 py-2 uppercase text-[#0b0d10] disabled:opacity-40 sm:w-auto">{busy ? "Broadcasting…" : broadcastAttempted ? "Broadcast attempted — verify TXID" : "Broadcast via Mempool"}</button></div>}
     {error && <p className="mt-3 break-words border border-[#a45e54]/50 p-3 font-mono text-[10px] leading-5 text-[#e6a69b]" role="alert">{error}</p>}
     {message && <p className="mt-3 break-words border border-[#70c7a0]/40 p-3 font-mono text-[10px] leading-5 text-[#9fe0bd]" role="status">{message}</p>}
   </section>;
