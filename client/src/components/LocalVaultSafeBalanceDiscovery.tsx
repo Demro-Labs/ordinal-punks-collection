@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Check, Copy, Loader2, Search, Wallet } from "lucide-react";
-import { fetchAddressBalance } from "@/lib/ordi-wallet";
 import { getSpendableUtxos } from "@/lib/mempool";
-import { ADDRESS_SPECS, type AddressType, type OrdiNetwork, type OrdiWalletRecord } from "@/lib/ordi-wallet";
+import { ADDRESS_SPECS, fetchAddressBalance, type AddressType, type OrdiNetwork, type OrdiWalletRecord } from "@/lib/ordi-wallet";
 
 type ScanRow = { type: AddressType; address: string; confirmedSats: number | null; pendingSats: number | null; totalSats: number | null; safeSats: number | null; safeUtxos: number | null; balanceError?: string; safeError?: string };
 
