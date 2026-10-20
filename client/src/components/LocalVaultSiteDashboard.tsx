@@ -3,7 +3,7 @@ import { ArrowDownLeft, ArrowUpRight, ExternalLink, RefreshCw, ShieldCheck, Wall
 import { ProtocolAssetsPanel } from "@/components/ProtocolAssetsPanel";
 import { LocalVaultActiveUtxosPanel } from "@/components/LocalVaultActiveUtxosPanel";
 import { clearLocalVaultSiteSession, LOCAL_VAULT_SESSION_EVENT, readLocalVaultSiteSession, type LocalVaultSite, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
-import { ADDRESS_SPECS, formatSats } from "@/lib/ordi-wallet";
+import { ADDRESS_SPECS, fetchAddressBalance, formatSats } from "@/lib/ordi-wallet";
 
 type AddressType = LocalVaultSiteSession["activeAddressType"];
 type Balance = { confirmed: number; unconfirmed: number; total: number };
@@ -47,19 +47,9 @@ export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSe
     setActivityError("");
     const base = endpoint(session.network);
     const addresses = ADDRESS_SPECS.map(spec => ({ type: spec.type, address: session.addresses[spec.type].address }));
-    const balanceResults = await Promise.allSettled(addresses.map(async item => {
-      const response = await fetch(`${base}/api/address/${encodeURIComponent(item.address)}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Balance endpoint returned HTTP ${response.status}`);
-      const data = await response.json() as {
-        chain_stats?: { funded_txo_sum?: number; spent_txo_sum?: number };
-        mempool_stats?: { funded_txo_sum?: number; spent_txo_sum?: number };
-      };
-      const chain = data.chain_stats ?? {};
-      const pending = data.mempool_stats ?? {};
-      const confirmed = (chain.funded_txo_sum ?? 0) - (chain.spent_txo_sum ?? 0);
-      const unconfirmed = (pending.funded_txo_sum ?? 0) - (pending.spent_txo_sum ?? 0);
-      return [item.type, { confirmed, unconfirmed, total: confirmed + unconfirmed }] as const;
-    }));
+    const balanceResults = await Promise.allSettled(addresses.map(async item =>
+      [item.type, await fetchAddressBalance(session.network, item.address)] as const
+    ));
     const nextBalances: Partial<Record<AddressType, Balance>> = {};
     for (const result of balanceResults) {
       if (result.status === "fulfilled") nextBalances[result.value[0]] = result.value[1];
