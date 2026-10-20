@@ -820,9 +820,13 @@ async function addressUtxos(request, env, corsHeaders) {
         ? item.inscriptions.filter(value => typeof value === 'string' || (value && typeof value === 'object')).map(value => typeof value === 'string' ? value : (typeof value.inscriptionId === 'string' ? value.inscriptionId : 'unknown'))
         : null;
       const isSpent = typeof item?.isSpent === 'boolean' ? item.isSpent : null;
+      // Keep protocol markers in this display-only endpoint so the UI can distinguish
+      // an ordinary-looking output from one carrying Runes/Alkanes. Missing metadata stays unknown.
+      const runes = Array.isArray(item?.runes) ? item.runes : null;
+      const alkanes = Array.isArray(item?.alkanes) ? item.alkanes : null;
       if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !Number.isSafeInteger(satoshi) || satoshi < 0 ||
           (height !== null && (!Number.isSafeInteger(height) || height < 0))) return null;
-      return { txid, vout, satoshi, height, scriptPk, inscriptions, isSpent };
+      return { txid, vout, satoshi, height, scriptPk, inscriptions, runes, alkanes, isSpent };
     });
     if (utxo.some(item => item === null)) throw new Error('Invalid UniSat UTXO item');
     const sourceCursor = source?.cursor === undefined ? cursor : Number(source.cursor);
