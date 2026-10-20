@@ -44,8 +44,26 @@ async function assertOrdinalListStillCurrent(network: OrdiNetwork, address: stri
   assertCompleteOrdinalList(current.detail, current.total);
   if (!sameOrdinalSet(current.detail, expected)) throw new Error("La liste ou la position des inscriptions a changé depuis la revue; aucune signature n’a été créée.");
 }
+function getOrdinalFeeInputs(plan: OrdinalTransferPlan) {
+  const inscriptionOutpoint = typeof plan.inscriptionOutpoint === "string" ? plan.inscriptionOutpoint.toLowerCase() : "";
+  if (!/^[a-f0-9]{64}:\\d+$/.test(inscriptionOutpoint)) {
+    throw new Error("La position de l’inscription dans le PSBT est invalide; aucune signature n’a été créée.");
+  }
+  const outpoints = plan.inputs.map(input => `${input.txid.toLowerCase()}:${input.vout}`);
+  if (outpoints.some(outpoint => !/^[a-f0-9]{64}:\\d+$/.test(outpoint)) || new Set(outpoints).size !== outpoints.length) {
+    throw new Error("Le PSBT contient une entrée invalide ou dupliquée; aucune signature n’a été créée.");
+  }
+  const inscriptionMatches = outpoints.filter(outpoint => outpoint === inscriptionOutpoint).length;
+  if (inscriptionMatches !== 1) {
+    throw new Error("L’entrée de l’inscription ne correspond pas exactement au PSBT; aucune signature n’a été créée.");
+  }
+  return plan.inputs.filter((input, index) => outpoints[index] !== inscriptionOutpoint);
+}
+
 async function assertFeeInputsStillSafe(network: OrdiNetwork, address: string, plan: OrdinalTransferPlan) {
-  const feeInputs = plan.inputs.slice(1);
+  // Identify the asset input by its outpoint, never by array position. Only separate fee inputs
+  // are checked against the spendable set, so the inscription itself is never treated as fees.
+  const feeInputs = getOrdinalFeeInputs(plan);
   if (!feeInputs.length) throw new Error("Le PSBT n’a pas d’entrée de frais distincte; le vault bloque ce transfert.");
   const refs = await getSpendableUtxos(network, address, 1, { requiredOutpoints: feeInputs.map(input => `${input.txid}:${input.vout}`) });
   const byOutpoint = new Map(refs.map(ref => [`${ref.txid.toLowerCase()}:${ref.vout}`, ref]));
