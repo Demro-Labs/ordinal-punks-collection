@@ -2,7 +2,7 @@ import { Buffer } from "buffer";
 import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
 import type { AddressType, OrdiAddress, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
-import { getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
+import { confirmSpendableUtxos, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
 import { LIVE_DATA_API_BASE } from "@/lib/live";
 
 bitcoin.initEccLib(ecc);
@@ -76,6 +76,10 @@ async function verifyInputs(network: OrdiNetwork, walletAddress: string, inputs:
       throw new Error(`L’entrée ${input.txid}:${input.vout} n’est pas un UTXO confirmé et sans actif pour ce coffre sur ${network}. Rien n’a été signé ni diffusé.`);
     }
   }
+
+  await confirmSpendableUtxos(network, walletAddress, minimumSats, inputs.map(input => ({
+    txid: input.txid, vout: input.vout, satoshi: input.valueSats, scriptPk: input.scriptHex,
+  })));
 }
 function transactionInputValueAndScript(item: bitcoin.Psbt["data"]["inputs"][number], outpoint: { txid: string; vout: number }) {
   if (item.witnessUtxo && item.nonWitnessUtxo) throw new Error("Le PSBT mélange les preuves UTXO witness et non-witness.");
