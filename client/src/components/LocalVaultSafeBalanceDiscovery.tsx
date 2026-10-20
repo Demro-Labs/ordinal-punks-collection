@@ -15,15 +15,18 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
   const scan = async () => {
     setBusy(true); setNotice(""); setRows(null);
     try {
-      const results = await Promise.all(ADDRESS_SPECS.map(async spec => {
+      const results: ScanRow[] = await Promise.all(ADDRESS_SPECS.map(async (spec): Promise<ScanRow> => {
         const address = wallet.addresses[spec.type]?.address ?? "";
         if (!address) return { type: spec.type, address, confirmedSats: null, pendingSats: null, totalSats: null, safeSats: null, safeUtxos: null, totalUtxos: null, availableUtxos: null, unavailableUtxos: null, balanceError: "Adresse absente du coffre.", safeError: "Adresse absente du coffre." } satisfies ScanRow;
-        const [balanceResult, safeResult] = await Promise.allSettled([fetchAddressBalance(network, address), getSpendableUtxos(network, address, 1, { collectAll: true })]);
+        const [balanceResult, safeResult, summaryResult] = await Promise.allSettled([fetchAddressBalance(network, address), getSpendableUtxos(network, address, 1, { collectAll: true }), getUtxoBalanceSummary(network, address)]);
         const balance = balanceResult.status === "fulfilled" ? balanceResult.value : null;
         const safe = safeResult.status === "fulfilled" ? safeResult.value : null;
+        const summary = summaryResult.status === "fulfilled" ? summaryResult.value : null;
         return {
           type: spec.type, address, confirmedSats: balance?.confirmed ?? null, pendingSats: balance?.unconfirmed ?? null, totalSats: balance?.total ?? null,
           safeSats: safe ? safe.reduce((sum, item) => sum + item.satoshi, 0) : null, safeUtxos: safe?.length ?? null,
+          totalUtxos: summary?.totalUtxoCount ?? null, availableUtxos: summary?.availableUtxoCount ?? null, unavailableUtxos: summary?.unavailableUtxoCount ?? null,
+          ...(summaryResult.status === "rejected" ? { summaryError: summaryResult.reason instanceof Error ? summaryResult.reason.message : "Résumé UTXO indisponible." } : {}),
           ...(balanceResult.status === "rejected" ? { balanceError: balanceResult.reason instanceof Error ? balanceResult.reason.message : "Solde total indisponible." } : {}),
           ...(safeResult.status === "rejected" ? { safeError: safeResult.reason instanceof Error ? safeResult.reason.message : "Solde sûr indisponible." } : {}),
         } satisfies ScanRow;
@@ -60,7 +63,8 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
             <p className="font-mono text-[9px] text-[#9fe0bd]">Sûr vérifié : {row.safeSats === null ? "—" : `${row.safeSats.toLocaleString("fr-FR")} sats · ${row.safeUtxos} UTXO`}</p>
           </div>
           <p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#718092]">{row.address || "Adresse absente"}</p>
-          {row.summaryError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Résumé UTXO : {row.summaryError}</p>}\n          {row.balanceError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Solde total : {row.balanceError}</p>}
+          {row.summaryError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Résumé UTXO : {row.summaryError}</p>}\n          {row.summaryError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Résumé UTXO : {row.summaryError}</p>}
+          {row.balanceError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Solde total : {row.balanceError}</p>}
           {row.safeError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Scan UTXO sûr : {row.safeError}</p>}
           <div className="mt-2 flex flex-wrap gap-2">
             {row.address && <button type="button" onClick={() => void copyAddress(row.address)} className="inline-flex min-h-9 items-center gap-1 border border-[#3b434d] px-2 font-mono text-[9px] text-[#9ea7b3]">{copied === row.address ? <Check size={12} /> : <Copy size={12} />} Copier l’adresse</button>}
