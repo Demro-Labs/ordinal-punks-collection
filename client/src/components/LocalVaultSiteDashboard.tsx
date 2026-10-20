@@ -127,7 +127,6 @@ export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSe
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {ADDRESS_SPECS.map(spec => {
           const address = session.addresses[spec.type].address;
-          const balance = balances[spec.type];
           const active = session.activeAddressType === spec.type;
           return <article key={spec.type} className={`min-w-0 rounded-xl border p-4 transition ${active ? "border-[#70c7a0]/60 bg-[#70c7a0]/[.07] shadow-[inset_0_0_0_1px_rgba(112,199,160,.08)]" : "border-[#27332f] bg-[#101613] hover:border-[#3a4a42]"}`}>
             <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#d9d3c6]">{spec.label}</p>{active && <span className="rounded-full bg-[#70c7a0]/10 px-2 py-1 font-mono text-[8px] uppercase tracking-[.1em] text-[#9fe0bd]">Active</span>}</div>
