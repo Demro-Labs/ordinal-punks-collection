@@ -57,13 +57,14 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
             <p className="font-mono text-[10px] text-[#d9d3c6]">{spec.label}</p>
             <p className="font-mono text-[10px] text-[#f2bd63]">{row.totalSats === null ? "Solde total indisponible" : `Total ${row.totalSats.toLocaleString("fr-FR")} sats`}</p>
           </div>
-          <div className="mt-2 grid gap-1 sm:grid-cols-2">\n            <p className="font-mono text-[9px] text-[#9ea7b3]">UTXO indexés : {row.totalUtxos === null ? "—" : row.totalUtxos} · disponibles UniSat : {row.availableUtxos === null ? "—" : row.availableUtxos} · indisponibles : {row.unavailableUtxos === null ? "—" : row.unavailableUtxos}</p>
+          <div className="mt-2 grid gap-1 sm:grid-cols-2">
+            <p className="font-mono text-[9px] text-[#9ea7b3]">UTXO indexés : {row.totalUtxos === null ? "—" : row.totalUtxos} · disponibles UniSat : {row.availableUtxos === null ? "—" : row.availableUtxos} · indisponibles : {row.unavailableUtxos === null ? "—" : row.unavailableUtxos}</p>
             <p className="font-mono text-[9px] text-[#9ea7b3]">Confirmé : {row.confirmedSats === null ? "—" : `${row.confirmedSats.toLocaleString("fr-FR")} sats`}</p>
             <p className="font-mono text-[9px] text-[#9ea7b3]">Mempool : {row.pendingSats === null ? "—" : `${row.pendingSats.toLocaleString("fr-FR")} sats`}</p>
             <p className="font-mono text-[9px] text-[#9fe0bd]">Sûr vérifié : {row.safeSats === null ? "—" : `${row.safeSats.toLocaleString("fr-FR")} sats · ${row.safeUtxos} UTXO`}</p>
           </div>
           <p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#718092]">{row.address || "Adresse absente"}</p>
-          {row.summaryError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Résumé UTXO : {row.summaryError}</p>}\n          {row.summaryError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Résumé UTXO : {row.summaryError}</p>}
+          {row.summaryError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Résumé UTXO : {row.summaryError}</p>}
           {row.balanceError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Solde total : {row.balanceError}</p>}
           {row.safeError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Scan UTXO sûr : {row.safeError}</p>}
           <div className="mt-2 flex flex-wrap gap-2">
