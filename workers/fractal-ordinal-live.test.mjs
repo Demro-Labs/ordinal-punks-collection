@@ -1926,7 +1926,9 @@ test('Alkanes balance route defaults to Bitcoin and rejects unsupported Fractal 
 
     const fractal = await worker.fetch(makeRequest(`/api/alkanes/balances?address=${address}&chain=FRACTAL_BITCOIN_MAINNET`, { ip: '192.0.2.247' }), { UNISAT_API_KEY: 'fractal-test-only' });
     assert.equal(fractal.status, 400);
-    assert.match((await fractal.json()).error, /only on Bitcoin mainnet/i);
+    const unsupported = await fractal.json();
+    assert.match(unsupported.error, /only on Bitcoin mainnet/i);
+    assert.equal(unsupported.code, 'ALKANES_CHAIN_UNSUPPORTED');
     assert.equal(calls.length, 1, 'unsupported Fractal route must not call UniSat');
   } finally { globalThis.fetch = previousFetch; }
 });
