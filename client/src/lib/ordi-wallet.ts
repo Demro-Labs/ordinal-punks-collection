@@ -102,12 +102,31 @@ export function formatSats(value: number | null) {
 }
 
 export async function fetchAddressBalance(network: OrdiNetwork, address: string) {
+  if (!address.trim()) throw new Error("Adresse vide : impossible de vérifier le solde.");
   const query = new URLSearchParams({ chain: network, address });
   const response = await fetch(`${LIVE_DATA_API_BASE}/api/mempool/address?${query}`, { cache: "no-store", headers: { Accept: "application/json" } });
   if (!response.ok) throw new Error(`Mempool HTTP ${response.status}`);
-  const value = await response.json() as { chain_stats?: { funded_txo_sum?: number; spent_txo_sum?: number }; mempool_stats?: { funded_txo_sum?: number; spent_txo_sum?: number } };
-  const chain = value.chain_stats ?? {}; const mempool = value.mempool_stats ?? {};
-  const confirmed = (chain.funded_txo_sum ?? 0) - (chain.spent_txo_sum ?? 0);
-  const unconfirmed = (mempool.funded_txo_sum ?? 0) - (mempool.spent_txo_sum ?? 0);
-  return { confirmed, unconfirmed, total: confirmed + unconfirmed };
+  const value = await response.json() as {
+    chain_stats?: { funded_txo_sum?: unknown; spent_txo_sum?: unknown };
+    mempool_stats?: { funded_txo_sum?: unknown; spent_txo_sum?: unknown };
+  };
+  // Never turn a partial/indexer-error response into a plausible 0-sat balance.
+  const readSats = (raw: unknown, field: string) => {
+    if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0) {
+      throw new Error(`Solde incomplet : champ ${field} absent ou invalide. Réessayez après vérification de l’indexeur.`);
+    }
+    return raw;
+  };
+  if (!value.chain_stats || !value.mempool_stats) {
+    throw new Error("Solde incomplet : statistiques confirmées ou mempool absentes. Le solde n’est pas considéré comme zéro.");
+  }
+  const confirmed = readSats(value.chain_stats.funded_txo_sum, "chain_stats.funded_txo_sum")
+    - readSats(value.chain_stats.spent_txo_sum, "chain_stats.spent_txo_sum");
+  const unconfirmed = readSats(value.mempool_stats.funded_txo_sum, "mempool_stats.funded_txo_sum")
+    - readSats(value.mempool_stats.spent_txo_sum, "mempool_stats.spent_txo_sum");
+  const total = confirmed + unconfirmed;
+  if (!Number.isSafeInteger(confirmed) || confirmed < 0 || !Number.isSafeInteger(total) || total < 0) {
+    throw new Error("Solde incohérent renvoyé par l’indexeur. Le résultat n’est pas affiché comme fiable.");
+  }
+  return { confirmed, unconfirmed, total };
 }
