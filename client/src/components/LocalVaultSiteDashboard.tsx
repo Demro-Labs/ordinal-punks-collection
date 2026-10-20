@@ -7,7 +7,7 @@ import { ADDRESS_SPECS, fetchAddressBalance, formatSats } from "@/lib/ordi-walle
 
 type AddressType = LocalVaultSiteSession["activeAddressType"];
 type Network = LocalVaultSiteSession["network"];
-type Balance = { confirmed: number; unconfirmed: number; total: number };
+type Balance = { confirmed: number; unconfirmed: number; total: number } | null;
 type MempoolTx = {
   txid: string;
   fee?: number;
