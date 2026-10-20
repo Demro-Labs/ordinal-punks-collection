@@ -1234,7 +1234,7 @@ test('Worker refuses an input whose value differs from the current UniSat outpoi
     const body = JSON.stringify({ chain: 'fractal', address, minimumSats: 30000, utxos: [{ txid: record.txid, vout: 0, satoshi: 50000, scriptPk: record.scriptPk }] });
     const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.237', body }), { UNISAT_API_KEY: 'test-only' });
     assert.equal(response.status, 409);
-    assert.equal((await response.json()).code, 'UTXO_CONFIRM_NOT_SPENDABLE');
+    assert.equal((await response.json()).code, 'UTXO_CONFIRM_NOT_IN_AVAILABLE_SET');
     assert.equal(detailLookups, 0);
   } finally { globalThis.fetch = previousFetch; }
 });
