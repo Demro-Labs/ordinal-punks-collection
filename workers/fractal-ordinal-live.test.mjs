@@ -1177,34 +1177,42 @@ test('reports safe-UTXO rejection reasons without exposing addresses or outpoint
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('Worker attests that the exact Fractal PSBT inputs cover payment plus fees', async () => {
+test('Worker attests that exact BTC and FB PSBT inputs cover payment plus fees', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
   const record = { address, txid: 'e'.repeat(64), vout: 1, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    assert.ok(['https://open-api-fractal.unisat.io', 'https://open-api.unisat.io'].includes(url.origin), url.origin);
     if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { cursor: Number(url.searchParams.get('cursor')), total: 1, utxo: [record] } });
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/${record.vout}`) return Response.json({ code: 0, data: record });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
-    const makeBody = minimumSats => JSON.stringify({ chain: 'fractal', address, minimumSats, utxos: [{ txid: record.txid, vout: record.vout, satoshi: record.satoshi, scriptPk: record.scriptPk }] });
-    const sufficientResponse = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.238', body: makeBody(49000) }), { UNISAT_API_KEY: 'test-only' });
-    const sufficient = await sufficientResponse.json();
-    assert.equal(sufficientResponse.status, 200);
-    assert.equal(sufficient.sufficient, true);
-    assert.equal(sufficient.safeSats, 50000);
-    assert.equal(sufficient.minimumSats, 49000);
-    assert.equal(sufficient.verifiedUtxoCount, 1);
-    assert.equal(sufficient.utxo[0].txid, record.txid);
-    assert.equal(JSON.stringify(sufficient).includes('test-only'), false);
+    for (const [chain, ipSuffix, env] of [
+      ['fractal', 238, { UNISAT_API_KEY: 'test-only' }],
+      ['bitcoin', 240, { UNISAT_BITCOIN_API: 'test-only' }],
+    ]) {
+      const makeBody = minimumSats => JSON.stringify({ chain, address, minimumSats, utxos: [{ txid: record.txid, vout: record.vout, satoshi: record.satoshi, scriptPk: record.scriptPk }] });
+      const sufficientResponse = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: `192.0.2.${ipSuffix}`, body: makeBody(49000) }), env);
+      const sufficient = await sufficientResponse.json();
+      assert.equal(sufficientResponse.status, 200, chain);
+      assert.equal(sufficient.chain, chain);
+      assert.equal(sufficient.sufficient, true);
+      assert.equal(sufficient.safeSats, 50000);
+      assert.equal(sufficient.minimumSats, 49000);
+      assert.equal(sufficient.verifiedUtxoCount, 1);
+      assert.equal(sufficient.utxo[0].txid, record.txid);
+      assert.equal(JSON.stringify(sufficient).includes('test-only'), false);
 
-    const insufficientResponse = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.239', body: makeBody(51000) }), { UNISAT_API_KEY: 'test-only' });
-    const insufficient = await insufficientResponse.json();
-    assert.equal(insufficientResponse.status, 200);
-    assert.equal(insufficient.sufficient, false);
-    assert.equal(insufficient.safeSats, 50000);
+      const insufficientResponse = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: `192.0.2.${ipSuffix+1}`, body: makeBody(51000) }), env);
+      const insufficient = await insufficientResponse.json();
+      assert.equal(insufficientResponse.status, 200, chain);
+      assert.equal(insufficient.chain, chain);
+      assert.equal(insufficient.sufficient, false);
+      assert.equal(insufficient.safeSats, 50000);
+    }
   } finally { globalThis.fetch = previousFetch; }
 });
 
