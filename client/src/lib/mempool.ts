@@ -194,6 +194,13 @@ export function minimumSpendableSatsForScript(scriptHex: string): number {
 }
 
 /** Fetch confirmed, non-asset UTXOs; a low-fee/RBF history does not make a confirmed output replaceable. */
+function compareSpendableUtxos(left: SpendableUtxo, right: SpendableUtxo) {
+  // Largest-first reduces the number of fee inputs while keeping the selection deterministic.
+  return right.satoshi - left.satoshi ||
+    left.txid.localeCompare(right.txid) ||
+    left.vout - right.vout;
+}
+
 export async function getSpendableUtxos(network: string, address: string, minimumSats: number, options: { mobile?: boolean; requiredOutpoints?: string[]; collectAll?: boolean } = {}): Promise<SpendableUtxo[]> {
   const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
   if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0) {
@@ -283,7 +290,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     if (requiredOutpoints) {
       const byOutpoint = new Map(collected.map(item => [`${item.txid.toLowerCase()}:${item.vout}`, item]));
       if (requiredOutpoints.every(outpoint => byOutpoint.has(outpoint))) return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
-    } else if (!collectAll && safeSats >= minimumSats) return collected;
+    } else if (!collectAll && safeSats >= minimumSats) return [...collected].sort(compareSpendableUtxos);
     if (pageScannedCount === 0 || nextCursor === total) break;
     cursor = nextCursor!;
   }
@@ -314,7 +321,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     const rejectedValueHint = rejectedValueSummary ? ` Valeur des sorties rejetées par motif: ${rejectedValueSummary}.` : "";
     throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} UniSat available outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}; protocol-asset outputs are excluded from this fee-safe scan). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.${diagnosticHint}${rejectedValueHint}${zeroSafeBalanceHint}`);
   }
-  return collected;
+  return [...collected].sort(compareSpendableUtxos);
 }
 
 /** Recheck the exact PSBT inputs with the Fractal Worker before UniSat is asked to sign or pay. */
