@@ -1921,7 +1921,10 @@ test('lists active address UTXOs separately for Bitcoin and Fractal without trea
     assert.equal(btcData.total, 2);
     assert.equal(btcData.utxo.length, 2);
     assert.equal(btcData.utxo[0].satoshi, 1200);
+    assert.deepEqual(btcData.utxo[0].runes, []);
+    assert.deepEqual(btcData.utxo[0].alkanes, []);
     assert.deepEqual(btcData.utxo[1].inscriptions, ['inscription-test']);
+    assert.deepEqual(btcData.utxo[1].runes, [{ id: '1:1' }]);
     assert.equal(calls[0].auth, 'Bearer bitcoin-test-only');
 
     const fb = await worker.fetch(makeRequest(`/api/address-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.245' }), { UNISAT_API_KEY: 'fractal-test-only' });
