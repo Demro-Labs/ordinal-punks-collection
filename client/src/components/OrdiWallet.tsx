@@ -54,7 +54,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
   const [password, setPassword] = useState("");
   const [network, setNetwork] = useState<OrdiNetwork>("BITCOIN_MAINNET");
   const [activeAddressType, setActiveAddressType] = useState<AddressType>("native-segwit");
-  const [balances, setBalances] = useState<Record<AddressType, Balance>>({} as Record<AddressType, Balance>);
+  const [balances, setBalances] = useState<Record<OrdiNetwork, Partial<Record<AddressType, Balance>>>>({ BITCOIN_MAINNET: {}, FRACTAL_BITCOIN_MAINNET: {} });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -172,19 +172,37 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
     if (!wallet) return;
     setLoading(true);
     setError("");
-    try {
-      const entries = await Promise.all(addresses.map(async item => [item.type, await fetchAddressBalance(network, item.address)] as const));
-      setBalances(Object.fromEntries(entries) as Record<AddressType, Balance>);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load balances.");
-    } finally {
-      setLoading(false);
+    const networks: OrdiNetwork[] = ["BITCOIN_MAINNET", "FRACTAL_BITCOIN_MAINNET"];
+    const checks = await Promise.all(networks.flatMap(chain => addresses.map(async item => ({
+      network: chain,
+      type: item.type,
+      result: await Promise.allSettled([fetchAddressBalance(chain, item.address)]).then(([result]) => result),
+    }))));
+    const next: Record<OrdiNetwork, Partial<Record<AddressType, Balance>>> = {
+      BITCOIN_MAINNET: {},
+      FRACTAL_BITCOIN_MAINNET: {},
+    };
+    const failures: string[] = [];
+    for (const check of checks) {
+      if (check.result.status === "fulfilled") {
+        next[check.network][check.type] = check.result.value;
+      } else {
+        next[check.network][check.type] = null;
+        const networkLabel = check.network === "BITCOIN_MAINNET" ? "BTC" : "FB";
+        const addressLabel = ADDRESS_SPECS.find(spec => spec.type === check.type)?.label ?? check.type;
+        failures.push(`${networkLabel} / ${addressLabel}`);
+      }
     }
+    setBalances(next);
+    if (failures.length) {
+      setError(`Scan partiel : solde indisponible pour ${failures.join(", ")}. Ces résultats ne sont pas considérés comme 0 sats; relancez le scan après vérification de l’indexeur.`);
+    }
+    setLoading(false);
   }
 
   useEffect(() => {
     if (wallet) void refresh();
-  }, [wallet, network]);
+  }, [wallet]);
 
   useEffect(() => {
     if (!wallet || !connectedToSite) return;
@@ -288,7 +306,18 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
                 {error && <p className="mt-4 break-words border border-[#a45e54]/50 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#e6a69b]" role="alert">{error}</p>}
                 <div className="mt-4 grid min-w-0 gap-3 sm:mt-5 sm:grid-cols-2 xl:grid-cols-4">{addresses.map(item => <article key={item.type} className="min-w-0 border border-[#2c323a] bg-[#12171d] p-4">
                   <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#f2bd63]">{item.label}</p><p className="mt-2 break-all font-mono text-[10px] text-[#d9d3c6]">{short(item.address)}</p></div><button type="button" onClick={() => copy(item.address)} className="flex min-h-10 min-w-10 shrink-0 items-center justify-center text-[#9ea7b3] hover:text-[#f2bd63]" aria-label="Copy address"><Copy size={15} /></button></div>
-                  <p className="mt-3 font-display text-xl text-[#f3efe5]">{formatSatsAsAsset(balances[item.type]?.total ?? null, network === "BITCOIN_MAINNET" ? "BTC" : "FB")}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">Confirmed {formatSatsAsAsset(balances[item.type]?.confirmed ?? null, network === "BITCOIN_MAINNET" ? "BTC" : "FB")}</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <div className="border border-[#2c323a] bg-[#0b0f13] p-2">
+                      <p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#9fe0bd]">Bitcoin · BTC</p>
+                      <p className="mt-1 font-display text-lg text-[#f3efe5]">{formatSatsAsAsset(balances.BITCOIN_MAINNET[item.type]?.total ?? null, "BTC")}</p>
+                      <p className="mt-1 font-mono text-[9px] text-[#718092]">Confirmé {formatSatsAsAsset(balances.BITCOIN_MAINNET[item.type]?.confirmed ?? null, "BTC")} · Mempool {formatSatsAsAsset(balances.BITCOIN_MAINNET[item.type]?.unconfirmed ?? null, "BTC")}</p>
+                    </div>
+                    <div className="border border-[#2c323a] bg-[#0b0f13] p-2">
+                      <p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#f2bd63]">Fractal Bitcoin · FB</p>
+                      <p className="mt-1 font-display text-lg text-[#f3efe5]">{formatSatsAsAsset(balances.FRACTAL_BITCOIN_MAINNET[item.type]?.total ?? null, "FB")}</p>
+                      <p className="mt-1 font-mono text-[9px] text-[#718092]">Confirmé {formatSatsAsAsset(balances.FRACTAL_BITCOIN_MAINNET[item.type]?.confirmed ?? null, "FB")} · Mempool {formatSatsAsAsset(balances.FRACTAL_BITCOIN_MAINNET[item.type]?.unconfirmed ?? null, "FB")}</p>
+                    </div>
+                  </div>
                   <details className="mt-4 border-t border-[#2c323a] pt-3"><summary className="min-h-10 cursor-pointer py-2 font-mono text-[9px] uppercase text-[#718092]">Advanced keys</summary><p className="mt-2 break-all font-mono text-[9px] text-[#718092]">Derivation path: {item.path}</p><button type="button" onClick={() => setReveal(value => ({ ...value, [item.type]: !value[item.type] }))} className="mt-2 inline-flex min-h-10 items-center gap-1 font-mono text-[9px] uppercase text-[#e6a69b]">{reveal[item.type] ? <EyeOff size={12} /> : <Eye size={12} />}{reveal[item.type] ? "Hide private key" : "Reveal private key"}</button>{reveal[item.type] && <><p className="mt-2 break-all border border-[#a45e54]/50 bg-[#a45e54]/10 p-2 font-mono text-[9px] text-[#e6a69b]">{item.privateKey}</p><button type="button" onClick={() => copy(item.privateKey)} className="mt-2 min-h-10 font-mono text-[9px] uppercase text-[#f2bd63]">Copy private key</button></>}</details>
                 </article>)}</div>
                 <LocalVaultPortfolioPanel addresses={wallet.addresses} network={network} />

@@ -6,7 +6,8 @@ import { clearLocalVaultSiteSession, LOCAL_VAULT_SESSION_EVENT, readLocalVaultSi
 import { ADDRESS_SPECS, fetchAddressBalance, formatSats } from "@/lib/ordi-wallet";
 
 type AddressType = LocalVaultSiteSession["activeAddressType"];
-type Balance = { confirmed: number; unconfirmed: number; total: number };
+type Network = LocalVaultSiteSession["network"];
+type Balance = { confirmed: number; unconfirmed: number; total: number } | null;
 type MempoolTx = {
   txid: string;
   fee?: number;
@@ -34,7 +35,7 @@ function transactionSummary(tx: MempoolTx, address: string) {
 }
 
 export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSession }) {
-  const [balances, setBalances] = useState<Partial<Record<AddressType, Balance>>>({});
+  const [balances, setBalances] = useState<Record<Network, Partial<Record<AddressType, Balance>>>>({ BITCOIN_MAINNET: {}, FRACTAL_BITCOIN_MAINNET: {} });
   const [transactions, setTransactions] = useState<MempoolTx[]>([]);
   const [busy, setBusy] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -47,15 +48,20 @@ export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSe
     setActivityError("");
     const base = endpoint(session.network);
     const addresses = ADDRESS_SPECS.map(spec => ({ type: spec.type, address: session.addresses[spec.type].address }));
-    const balanceResults = await Promise.allSettled(addresses.map(async item =>
-      [item.type, await fetchAddressBalance(session.network, item.address)] as const
-    ));
-    const nextBalances: Partial<Record<AddressType, Balance>> = {};
-    for (const result of balanceResults) {
-      if (result.status === "fulfilled") nextBalances[result.value[0]] = result.value[1];
+    const networks: Network[] = ["BITCOIN_MAINNET", "FRACTAL_BITCOIN_MAINNET"];
+    const balanceResults = await Promise.all(networks.flatMap(chain => addresses.map(async item => ({
+      network: chain,
+      type: item.type,
+      result: await Promise.allSettled([fetchAddressBalance(chain, item.address)]).then(([result]) => result),
+    }))));
+    const nextBalances: Record<Network, Partial<Record<AddressType, Balance>>> = { BITCOIN_MAINNET: {}, FRACTAL_BITCOIN_MAINNET: {} };
+    const failedBalances: string[] = [];
+    for (const check of balanceResults) {
+      if (check.result.status === "fulfilled") nextBalances[check.network][check.type] = check.result.value;
+      else failedBalances.push(`${check.network === "BITCOIN_MAINNET" ? "BTC" : "FB"} / ${ADDRESS_SPECS.find(spec => spec.type === check.type)?.label ?? check.type}`);
     }
     setBalances(nextBalances);
-    if (Object.keys(nextBalances).length !== addresses.length) setBalanceError("Some live balances are temporarily unavailable.");
+    if (failedBalances.length) setBalanceError(`Scan partiel : solde indisponible pour ${failedBalances.join(", ")}. Les résultats en erreur ne sont pas considérés comme 0 sats.`);
 
     try {
       const activeAddress = session.addresses[session.activeAddressType].address;
@@ -79,7 +85,7 @@ export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSe
   }, [refresh]);
 
   const networkLabel = session.network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin";
-  const activeBalance = balances[session.activeAddressType];
+  const activeBalance = balances[session.network][session.activeAddressType];
 
   return <section className="mt-4 overflow-hidden rounded-2xl border border-[#27332f] bg-[#0a0f0e] shadow-[0_24px_70px_rgba(0,0,0,.22)]" aria-labelledby="ordi-vault-live-title">
     <div className="relative overflow-hidden border-b border-[#27332f] bg-[radial-gradient(ellipse_at_top_right,rgba(112,199,160,.12),transparent_55%),linear-gradient(135deg,#101a17,#0b100f_65%)] p-4 sm:p-6">
@@ -117,17 +123,26 @@ export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSe
     </div>
 
     <div className="p-4 sm:p-6">
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-2"><div><h4 className="font-display text-base font-semibold text-[#f3efe5]">Address accounts</h4><p className="mt-1 text-xs text-[#718092]">All four derivation types · balances on {networkLabel}</p></div><span className="font-mono text-[10px] uppercase tracking-[.12em] text-[#718092]">4 accounts</span></div>
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2"><div><h4 className="font-display text-base font-semibold text-[#f3efe5]">Address accounts</h4><p className="mt-1 text-xs text-[#718092]">All four derivation types · separate BTC and FB balances</p></div><span className="font-mono text-[10px] uppercase tracking-[.12em] text-[#718092]">4 accounts</span></div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {ADDRESS_SPECS.map(spec => {
           const address = session.addresses[spec.type].address;
-          const balance = balances[spec.type];
           const active = session.activeAddressType === spec.type;
           return <article key={spec.type} className={`min-w-0 rounded-xl border p-4 transition ${active ? "border-[#70c7a0]/60 bg-[#70c7a0]/[.07] shadow-[inset_0_0_0_1px_rgba(112,199,160,.08)]" : "border-[#27332f] bg-[#101613] hover:border-[#3a4a42]"}`}>
             <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-[#d9d3c6]">{spec.label}</p>{active && <span className="rounded-full bg-[#70c7a0]/10 px-2 py-1 font-mono text-[8px] uppercase tracking-[.1em] text-[#9fe0bd]">Active</span>}</div>
             <a href={explorerAddress(session.network, address)} target="_blank" rel="noreferrer" className="mt-3 flex items-start gap-1 break-all font-mono text-[10px] leading-5 text-[#718d81] hover:text-[#9fe0bd]">{short(address)} <ExternalLink size={10} className="mt-1 shrink-0" /></a>
-            <p className="mt-4 font-display text-xl font-semibold tracking-tight text-[#f3efe5]">{formatSats(balance?.total ?? null)}</p>
-            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 border-t border-[#27332f] pt-3 text-[10px] text-[#718092]"><span>Confirmed {formatSats(balance?.confirmed ?? null)}</span><span>Pending {formatSats(balance?.unconfirmed ?? null)}</span></div>
+            <div className="mt-3 grid gap-2">
+              <div className="rounded-lg border border-[#27332f] bg-[#0b0f0e] p-2">
+                <p className="font-mono text-[9px] uppercase tracking-[.1em] text-[#9fe0bd]">Bitcoin · BTC</p>
+                <p className="mt-1 font-display text-lg font-semibold tracking-tight text-[#f3efe5]">{formatSats(balances.BITCOIN_MAINNET[spec.type]?.total ?? null)}</p>
+                <p className="mt-1 text-[9px] text-[#718092]">Confirmé {formatSats(balances.BITCOIN_MAINNET[spec.type]?.confirmed ?? null)} · Mempool {formatSats(balances.BITCOIN_MAINNET[spec.type]?.unconfirmed ?? null)}</p>
+              </div>
+              <div className="rounded-lg border border-[#27332f] bg-[#0b0f0e] p-2">
+                <p className="font-mono text-[9px] uppercase tracking-[.1em] text-[#f2bd63]">Fractal Bitcoin · FB</p>
+                <p className="mt-1 font-display text-lg font-semibold tracking-tight text-[#f3efe5]">{formatSats(balances.FRACTAL_BITCOIN_MAINNET[spec.type]?.total ?? null)}</p>
+                <p className="mt-1 text-[9px] text-[#718092]">Confirmé {formatSats(balances.FRACTAL_BITCOIN_MAINNET[spec.type]?.confirmed ?? null)} · Mempool {formatSats(balances.FRACTAL_BITCOIN_MAINNET[spec.type]?.unconfirmed ?? null)}</p>
+              </div>
+            </div>
           </article>;
         })}
       </div>
