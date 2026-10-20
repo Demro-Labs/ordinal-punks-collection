@@ -50,7 +50,11 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
   };
 
   const sign = async () => {
-    if (!plan || !review || !confirmed || ownershipProofKey !== ownershipContextKey) return;
+    if (!plan || !review || !confirmed) return;
+    if (!ownershipContextKey || ownershipProofKey !== ownershipContextKey) {
+      setError("La preuve BIP-322 a expiré ou ne correspond plus à cette transaction. Refaites la preuve puis préparez à nouveau la revue.");
+      return;
+    }
     setBusy(true); setError("");
     try { setSigned(await signLocalPsbt(plan.psbtHex, wallet, review)); setMessage("Signature créée localement. La transaction n’est pas encore diffusée."); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "La signature locale a échoué."); }
@@ -92,7 +96,7 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
     <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_12rem_auto]">
       <input aria-label={`Adresse ${asset} destinataire`} value={recipient} onChange={event => { setRecipient(event.target.value); reset(); }} placeholder="Adresse destinataire" className="min-h-11 min-w-0 border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-base text-[#f3efe5] placeholder:text-[#718092] sm:text-sm" />
       <input aria-label={`Montant ${asset}`} inputMode="decimal" value={amount} onChange={event => { setAmount(event.target.value); reset(); }} placeholder={`Montant ${asset}`} className="min-h-11 border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-base text-[#f3efe5] placeholder:text-[#718092] sm:text-sm" />
-      <button type="button" onClick={() => void prepare()} disabled={busy || !recipient.trim() || !amount.trim()} className="inline-flex min-h-11 items-center justify-center gap-2 border border-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-40">{busy ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />} Review {asset}</button>
+      <button type="button" onClick={() => void prepare()} disabled={busy || !recipient.trim() || !amount.trim() || !ownershipContextKey || ownershipProofKey !== ownershipContextKey} className="inline-flex min-h-11 items-center justify-center gap-2 border border-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-40">{busy ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />} Review {asset}</button>
     </div>
     {feeEstimate && <p className="mt-2 font-mono text-[9px] text-[#718092]">Frais live : {Math.ceil(feeEstimate.feeRate)} sat/vB · {describeFeeSources(feeEstimate.strategy, feeEstimate.sources)}</p>}
     {review && plan && <div className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]">
@@ -102,7 +106,7 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
       <p>Entrées : {review.inputCount} · Total : {formatAsset(review.inputSats, asset)} · Frais : {formatAsset(review.feeSats, asset)}</p>
       {plan.changeSats > 0 && <p>Change vers le coffre : {formatAsset(plan.changeSats, asset)}</p>}
       <label className="mt-3 flex min-h-11 items-start gap-2 py-2"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /> <span>Je confirme le réseau {asset === "BTC" ? "Bitcoin" : "Fractal Bitcoin"}, le compte source, l’adresse, le montant et les frais. Créer la signature locale.</span></label>
-      <button type="button" onClick={() => void sign()} disabled={!confirmed || busy} className="inline-flex min-h-11 items-center justify-center bg-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#0b0d10] disabled:opacity-40">{busy ? "Signing…" : `Sign ${asset} locally`}</button>
+      <button type="button" onClick={() => void sign()} disabled={!confirmed || busy || !ownershipContextKey || ownershipProofKey !== ownershipContextKey} className="inline-flex min-h-11 items-center justify-center bg-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#0b0d10] disabled:opacity-40">{busy ? "Signing…" : `Sign ${asset} locally`}</button>
     </div>}
     {signed && !tx && <div className="mt-3 border border-[#d99a54]/40 p-3"><p className="font-mono text-[10px] text-[#f2bd63]">Signature en mémoire uniquement; pas encore diffusée.</p><button type="button" onClick={() => void finalize()} disabled={busy} className="mt-2 inline-flex min-h-11 border border-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#f2bd63]">Verify signature</button></div>}
     {tx && <div className="mt-3 border border-[#d99a54]/60 p-3 font-mono text-[10px] leading-5"><p className="break-all text-[#f2bd63]">TXID : {tx.txid}</p><p className="mt-1 text-[#9ea7b3]">La diffusion est irréversible. Vérifiez une dernière fois le TXID et le réseau.</p><button type="button" onClick={() => void broadcast()} disabled={busy} className="mt-2 inline-flex min-h-11 bg-[#d99a54] px-4 uppercase text-[#0b0d10] disabled:opacity-40">{busy ? "Broadcasting…" : `Broadcast ${asset}`}</button></div>}
