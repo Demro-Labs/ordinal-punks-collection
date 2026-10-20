@@ -61,6 +61,25 @@ describe("validateMempoolAddress", () => {
 });
 
 describe("getSpendableUtxos", () => {
+  it("scans the full 500-output window by default even when the first UTXO covers the minimum", async () => {
+    const cursors: number[] = [];
+    installWindowAndFetch();
+    installWindowAndFetch(async input => {
+      const url = new URL(String(input));
+      const cursor = Number(url.searchParams.get("cursor"));
+      cursors.push(cursor);
+      return Response.json({
+        chain: "fractal", address: ADDRESS, cursor, nextCursor: cursor + 25, total: 500, scannedCount: 25,
+        utxo: cursor === 0 ? [makeSafeUtxo({ satoshi: 600_000 })] : [],
+      });
+    }) as typeof fetch);
+    const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1_700);
+    expect(cursors).toHaveLength(20);
+    expect(cursors[0]).toBe(0);
+    expect(cursors.at(-1)).toBe(475);
+    expect(result).toHaveLength(1);
+    expect(result[0].satoshi).toBe(600_000);
+  });
   it.each([
     { label: "P2WPKH", scriptPk: `0014${"11".repeat(20)}`, satoshi: 294 },
     { label: "P2TR", scriptPk: `5120${"22".repeat(32)}`, satoshi: 330 },
@@ -104,7 +123,7 @@ describe("getSpendableUtxos", () => {
       utxo: [makeSafeUtxo()],
     }));
 
-    const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 5_000);
+    const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 5_000, { collectAll: false });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ isLowFee: true, height: 100, inscriptionsRunesAlkanesChecked: true });
   });
@@ -190,7 +209,7 @@ describe("getSpendableUtxos", () => {
       });
     });
 
-    const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 5_000);
+    const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 5_000, { collectAll: false });
     expect(result).toHaveLength(1);
     expect(result[0].txid).toBe("b".repeat(64));
     expect(requestedCursors).toEqual([0, 25, 50, 75, 100, 125, 150, 175, 200, 225, 250]);
