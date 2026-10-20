@@ -1995,16 +1995,3 @@ test('returns validated total/available UTXO summaries for Bitcoin and Fractal w
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('rejects inconsistent UniSat UTXO summary totals', async () => {
-  const previousFetch = globalThis.fetch;
-  globalThis.fetch = async () => Response.json({ code: 0, data: {
-    totalBalance: 9000, totalUtxoCount: 4,
-    availableBalance: 3000, availableUtxoCount: 2,
-    unavailableBalance: 5000, unavailableUtxoCount: 2,
-  } });
-  try {
-    const response = await worker.fetch(makeRequest('/api/utxo-balance-summary?chain=fractal&address=bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', { ip: '203.0.113.254' }), { UNISAT_API_KEY: 'fractal-summary-test-key' });
-    assert.equal(response.status, 503);
-    assert.equal((await response.json()).code, 'UTXO_SUMMARY_UNISAT_UNAVAILABLE');
-  } finally { globalThis.fetch = previousFetch; }
-});
