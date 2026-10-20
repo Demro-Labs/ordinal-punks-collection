@@ -3,7 +3,7 @@ import { Check, Copy, Loader2, Search, Wallet } from "lucide-react";
 import { getSpendableUtxos, getUtxoBalanceSummary } from "@/lib/mempool";
 import { ADDRESS_SPECS, fetchAddressBalance, type AddressType, type OrdiNetwork, type OrdiWalletRecord } from "@/lib/ordi-wallet";
 
-type ScanRow = { type: AddressType; address: string; confirmedSats: number | null; pendingSats: number | null; totalSats: number | null; safeSats: number | null; safeUtxos: number | null; totalUtxos: number | null; availableUtxos: number | null; unavailableUtxos: number | null; summaryError?: string; balanceError?: string; safeError?: string };
+type ScanRow = { type: AddressType; address: string; confirmedSats: number | null; pendingSats: number | null; totalSats: number | null; safeSats: number | null; safeUtxos: number | null; totalUtxos: number | null; availableUtxos: number | null; unavailableUtxos: number | null; availableSats: number | null; unavailableSats: number | null; summaryError?: string; balanceError?: string; safeError?: string };
 
 export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddressType, onSelectAddressType }: {
   wallet: OrdiWalletRecord; network: OrdiNetwork; selectedAddressType: AddressType; onSelectAddressType?: (type: AddressType) => void;
@@ -17,7 +17,7 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
     try {
       const results: ScanRow[] = await Promise.all(ADDRESS_SPECS.map(async (spec): Promise<ScanRow> => {
         const address = wallet.addresses[spec.type]?.address ?? "";
-        if (!address) return { type: spec.type, address, confirmedSats: null, pendingSats: null, totalSats: null, safeSats: null, safeUtxos: null, totalUtxos: null, availableUtxos: null, unavailableUtxos: null, balanceError: "Adresse absente du coffre.", safeError: "Adresse absente du coffre." } satisfies ScanRow;
+        if (!address) return { type: spec.type, address, confirmedSats: null, pendingSats: null, totalSats: null, safeSats: null, safeUtxos: null, totalUtxos: null, availableUtxos: null, unavailableUtxos: null, availableSats: null, unavailableSats: null, balanceError: "Adresse absente du coffre.", safeError: "Adresse absente du coffre." } satisfies ScanRow;
         const [balanceResult, safeResult, summaryResult] = await Promise.allSettled([fetchAddressBalance(network, address), getSpendableUtxos(network, address, 1, { collectAll: true }), getUtxoBalanceSummary(network, address)]);
         const balance = balanceResult.status === "fulfilled" ? balanceResult.value : null;
         const safe = safeResult.status === "fulfilled" ? safeResult.value : null;
@@ -25,7 +25,7 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
         return {
           type: spec.type, address, confirmedSats: balance?.confirmed ?? null, pendingSats: balance?.unconfirmed ?? null, totalSats: balance?.total ?? null,
           safeSats: safe ? safe.reduce((sum, item) => sum + item.satoshi, 0) : null, safeUtxos: safe?.length ?? null,
-          totalUtxos: summary?.totalUtxoCount ?? null, availableUtxos: summary?.availableUtxoCount ?? null, unavailableUtxos: summary?.unavailableUtxoCount ?? null,
+          totalUtxos: summary?.totalUtxoCount ?? null, availableUtxos: summary?.availableUtxoCount ?? null, unavailableUtxos: summary?.unavailableUtxoCount ?? null, availableSats: summary?.availableBalance ?? null, unavailableSats: summary?.unavailableBalance ?? null,
           ...(summaryResult.status === "rejected" ? { summaryError: summaryResult.reason instanceof Error ? summaryResult.reason.message : "Résumé UTXO indisponible." } : {}),
           ...(balanceResult.status === "rejected" ? { balanceError: balanceResult.reason instanceof Error ? balanceResult.reason.message : "Solde total indisponible." } : {}),
           ...(safeResult.status === "rejected" ? { safeError: safeResult.reason instanceof Error ? safeResult.reason.message : "Solde sûr indisponible." } : {}),
@@ -59,6 +59,7 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
           </div>
           <div className="mt-2 grid gap-1 sm:grid-cols-2">
             <p className="font-mono text-[9px] text-[#9ea7b3]">UTXO indexés : {row.totalUtxos === null ? "—" : row.totalUtxos} · disponibles UniSat : {row.availableUtxos === null ? "—" : row.availableUtxos} · indisponibles : {row.unavailableUtxos === null ? "—" : row.unavailableUtxos}</p>
+            <p className="font-mono text-[9px] text-[#9ea7b3]">Sats disponibles UniSat : {row.availableSats === null ? "—" : `${row.availableSats.toLocaleString("fr-FR")} sats`} · indisponibles : {row.unavailableSats === null ? "—" : `${row.unavailableSats.toLocaleString("fr-FR")} sats`}</p>
             <p className="font-mono text-[9px] text-[#9ea7b3]">Confirmé : {row.confirmedSats === null ? "—" : `${row.confirmedSats.toLocaleString("fr-FR")} sats`}</p>
             <p className="font-mono text-[9px] text-[#9ea7b3]">Mempool : {row.pendingSats === null ? "—" : `${row.pendingSats.toLocaleString("fr-FR")} sats`}</p>
             <p className="font-mono text-[9px] text-[#9fe0bd]">Sûr vérifié : {row.safeSats === null ? "—" : `${row.safeSats.toLocaleString("fr-FR")} sats · ${row.safeUtxos} UTXO`}</p>
