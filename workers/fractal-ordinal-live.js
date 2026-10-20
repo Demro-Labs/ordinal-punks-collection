@@ -1030,33 +1030,38 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
       const alkaneMetadata = item?.alkanes === undefined ? [] : [item.alkanes];
       if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || satoshi === null || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) ||
           !Number.isSafeInteger(height) || height <= 0 || !Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0 ||
-          typeof item?.isLowFee !== 'boolean' || typeof item?.isOpInRBF !== 'boolean' ||
+          typeof item?.isLowFee !== 'boolean' || (item?.isOpInRBF !== undefined && typeof item.isOpInRBF !== 'boolean') ||
           runeMetadata.some(value => !Array.isArray(value) || value.length !== 0) || alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) continue;
       const candidate = candidateByOutpoint.get(key);
-      if (candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: item.isOpInRBF });
+      if (candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: typeof item.isOpInRBF === 'boolean' ? item.isOpInRBF : null });
     }
     const nextCursor = cursor + raw.length;
     if (raw.length === 0 || nextCursor === total) break;
     cursor = nextCursor;
   }
-  if (sourceTotal === null || availableByOutpoint.size !== candidateByOutpoint.size) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_SPENDABLE', 409);
+  if (sourceTotal === null || availableByOutpoint.size !== candidateByOutpoint.size) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_IN_AVAILABLE_SET', 409);
   const verified = [];
   let safeSats = 0;
   for (const [key, candidate] of candidateByOutpoint) {
     const available = availableByOutpoint.get(key);
     const detail = await spendableUtxoStage('UTXO_CONFIRM_DETAIL', () => uniNetwork(base, `/v1/indexer/utxo/${candidate.txid}/${candidate.vout}`, env));
+    if (!available) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_IN_AVAILABLE_SET', 409);
     if (
-      !available || String(detail?.txid || '').toLowerCase() !== candidate.txid || Number(detail?.vout) !== candidate.vout ||
+      String(detail?.txid || '').toLowerCase() !== candidate.txid || Number(detail?.vout) !== candidate.vout ||
       detail?.address !== address || Number(detail?.satoshi) !== candidate.satoshi ||
-      String(detail?.scriptPk || '').toLowerCase() !== candidate.scriptPk ||
-      !Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0 || detail?.isSpent !== false ||
-      (detail?.isOpInRBF !== undefined && typeof detail.isOpInRBF !== 'boolean') || !Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0 ||
-      (detail?.runes !== undefined && (!Array.isArray(detail.runes) || detail.runes.length !== 0)) ||
-      (detail?.alkanes !== undefined && (!Array.isArray(detail.alkanes) || detail.alkanes.length !== 0))
-    ) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_SPENDABLE', 409);
+      String(detail?.scriptPk || '').toLowerCase() !== candidate.scriptPk
+    ) throw new SpendableUtxoError('UTXO_CONFIRM_DETAIL_MISMATCH', 409);
+    if (!Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_CONFIRMED', 409);
+    if (detail?.isSpent !== false) throw new SpendableUtxoError('UTXO_CONFIRM_SPENT_OR_UNKNOWN', 409);
+    if (detail?.isOpInRBF !== undefined && typeof detail.isOpInRBF !== 'boolean') throw new SpendableUtxoError('UTXO_CONFIRM_INVALID_RBF_FLAG', 409);
+    if (!Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0 ||
+        (detail?.runes !== undefined && (!Array.isArray(detail.runes) || detail.runes.length !== 0)) ||
+        (detail?.alkanes !== undefined && (!Array.isArray(detail.alkanes) || detail.alkanes.length !== 0))) {
+      throw new SpendableUtxoError('UTXO_CONFIRM_ASSET_OR_UNKNOWN', 409);
+    }
     safeSats += candidate.satoshi;
     if (!Number.isSafeInteger(safeSats)) throw new SpendableUtxoError('UTXO_CONFIRM_TOTAL_UNSAFE');
-    verified.push({ address, txid: candidate.txid, vout: candidate.vout, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk, height: Number(detail.height), isLowFee: available.isLowFee, isOpInRBF: typeof detail.isOpInRBF === 'boolean' ? detail.isOpInRBF : available.isOpInRBF, inscriptionsRunesAlkanesChecked: true });
+    verified.push({ address, txid: candidate.txid, vout: candidate.vout, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk, height: Number(detail.height), isLowFee: available.isLowFee, isOpInRBF: typeof detail.isOpInRBF === 'boolean' ? detail.isOpInRBF : typeof available.isOpInRBF === 'boolean' ? available.isOpInRBF : false, inscriptionsRunesAlkanesChecked: true });
   }
   return Response.json({ chain, address, minimumSats, safeSats, sufficient: safeSats >= minimumSats, verifiedUtxoCount: verified.length, utxo: verified, confirmedAt: new Date().toISOString() }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
@@ -1822,6 +1827,31 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/address-utxos') {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
       return addressUtxos(request, env, headers);
+    }
+    if (request.method === 'GET' && url.pathname === '/api/utxo-balance-summary') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const chain = url.searchParams.get('chain') || '';
+      const address = url.searchParams.get('address') || '';
+      if (!['fractal', 'bitcoin'].includes(chain) || !validWalletAddress(address)) {
+        return Response.json({ error: 'Adresse ou réseau invalide.' }, { status: 400, headers: noStore });
+      }
+      const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
+      try {
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-balance?withLowFee=true`, env, { signal: AbortSignal.timeout(8000) });
+        const fields = ['totalBalance', 'totalUtxoCount', 'availableBalance', 'availableUtxoCount', 'unavailableBalance', 'unavailableUtxoCount'];
+        const values = Object.fromEntries(fields.map(key => [key, Number(source?.[key])]));
+        if (fields.some(key => !Number.isSafeInteger(values[key]) || values[key] < 0) ||
+            values.availableBalance + values.unavailableBalance !== values.totalBalance ||
+            values.availableUtxoCount + values.unavailableUtxoCount !== values.totalUtxoCount) {
+          throw new Error('Invalid UniSat available-balance response');
+        }
+        return Response.json({ chain, address, ...values, refreshedAt: new Date().toISOString() }, { headers: noStore });
+      } catch (error) {
+        const failure = error instanceof SpendableUtxoError ? error : null;
+        const code = failure?.code || (String(error?.message || '').includes('quota') ? 'UTXO_SUMMARY_UNISAT_RATE_LIMITED' : 'UTXO_SUMMARY_UNISAT_UNAVAILABLE');
+        return Response.json({ error: 'Le résumé des UTXO UniSat est temporairement indisponible.', code }, { status: 503, headers: noStore });
+      }
     }
     if (request.method === 'GET' && url.pathname === '/api/spendable-utxos') {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
