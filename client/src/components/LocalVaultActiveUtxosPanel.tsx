@@ -84,13 +84,13 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
     <div className="mt-3 grid gap-2 sm:grid-cols-3">
       <div className="border border-[#2c323a] bg-[#10151a] p-2"><p className="font-mono text-[8px] uppercase text-[#718092]">Lignes récupérées</p><p className="mt-1 font-display text-lg text-[#f3efe5]">{items.length}{sourceTotal !== null ? ` / ${Math.min(sourceTotal, MAX_UTXOS)}` : ""}</p></div>
       <div className="border border-[#2c323a] bg-[#10151a] p-2"><p className="font-mono text-[8px] uppercase text-[#718092]">Total listé</p><p className="mt-1 font-display text-lg text-[#f3efe5]">{sourceTotal === null ? "—" : sourceTotal.toLocaleString("fr-FR")}</p></div>
-      <div className="border border-[#2c323a] bg-[#10151a] p-2"><p className="font-mono text-[8px] uppercase text-[#718092]">Candidats indicatifs sans inscription</p><p className="mt-1 font-display text-lg text-[#f3efe5]">{safeTotal.toLocaleString("fr-FR")} sats</p></div>
+      <div className="border border-[#2c323a] bg-[#10151a] p-2"><p className="font-mono text-[8px] uppercase text-[#718092]">Candidats indicatifs sans actifs de protocole</p><p className="mt-1 font-display text-lg text-[#f3efe5]">{safeTotal.toLocaleString("fr-FR")} sats</p></div>
     </div>
     <p className="mt-2 font-mono text-[8px] leading-4 text-[#e0b45f]">Le total indicatif n’est pas une autorisation de dépense. Chaque entrée de frais est revalidée séparément par le contrôle de sécurité avant signature.</p>
     {error && <p className="mt-3 break-words border border-[#e0b45f]/40 p-2 font-mono text-[9px] text-[#e0b45f]" role="status">{error}</p>}
     {!error && items.length === 0 && <p className="mt-3 font-mono text-[9px] text-[#718092]">{busy ? "Chargement des UTXO…" : "Aucune sortie active renvoyée par l’indexeur."}</p>}
     {visible.length > 0 && <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[640px] border-collapse text-left font-mono text-[9px]">
-      <thead><tr className="border-b border-[#3b434d] text-[#718092]"><th className="p-2">Outpoint</th><th className="p-2">Valeur</th><th className="p-2">Confirmations</th><th className="p-2">Inscriptions</th><th className="p-2">État</th></tr></thead>
+      <thead><tr className="border-b border-[#3b434d] text-[#718092]"><th className="p-2">Outpoint</th><th className="p-2">Valeur</th><th className="p-2">Confirmations</th><th className="p-2">Inscriptions</th><th className="p-2">Runes / Alkanes</th><th className="p-2">État</th></tr></thead>
       <tbody>{visible.map(item => <tr key={`${item.txid}:${item.vout}`} className="border-b border-[#2c323a] text-[#d9d3c6]">
         <td className="p-2"><a href={`${explorer}/tx/${encodeURIComponent(item.txid)}#${item.vout}`} target="_blank" rel="noreferrer" className="hover:text-[#f2bd63]">{short(item.txid)}:{item.vout} <ExternalLink size={9} className="inline" /></a></td>
         <td className="p-2">{item.satoshi.toLocaleString("fr-FR")} sats</td>
