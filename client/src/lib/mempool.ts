@@ -109,6 +109,34 @@ export async function getRecommendedFeeRate(network: string) {
   return Math.ceil(estimate.feeRate);
 }
 
+export type UtxoBalanceSummary = {
+  chain: "fractal" | "bitcoin";
+  address: string;
+  totalBalance: number;
+  totalUtxoCount: number;
+  availableBalance: number;
+  availableUtxoCount: number;
+  unavailableBalance: number;
+  unavailableUtxoCount: number;
+  refreshedAt: string;
+};
+
+/** Read UniSat's aggregate total-vs-available view; never use this summary to select transaction inputs. */
+export async function getUtxoBalanceSummary(network: string, address: string): Promise<UtxoBalanceSummary> {
+  const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
+  if (!chain || !address || address.length > 100) throw new Error("Réseau ou adresse invalide pour le résumé des UTXO.");
+  const query = new URLSearchParams({ chain, address });
+  const result = await requestJson<Partial<UtxoBalanceSummary>>(`${LIVE_DATA_API_BASE}/api/utxo-balance-summary?${query}`, 12_000);
+  const fields = ["totalBalance", "totalUtxoCount", "availableBalance", "availableUtxoCount", "unavailableBalance", "unavailableUtxoCount"] as const;
+  if (result.chain !== chain || result.address !== address || typeof result.refreshedAt !== "string" ||
+      fields.some(key => !Number.isSafeInteger(result[key]) || (result[key] as number) < 0) ||
+      result.availableBalance! + result.unavailableBalance! !== result.totalBalance ||
+      result.availableUtxoCount! + result.unavailableUtxoCount! !== result.totalUtxoCount) {
+    throw new Error("Le Worker n’a pas confirmé un résumé cohérent des UTXO UniSat.");
+  }
+  return result as UtxoBalanceSummary;
+}
+
 export type SpendableUtxo = { address: string; txid: string; vout: number; satoshi: number; scriptPk: string; height: number; inscriptionsRunesAlkanesChecked: true; isLowFee: boolean; isOpInRBF: boolean; inscriptions: [] };
 export class InsufficientSafeUtxosError extends Error {
   constructor(message: string) { super(message); this.name = "InsufficientSafeUtxosError"; }
