@@ -1186,7 +1186,7 @@ test('Worker attests that exact BTC and FB PSBT inputs cover payment plus fees',
     const url = new URL(String(input));
     assert.equal(url.origin, expectedOrigin);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { cursor: Number(url.searchParams.get('cursor')), total: 1, utxo: [record] } });
+    if (url.pathname.endsWith('/available-utxo-data')) { const available = { ...record }; delete available.isOpInRBF; return Response.json({ code: 0, data: { cursor: Number(url.searchParams.get('cursor')), total: 1, utxo: [available] } }); }
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/${record.vout}`) { const detail = { ...record }; delete detail.isOpInRBF; return Response.json({ code: 0, data: detail }); }
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
