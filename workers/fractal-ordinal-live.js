@@ -1056,7 +1056,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     if (detail?.isOpInRBF !== undefined && typeof detail.isOpInRBF !== 'boolean') throw new SpendableUtxoError('UTXO_CONFIRM_INVALID_RBF_FLAG', 409);
     if (!Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0 ||
         (detail?.runes !== undefined && (!Array.isArray(detail.runes) || detail.runes.length !== 0)) ||
-        (detail?.alkanes !== undefined && (!Array.isArray(detail.alkanes) || detail.alkanes.length !== 0)) {
+        (detail?.alkanes !== undefined && (!Array.isArray(detail.alkanes) || detail.alkanes.length !== 0))) {
       throw new SpendableUtxoError('UTXO_CONFIRM_ASSET_OR_UNKNOWN', 409);
     }
     safeSats += candidate.satoshi;
