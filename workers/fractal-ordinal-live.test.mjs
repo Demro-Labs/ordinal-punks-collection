@@ -1657,7 +1657,7 @@ test('sign-in verification rejects a challenge submitted under a different Bitco
   }), { AUTH_STORAGE: binding });
   const challenge = await challengeResponse.json();
   const response = await worker.fetch(makeRequest('/api/auth/verify', {
-    method: 'POST', ip: '192.0.2.233',
+    method: 'POST', ip: '198.51.100.251',
     body: JSON.stringify({ site: 'punks', challengeId: challenge.challengeId, address, network: 'FRACTAL_BITCOIN_MAINNET', signature: 'ZmFrZV9zaWduYXR1cmU=' }),
   }), { AUTH_STORAGE: binding });
   const result = await response.json();
