@@ -39,15 +39,17 @@ export function LocalVaultAssetPanel({
   const [brc20InscriptionId, setBrc20InscriptionId] = useState("");
   const [brc20CompletedId, setBrc20CompletedId] = useState("");
   const [ownershipProofKey, setOwnershipProofKey] = useState<string | null>(null);
-  const load = async () => {
+  const load = async (): Promise<AddressOrdinal[] | null> => {
     setLoading(true);
     setError("");
     try {
       const result = await fetchAddressOrdinals(address, network);
       setItems(result.detail);
       if (selected && !result.detail.some(item => item.inscriptionId === selected)) setSelected("");
+      return result.detail;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Live Ordinals data is unavailable.");
+      return null;
     } finally { setLoading(false); }
   };
   useEffect(() => {
@@ -98,7 +100,17 @@ export function LocalVaultAssetPanel({
   return <section className="mt-4 border border-[#70c7a0]/35 bg-[#101a16] p-3 sm:p-4" aria-labelledby="local-vault-assets-title">
     <LocalVaultBrc20TransferPanel wallet={wallet} network={network} addressType={addressType} site={site} completedInscriptionId={brc20CompletedId} onCreated={(inscriptionId, target) => {
       void (async () => {
-        await load();
+        // The order API can reveal the inscription before the address indexer lists it.
+        // Retry indexing briefly so the next step can select and review the actual inscription.
+        let indexed = false;
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const currentItems = await load();
+          if (currentItems?.some(item => item.inscriptionId === inscriptionId)) {
+            indexed = true;
+            break;
+          }
+          if (attempt < 3) await new Promise(resolve => window.setTimeout(resolve, 2000));
+        }
         setSelected(inscriptionId);
         setBrc20InscriptionId(inscriptionId);
         setBrc20CompletedId("");
@@ -110,7 +122,9 @@ export function LocalVaultAssetPanel({
         setBroadcastAttempted(false);
         setTransferError("");
         setOwnershipProofKey(null);
-        setMessage("Transfer inscription selected. Review and sign the separate inscription-send transaction below.");
+        setMessage(indexed
+          ? "Étape 1/2 terminée : l’inscription BRC-20 du montant demandé est indexée. Étape 2/2 : vérifiez puis signez séparément son envoi au destinataire."
+          : "Inscription créée, mais l’indexeur d’adresse ne la montre pas encore. Le transfert n’est pas préparé. Actualisez les actifs locaux et réessayez quand l’inscription apparaît.");
       })();
     }} />
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
