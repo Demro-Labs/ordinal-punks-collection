@@ -171,6 +171,9 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0) {
     throw new Error("Invalid network, address, or amount for spendable UTXO verification.");
   }
+  // Local Vault fee discovery scans the complete bounded set (up to 500 outputs) by default.
+  // Callers may opt into an early stop only when they explicitly request collectAll: false.
+  const collectAll = options.collectAll ?? true;
   const normalizedOutpoints = options.requiredOutpoints?.map(value => value.toLowerCase());
   const requiredOutpoints = normalizedOutpoints ? normalizedOutpoints.filter((value, index) => normalizedOutpoints.indexOf(value) === index) : null;
   if (requiredOutpoints && (requiredOutpoints.length !== options.requiredOutpoints!.length || requiredOutpoints.length < 1 || requiredOutpoints.some(value => !/^[a-f0-9]{64}:\d+$/.test(value)))) {
@@ -252,7 +255,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     if (requiredOutpoints) {
       const byOutpoint = new Map(collected.map(item => [`${item.txid.toLowerCase()}:${item.vout}`, item]));
       if (requiredOutpoints.every(outpoint => byOutpoint.has(outpoint))) return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
-    } else if (!options.collectAll && safeSats >= minimumSats) return collected;
+    } else if (!collectAll && safeSats >= minimumSats) return collected;
     if (pageScannedCount === 0 || nextCursor === total) break;
     cursor = nextCursor!;
   }
@@ -265,7 +268,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   }
   // Never silently return a partial set when collectAll reaches the 500-output scan cap.
   // An incomplete scan could omit fee UTXOs and misstate the address's safe balance.
-  if (options.collectAll && sourceTotal !== null && scannedCount < sourceTotal) {
+  if (collectAll && sourceTotal !== null && scannedCount < sourceTotal) {
     throw new Error(`Safe UTXO scan is incomplete: verified ${scannedCount} of ${sourceTotal} address outputs (scan cap ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). No transaction was signed or broadcast.`);
   }
   if (!options.collectAll && safeSats < minimumSats) {
