@@ -144,6 +144,17 @@ const UTXO_REJECTION_LABELS: Record<typeof UTXO_REJECTION_KEYS[number], string> 
   hasAlkanes: "Alkane détecté",
 };
 
+/** UniSat may serialize satoshi amounts as decimal strings; normalize safely before filtering/summing. */
+function normalizeSatoshiValue(item: Record<string, unknown>): number | null {
+  const raw = item.satoshi !== undefined && item.satoshi !== null ? item.satoshi : item.value;
+  if (typeof raw === "number") return Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+  if (typeof raw === "string" && /^\d+$/.test(raw)) {
+    const value = Number(raw);
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+  return null;
+}
+
 /** Keep the browser-side UTXO floor aligned with the Worker; final fee sufficiency is checked separately. */
 export function minimumSpendableSatsForScript(scriptHex: string): number {
   const script = typeof scriptHex === "string" ? scriptHex.toLowerCase() : "";
@@ -223,7 +234,10 @@ export async function getSpendableUtxos(network: string, address: string, minimu
         rejectionSatsTotals[key] += value as number;
       }
     }
-    const safe = page.utxo.filter((item): item is SpendableUtxo =>
+    const safe = page.utxo.map((item): Record<string, unknown> => ({
+      ...item,
+      satoshi: normalizeSatoshiValue(item),
+    })).filter((item): item is Record<string, unknown> & SpendableUtxo =>
       item.address === address && typeof item.txid === "string" && /^[a-f0-9]{64}$/i.test(item.txid) &&
       typeof item.vout === "number" && Number.isSafeInteger(item.vout) && item.vout >= 0 &&
       typeof item.satoshi === "number" && Number.isSafeInteger(item.satoshi) &&
