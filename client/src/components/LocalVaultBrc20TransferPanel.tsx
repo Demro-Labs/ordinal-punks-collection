@@ -39,6 +39,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
   const [signed, setSigned] = useState("");
   const [tx, setTx] = useState<Tx | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [confirmedBroadcast, setConfirmedBroadcast] = useState(false);
   const [proofKey, setProofKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -62,7 +63,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
   }
   useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 300_000); return () => window.clearInterval(timer); }, [address, network, ticker]);
   useEffect(() => {
-    setOrder(null); setPlan(null); setReview(null); setSigned(""); setTx(null); setConfirmed(false);
+    setOrder(null); setPlan(null); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setConfirmedBroadcast(false);
     if (!ticker) return;
     try {
       const raw = localStorage.getItem(keyFor(site, network, address, ticker));
@@ -76,7 +77,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
   useEffect(() => {
     if (!completedInscriptionId || !order || order.inscriptionId !== completedInscriptionId) return;
     try { localStorage.removeItem(keyFor(order.site, order.network, order.address, order.ticker)); } catch { /* Storage is optional. */ }
-    setOrder(null); setPlan(null); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setAmount(""); setRecipient(""); setProofKey(null);
+    setOrder(null); setPlan(null); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setConfirmedBroadcast(false); setAmount(""); setRecipient(""); setProofKey(null);
     setMessage("Le transfert de l’inscription a été diffusé. Actualisez les soldes avant de préparer le transfert suivant.");
   }, [completedInscriptionId, order]);
   function saveOrder(next: Order) {
@@ -115,7 +116,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
   async function preparePayment() {
     if (!order || order.paymentStarted || order.inscriptionId) return;
     if (!context || proofKey !== context) { setError("Terminez la preuve BIP-322 du portefeuille Ordi local pour cet ordre avant de préparer le paiement."); return; }
-    setBusy(true); setError(""); setPlan(null); setReview(null); setSigned(""); setTx(null); setConfirmed(false);
+    setBusy(true); setError(""); setPlan(null); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setConfirmedBroadcast(false);
     try {
       const payment = await prepareLocalNativeTransfer(network, wallet, addressType, order.payAddress, (order.payAmount / 100_000_000).toFixed(8));
       const examined = await reviewLocalPsbt(payment.psbtHex, wallet, network);
@@ -135,16 +136,17 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
   async function finalizePayment() {
     if (!order || !plan || !review || !signed || order.paymentStarted) return;
     setBusy(true); setError("");
+    setConfirmedBroadcast(false);
     try { setTx(await finalizeLocalPsbt(signed, wallet, review)); setMessage("Transaction finalisée et vérifiée. La diffusion reste une action séparée."); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "La finalisation a échoué."); }
     finally { setBusy(false); }
   }
   async function broadcastPayment() {
-    if (!order || !review || !tx || order.paymentStarted) return;
+    if (!order || !review || !tx || order.paymentStarted || !confirmedBroadcast) return;
     const attempted = { ...order, paymentStarted: true, paymentTxid: tx.txid };
     saveOrder(attempted);
     setBusy(true); setError(""); setMessage("Diffusion demandée. Le paiement est marqué comme tenté pour éviter tout double paiement.");
-    try { await broadcastLocalPsbt(network, tx.rawTxHex, tx.txid, wallet, review); setMessage("Paiement diffusé: " + tx.txid + ". Vérifiez l’ordre pour récupérer l’inscription."); setPlan(null); setReview(null); setSigned(""); setTx(null); }
+    try { await broadcastLocalPsbt(network, tx.rawTxHex, tx.txid, wallet, review); setMessage("Paiement diffusé: " + tx.txid + ". Vérifiez l’ordre pour récupérer l’inscription."); setPlan(null); setReview(null); setSigned(""); setTx(null); setConfirmedBroadcast(false); }
     catch (cause) { setError((cause instanceof Error ? cause.message : "Résultat de diffusion incertain.") + " Ne payez pas à nouveau; vérifiez le TXID " + tx.txid + "."); }
     finally { setBusy(false); }
   }
@@ -184,7 +186,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
   function discardOrder() {
     if (!order || order.paymentStarted) return;
     try { localStorage.removeItem(keyFor(site, network, address, order.ticker)); } catch { /* Storage is optional. */ }
-    setOrder(null); setPlan(null); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setMessage("Ordre non payé supprimé."); setError("");
+    setOrder(null); setPlan(null); setReview(null); setSigned(""); setTx(null); setConfirmed(false); setConfirmedBroadcast(false); setMessage("Ordre non payé supprimé."); setError("");
   }
 
   return <section className="mt-4 border border-[#d99a54]/40 bg-[#10151a] p-3 sm:p-4" aria-labelledby="local-vault-brc20-title">
@@ -201,7 +203,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
       {!order.paymentStarted && !order.inscriptionId && !plan && <button type="button" onClick={() => void preparePayment()} disabled={busy || !context || proofKey !== context} className="mt-3 min-h-11 w-full border border-[#3b434d] px-3 uppercase disabled:opacity-40">{busy ? "Préparation…" : "Préparer et examiner le paiement local"}</button>}
       {review && plan && !order.paymentStarted && <div className="mt-3 border border-[#3b434d] p-3"><p>Entrées: {review.inputCount} · total {review.inputSats.toLocaleString("en-US")} sats · frais {review.feeSats.toLocaleString("en-US")} sats · change {plan.changeSats.toLocaleString("en-US")} sats.</p><p className="break-all">Destination: {order.payAddress} · montant exact {order.payAmount.toLocaleString("en-US")} sats.</p><label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} className="mt-1" /><span>Je confirme le réseau, l’adresse de paiement, le montant exact et les frais séparés. Signer dans le coffre local.</span></label><button type="button" onClick={() => void signPayment()} disabled={busy || !confirmed || !context || proofKey !== context} className="mt-3 min-h-11 w-full bg-[#d99a54] px-3 uppercase text-[#0b0f13] disabled:opacity-40">{busy ? "Signature…" : "Signer localement"}</button></div>}
       {signed && !tx && !order.paymentStarted && <button type="button" onClick={() => void finalizePayment()} disabled={busy} className="mt-3 min-h-11 w-full border border-[#3b434d] px-3 uppercase">{busy ? "Finalisation…" : "Vérifier la transaction signée"}</button>}
-      {tx && !order.paymentStarted && <div className="mt-3 border border-[#e0b45f]/40 p-3"><p className="break-all">TXID: {tx.txid}</p><button type="button" onClick={() => void broadcastPayment()} disabled={busy} className="mt-3 min-h-11 w-full bg-[#d99a54] px-3 uppercase text-[#0b0f13] disabled:opacity-40">{busy ? "Diffusion…" : "Diffuser le paiement de l’inscription"}</button></div>}
+      {tx && !order.paymentStarted && <div className="mt-3 border border-[#e0b45f]/40 p-3"><p className="break-all">TXID: {tx.txid}</p><label className="mt-2 flex min-h-11 items-start gap-2"><input type="checkbox" checked={confirmedBroadcast} onChange={e => setConfirmedBroadcast(e.target.checked)} className="mt-1 h-4 w-4" /><span>Je confirme ce TXID exact, le montant du paiement et sa diffusion irréversible sur {network}.</span></label><button type="button" onClick={() => void broadcastPayment()} disabled={busy || !confirmedBroadcast} className="mt-3 min-h-11 w-full bg-[#d99a54] px-3 uppercase text-[#0b0f13] disabled:opacity-40">{busy ? "Diffusion…" : "Diffuser le paiement de l’inscription"}</button></div>}
       {order.paymentStarted && order.paymentTxid && <button type="button" onClick={() => void checkPaymentStatus()} disabled={busy} className="mt-3 min-h-11 w-full border border-[#3b434d] px-3 uppercase disabled:opacity-40">{busy ? "Vérification…" : "Vérifier le TXID du paiement (sans paiement)"}</button>}
       {order.paymentStarted && !order.inscriptionId && <button type="button" onClick={() => void checkOrder()} disabled={busy} className="mt-3 min-h-11 w-full border border-[#d99a54] px-3 uppercase disabled:opacity-40">{busy ? "Vérification…" : "Vérifier l’ordre / inscription (sans paiement)"}</button>}
       {order.inscriptionId && <button type="button" onClick={() => onCreated(order.inscriptionId, order.recipient)} className="mt-3 min-h-11 w-full border border-[#70c7a0] px-3 uppercase text-[#70c7a0]">Sélectionner l’inscription pour l’envoyer</button>}
