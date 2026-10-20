@@ -1181,19 +1181,21 @@ test('Worker attests that exact BTC and FB PSBT inputs cover payment plus fees',
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
   const record = { address, txid: 'e'.repeat(64), vout: 1, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  let expectedOrigin = 'https://open-api-fractal.unisat.io';
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
+    assert.equal(url.origin, expectedOrigin);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    assert.ok(['https://open-api-fractal.unisat.io', 'https://open-api.unisat.io'].includes(url.origin), url.origin);
     if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { cursor: Number(url.searchParams.get('cursor')), total: 1, utxo: [record] } });
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/${record.vout}`) return Response.json({ code: 0, data: record });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
-    for (const [chain, ipSuffix, env] of [
-      ['fractal', 238, { UNISAT_API_KEY: 'test-only' }],
-      ['bitcoin', 240, { UNISAT_BITCOIN_API: 'test-only' }],
+    for (const [chain, ipSuffix, env, origin] of [
+      ['fractal', 238, { UNISAT_API_KEY: 'test-only' }, 'https://open-api-fractal.unisat.io'],
+      ['bitcoin', 240, { UNISAT_BITCOIN_API: 'test-only' }, 'https://open-api.unisat.io'],
     ]) {
+      expectedOrigin = origin;
       const makeBody = minimumSats => JSON.stringify({ chain, address, minimumSats, utxos: [{ txid: record.txid, vout: record.vout, satoshi: record.satoshi, scriptPk: record.scriptPk }] });
       const sufficientResponse = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: `192.0.2.${ipSuffix}`, body: makeBody(49000) }), env);
       const sufficient = await sufficientResponse.json();
