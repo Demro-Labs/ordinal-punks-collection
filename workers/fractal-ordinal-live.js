@@ -1691,7 +1691,7 @@ export default {
       // misleading upstream 404. Reject explicit Fractal requests before contacting UniSat.
       const chain = url.searchParams.get('chain') || (isBrc20 ? '' : 'BITCOIN_MAINNET');
       if (!validWalletAddress(address) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse ou réseau invalide.' }, { status: 400, headers: noStore });
-      if (!isBrc20 && chain !== 'BITCOIN_MAINNET') return Response.json({ error: 'Alkanes balance indexing is supported only on Bitcoin mainnet.' }, { status: 400, headers: noStore });
+      if (!isBrc20 && chain !== 'BITCOIN_MAINNET') return Response.json({ error: 'Alkanes balance indexing is supported only on Bitcoin mainnet.', code: 'ALKANES_CHAIN_UNSUPPORTED' }, { status: 400, headers: noStore });
       const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
       try {
         const path = isBrc20
