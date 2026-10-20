@@ -83,6 +83,16 @@ describe("getSpendableUtxos", () => {
       .rejects.toBeInstanceOf(InsufficientSafeUtxosError);
   });
 
+  it("normalizes UniSat satoshi strings before applying safe-balance checks", async () => {
+    installWindowAndFetch(async () => Response.json({
+      chain: "fractal", address: ADDRESS, cursor: 0, nextCursor: 1, total: 1, scannedCount: 1,
+      utxo: [makeSafeUtxo({ satoshi: "600000" as unknown as number })],
+    }));
+    const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1_700);
+    expect(result).toHaveLength(1);
+    expect(result[0].satoshi).toBe(600_000);
+  });
+
   it("accepts a confirmed low-fee output after the Worker verifies it has no assets", async () => {
     installWindowAndFetch(async () => Response.json({
       chain: "fractal",
