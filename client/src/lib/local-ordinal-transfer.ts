@@ -46,11 +46,11 @@ async function assertOrdinalListStillCurrent(network: OrdiNetwork, address: stri
 }
 function getOrdinalFeeInputs(plan: OrdinalTransferPlan) {
   const inscriptionOutpoint = typeof plan.inscriptionOutpoint === "string" ? plan.inscriptionOutpoint.toLowerCase() : "";
-  if (!/^[a-f0-9]{64}:\\d+$/.test(inscriptionOutpoint)) {
+  if (!/^[a-f0-9]{64}:\d+$/.test(inscriptionOutpoint)) {
     throw new Error("La position de l’inscription dans le PSBT est invalide; aucune signature n’a été créée.");
   }
   const outpoints = plan.inputs.map(input => `${input.txid.toLowerCase()}:${input.vout}`);
-  if (outpoints.some(outpoint => !/^[a-f0-9]{64}:\\d+$/.test(outpoint)) || new Set(outpoints).size !== outpoints.length) {
+  if (outpoints.some(outpoint => !/^[a-f0-9]{64}:\d+$/.test(outpoint)) || new Set(outpoints).size !== outpoints.length) {
     throw new Error("Le PSBT contient une entrée invalide ou dupliquée; aucune signature n’a été créée.");
   }
   const inscriptionMatches = outpoints.filter(outpoint => outpoint === inscriptionOutpoint).length;
