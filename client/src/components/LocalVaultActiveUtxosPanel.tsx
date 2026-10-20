@@ -88,7 +88,7 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
       <div className="border border-[#2c323a] bg-[#10151a] p-2"><p className="font-mono text-[8px] uppercase text-[#718092]">Total listé</p><p className="mt-1 font-display text-lg text-[#f3efe5]">{sourceTotal === null ? "—" : sourceTotal.toLocaleString("fr-FR")}</p></div>
       <div className="border border-[#2c323a] bg-[#10151a] p-2"><p className="font-mono text-[8px] uppercase text-[#718092]">Candidats indicatifs sans actifs de protocole</p><p className="mt-1 font-display text-lg text-[#f3efe5]">{safeTotal.toLocaleString("fr-FR")} sats</p></div>
     </div>
-    <p className="mt-2 font-mono text-[8px] leading-4 text-[#e0b45f]">Le total indicatif n’est pas une autorisation de dépense. Chaque entrée de frais est revalidée séparément par le contrôle de sécurité avant signature.</p>
+    <p className="mt-2 font-mono text-[8px] leading-4 text-[#e0b45f]">Le total indicatif n’est pas une autorisation de dépense : seuls les UTXO confirmés dont l’absence d’inscriptions, Runes et Alkanes est explicitement connue sont comptés. Chaque entrée de frais est revalidée séparément avant signature.</p>
     {error && <p className="mt-3 break-words border border-[#e0b45f]/40 p-2 font-mono text-[9px] text-[#e0b45f]" role="status">{error}</p>}
     {!error && items.length === 0 && <p className="mt-3 font-mono text-[9px] text-[#718092]">{busy ? "Chargement des UTXO…" : "Aucune sortie active renvoyée par l’indexeur."}</p>}
     {visible.length > 0 && <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[640px] border-collapse text-left font-mono text-[9px]">
@@ -98,6 +98,7 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
         <td className="p-2">{item.satoshi.toLocaleString("fr-FR")} sats</td>
         <td className="p-2">{item.height === null ? "Inconnues" : item.height > 0 ? `Confirmée · bloc ${item.height}` : "Non confirmée"}</td>
         <td className="p-2">{item.inscriptions === null ? "À vérifier" : item.inscriptions.length ? `${item.inscriptions.length} détectée(s)` : "Aucune listée"}</td>
+        <td className="p-2">{item.runes === null || item.alkanes === null ? "À vérifier" : item.runes.length || item.alkanes.length ? `Runes ${item.runes.length} · Alkanes ${item.alkanes.length}` : "Aucun détecté"}</td>
         <td className="p-2">{item.isSpent === false ? "Active" : item.isSpent === true ? "Dépensée" : "État à vérifier"}</td>
       </tr>)}</tbody>
     </table></div>}
