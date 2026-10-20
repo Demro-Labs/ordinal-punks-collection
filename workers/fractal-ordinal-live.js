@@ -508,6 +508,22 @@ function selectedFeeRate(fees) {
   return Math.max(1, Math.ceil(value));
 }
 
+/** Retry transient Mempool read outages without retrying transaction broadcasts. */
+async function fetchMempoolReadWithRetry(url, init = {}, attempts = 3) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, { ...init, signal: AbortSignal.timeout(10_000) });
+      if (![502, 503, 504].includes(response.status) || attempt === attempts - 1) return response;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1) throw error;
+    }
+    await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+  }
+  throw lastError || new Error('Mempool read request failed.');
+}
+
 async function recommendedFeeEstimate(chain, env) {
   const unisatBase = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
   const mempoolBase = chain === 'BITCOIN_MAINNET' ? 'https://mempool.space' : 'https://mempool.fractalbitcoin.io';
@@ -1441,7 +1457,7 @@ export default {
         return Response.json({ error: 'Unsupported Mempool proxy route.' }, { status: 404, headers: noStore });
       }
       try {
-        const upstream = await fetch(base + upstreamPath, { headers: { Accept: url.pathname.endsWith('/tx-hex') ? 'text/plain' : 'application/json' }, signal: AbortSignal.timeout(10_000) });
+        const upstream = await fetchMempoolReadWithRetry(base + upstreamPath, { headers: { Accept: url.pathname.endsWith('/tx-hex') ? 'text/plain' : 'application/json' } });
         const body = await upstream.text();
         if (!upstream.ok) return Response.json({ error: 'Mempool upstream request failed.', upstreamStatus: upstream.status }, { status: upstream.status, headers: noStore });
         if (url.pathname.endsWith('/tx-hex')) {

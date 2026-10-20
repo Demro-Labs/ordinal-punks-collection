@@ -334,6 +334,23 @@ test('responses contain API security headers and allow the site origin', async (
   assert.match(response.headers.get('content-security-policy') || '', /default-src 'none'/);
 });
 
+test('retries transient Mempool 503 responses for Local Vault read routes', async () => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async input => {
+    calls += 1;
+    assert.equal(String(input), 'https://mempool.fractalbitcoin.io/api/v1/fees/recommended');
+    if (calls < 3) return Response.json({ error: 'temporarily unavailable' }, { status: 503 });
+    return Response.json({ halfHourFee: 7, fastestFee: 9 });
+  };
+  try {
+    const response = await worker.fetch(makeRequest('/api/mempool/fees?chain=FRACTAL_BITCOIN_MAINNET', { ip: '192.0.2.79' }), {});
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { halfHourFee: 7, fastestFee: 9 });
+    assert.equal(calls, 3);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('returns the higher live Mempool/UniSat half-hour fee without exposing the API key', async () => {
   const previousFetch = globalThis.fetch;
   let unisatAuth = '';
