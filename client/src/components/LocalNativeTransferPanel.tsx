@@ -22,6 +22,8 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
   const [tx, setTx] = useState<{ rawTxHex: string; txid: string } | null>(null);
   const [receipt, setReceipt] = useState<MempoolReceipt | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [confirmedBroadcast, setConfirmedBroadcast] = useState(false);
+  const [broadcastAttempted, setBroadcastAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -31,11 +33,11 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
     : "";
 
   useEffect(() => {
-    setPlan(null); setReview(null); setSigned(""); setTx(null); setReceipt(null); setConfirmed(false); setError(""); setMessage("");
+    setPlan(null); setReview(null); setSigned(""); setTx(null); setReceipt(null); setConfirmed(false); setConfirmedBroadcast(false); setBroadcastAttempted(false); setError(""); setMessage("");
     void getRecommendedFeeEstimate(network).then(setFeeEstimate).catch(() => setFeeEstimate(null));
   }, [network, addressType]);
 
-  const reset = () => { setPlan(null); setReview(null); setSigned(""); setTx(null); setReceipt(null); setConfirmed(false); setMessage(""); };
+  const reset = () => { setPlan(null); setReview(null); setSigned(""); setTx(null); setReceipt(null); setConfirmed(false); setConfirmedBroadcast(false); setBroadcastAttempted(false); setMessage(""); };
 
   const prepare = async () => {
     if (!ownershipContextKey || ownershipProofKey !== ownershipContextKey) { setError("Complete the local BIP-322 ownership proof for this source account, recipient, amount, and network before preparing the transfer."); return; }
@@ -64,20 +66,22 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
   const finalize = async () => {
     if (!plan || !review || !signed) return;
     setBusy(true); setError("");
+    setConfirmedBroadcast(false);
     try { setTx(await finalizeLocalPsbt(signed, wallet, review)); setMessage("Signature vérifiée localement. Vérifiez le TXID avant toute diffusion."); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "La signature finale est invalide."); }
     finally { setBusy(false); }
   };
 
   const broadcast = async () => {
-    if (!plan || !review || !tx) return;
+    if (!plan || !review || !tx || !confirmedBroadcast || broadcastAttempted) return;
+    setBroadcastAttempted(true);
     setBusy(true); setError("");
     try {
       await broadcastLocalPsbt(network, tx.rawTxHex, tx.txid, wallet, review);
       const config = getMempoolConfig(network);
       if (!config) throw new Error("Aucun explorateur n’est configuré pour ce réseau.");
       const initial: MempoolReceipt = { txid: tx.txid, network: config.label, status: "checking", message: "Recherche de la transaction dans Mempool…", blockHeight: null, explorerUrl: `${config.explorer}${tx.txid}`, checkedAt: new Date().toISOString() };
-      setReceipt(initial); setMessage(`Transaction ${asset} diffusée. Suivi live en cours.`); onDone?.();
+      setReceipt(initial); setConfirmedBroadcast(false); setMessage(`Transaction ${asset} diffusée. Suivi live en cours.`); onDone?.();
       void trackMempoolTransaction(tx.txid, network, setReceipt).catch(cause => setError(cause instanceof Error ? cause.message : "Le suivi Mempool est indisponible."));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Le résultat de diffusion est incertain. Vérifiez Mempool avant de réessayer."); }
     finally { setBusy(false); }
@@ -109,7 +113,7 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
       <button type="button" onClick={() => void sign()} disabled={!confirmed || busy || !ownershipContextKey || ownershipProofKey !== ownershipContextKey} className="inline-flex min-h-11 items-center justify-center bg-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#0b0d10] disabled:opacity-40">{busy ? "Signing…" : `Sign ${asset} locally`}</button>
     </div>}
     {signed && !tx && <div className="mt-3 border border-[#d99a54]/40 p-3"><p className="font-mono text-[10px] text-[#f2bd63]">Signature en mémoire uniquement; pas encore diffusée.</p><button type="button" onClick={() => void finalize()} disabled={busy} className="mt-2 inline-flex min-h-11 border border-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#f2bd63]">Verify signature</button></div>}
-    {tx && <div className="mt-3 border border-[#d99a54]/60 p-3 font-mono text-[10px] leading-5"><p className="break-all text-[#f2bd63]">TXID : {tx.txid}</p><p className="mt-1 text-[#9ea7b3]">La diffusion est irréversible. Vérifiez une dernière fois le TXID et le réseau.</p><button type="button" onClick={() => void broadcast()} disabled={busy} className="mt-2 inline-flex min-h-11 bg-[#d99a54] px-4 uppercase text-[#0b0d10] disabled:opacity-40">{busy ? "Broadcasting…" : `Broadcast ${asset}`}</button></div>}
+    {tx && <div className="mt-3 border border-[#d99a54]/60 p-3 font-mono text-[10px] leading-5"><p className="break-all text-[#f2bd63]">TXID : {tx.txid}</p><p className="mt-1 text-[#9ea7b3]">La diffusion est irréversible. Vérifiez une dernière fois le TXID et le réseau.</p><label className="mt-2 flex min-h-11 items-start gap-2 py-2"><input type="checkbox" checked={confirmedBroadcast} onChange={event => setConfirmedBroadcast(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><span>Je confirme ce TXID exact et autorise sa diffusion sur {network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin mainnet"}.</span></label><button type="button" onClick={() => void broadcast()} disabled={busy || !confirmedBroadcast || broadcastAttempted} className="mt-2 inline-flex min-h-11 bg-[#d99a54] px-4 uppercase text-[#0b0d10] disabled:opacity-40">{busy ? "Broadcasting…" : broadcastAttempted ? "Broadcast attempted — verify TXID" : `Broadcast ${asset}`}</button></div>}
     {receipt && <p className="mt-3 break-all border border-[#70c7a0]/40 p-3 font-mono text-[10px] text-[#9fe0bd]" role="status">{receipt.message} · <a className="underline" href={receipt.explorerUrl} target="_blank" rel="noreferrer">Voir dans Mempool</a></p>}
     {error && <p className="mt-3 break-words border border-[#a45e54]/50 p-3 font-mono text-[10px] leading-5 text-[#e6a69b]" role="alert">{error}</p>}
     {message && <p className="mt-3 break-words border border-[#70c7a0]/40 p-3 font-mono text-[10px] leading-5 text-[#9fe0bd]" role="status">{message}</p>}
