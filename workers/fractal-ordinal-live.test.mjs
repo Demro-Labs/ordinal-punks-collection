@@ -1034,6 +1034,8 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     isLowFee: index === 0,
     isOpInRBF: index === 0 || index === 3,
     inscriptions: [],
+    ...(index === 1 ? { runes: [{ runeid: '1:1', amount: '1' }] } : {}),
+    ...(index === 2 ? { alkanes: [{ alkaneid: '2:1', amount: '1' }] } : {}),
     index,
   }));
   const calls = [];
@@ -1041,7 +1043,7 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     const url = new URL(String(input));
     calls.push(url.pathname);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/all-utxo-data')) {
+    if (url.pathname.endsWith('/available-utxo-data')) {
       return Response.json({ code: 0, data: { total: records.length, utxo: records } });
     }
     const pathParts = url.pathname.split('/');
@@ -1074,31 +1076,31 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     assert.equal(data.diagnosticsSats.hasRunes, records[1].satoshi);
     assert.equal(data.diagnosticsSats.hasAlkanes, records[2].satoshi);
     assert.equal(data.diagnosticsSats.unconfirmedOrInvalidHeight, records[3].satoshi);
-    assert.ok(calls.includes(`/v1/indexer/runes/utxo/${records[0].txid}/0/balance`));
-    assert.ok(calls.includes(`/v1/indexer/alkanes/utxo/${records[0].txid}/0/balance`));
-    assert.equal(calls.includes(`/v1/indexer/alkanes/utxo/${records[1].txid}/0/balance`), false);
+    assert.ok(calls.some(path => path.endsWith('/available-utxo-data')));
+    assert.equal(calls.some(path => path.includes('/runes/utxo/') || path.includes('/alkanes/utxo/')), false);
     assert.equal(JSON.stringify(data).includes('test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('desktop and mobile fail closed when the Fractal Alkanes balance endpoint is unavailable', async () => {
+test('desktop and mobile use the available-UTXO API without calling the unsupported Alkanes endpoint', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qmobiletestaddress000000000000000000000';
   const record = {
     address, txid: '1'.repeat(64), vout: 0, satoshi: 120000,
-    scriptPk: '0014' + '66'.repeat(20), height: 100, inscriptions: [],
+    scriptPk: '0014' + '66'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, inscriptions: [],
   };
   const upstreamMobileModes = [];
+  const upstreamPaths = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
+    upstreamPaths.push(url.pathname);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/all-utxo-data')) {
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      assert.equal(url.searchParams.get('withLowFee'), 'true');
       upstreamMobileModes.push(url.searchParams.get('mobile'));
       return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
     }
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false } });
-    if (url.pathname.endsWith(`/runes/utxo/${record.txid}/0/balance`)) return Response.json({ code: 0, data: [] });
-    if (url.pathname.endsWith(`/alkanes/utxo/${record.txid}/0/balance`)) return new Response('not found', { status: 404 });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
@@ -1108,29 +1110,28 @@ test('desktop and mobile fail closed when the Fractal Alkanes balance endpoint i
     ]) {
       const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25${query}`, { ip }), { UNISAT_API_KEY: 'test-only' });
       const data = await response.json();
-      assert.equal(response.status, 503, mode);
-      assert.equal(data.code, 'ALKANES_BALANCE_UNISAT_HTTP_404', mode);
-      assert.equal(Array.isArray(data.utxo), false, mode);
+      assert.equal(response.status, 200, mode);
+      assert.equal(data.utxo.length, 1, mode);
+      assert.equal(data.utxo[0].txid, record.txid, mode);
     }
     assert.deepEqual(upstreamMobileModes, [null, null]);
+    assert.equal(upstreamPaths.some(path => path.includes('/alkanes/utxo/')), false);
   } finally { globalThis.fetch = previousFetch; }
 });
 
 test('reports safe-UTXO rejection reasons without exposing addresses or outpoints', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qdiagnosticstestaddress000000000000000';
-  const valid = { address, txid: 'a'.repeat(64), vout: 0, satoshi: 120000, scriptPk: '0014' + '66'.repeat(20), height: 100, inscriptions: [] };
+  const valid = { address, txid: 'a'.repeat(64), vout: 0, satoshi: 120000, scriptPk: '0014' + '66'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, inscriptions: [] };
   const unconfirmed = { ...valid, txid: 'b'.repeat(64), height: 0 };
   const inscription = { ...valid, txid: 'c'.repeat(64), inscriptions: [{ id: 'redacted-test-inscription' }] };
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/all-utxo-data')) {
+    if (url.pathname.endsWith('/available-utxo-data')) {
       return Response.json({ code: 0, data: { total: 3, utxo: [valid, unconfirmed, inscription] } });
     }
     if (url.pathname === `/v1/indexer/utxo/${valid.txid}/0`) return Response.json({ code: 0, data: { ...valid, isSpent: false } });
-    if (url.pathname.endsWith(`/runes/utxo/${valid.txid}/0/balance`)) return Response.json({ code: 0, data: [] });
-    if (url.pathname.endsWith(`/alkanes/utxo/${valid.txid}/0/balance`)) return Response.json({ code: 0, data: [] });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
@@ -1166,9 +1167,8 @@ test('Worker attests that the exact Fractal PSBT inputs cover payment plus fees'
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { cursor: Number(url.searchParams.get('cursor')), total: 1, utxo: [record] } });
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/${record.vout}`) return Response.json({ code: 0, data: record });
-    if (url.pathname === `/v1/indexer/runes/utxo/${record.txid}/${record.vout}/balance`) return Response.json({ code: 0, data: [] });
-    if (url.pathname === `/v1/indexer/alkanes/utxo/${record.txid}/${record.vout}/balance`) return Response.json({ code: 0, data: [] });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
@@ -1195,38 +1195,37 @@ test('Worker refuses an input whose value differs from the current UniSat outpoi
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
   const record = { address, txid: 'f'.repeat(64), vout: 0, satoshi: 40000, scriptPk: '0014' + '55'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  let detailLookups = 0;
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: record });
-    throw new Error(`The Worker must reject the changed outpoint before asset lookups: ${url}`);
+    if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { cursor: 0, total: 1, utxo: [record] } });
+    if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) { detailLookups += 1; return Response.json({ code: 0, data: record }); }
+    throw new Error(`The Worker must reject the changed outpoint before detail lookups: ${url}`);
   };
   try {
     const body = JSON.stringify({ chain: 'fractal', address, minimumSats: 30000, utxos: [{ txid: record.txid, vout: 0, satoshi: 50000, scriptPk: record.scriptPk }] });
     const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.237', body }), { UNISAT_API_KEY: 'test-only' });
     assert.equal(response.status, 409);
     assert.equal((await response.json()).code, 'UTXO_CONFIRM_NOT_SPENDABLE');
+    assert.equal(detailLookups, 0);
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('fails closed when a protocol balance response is missing or malformed', async () => {
+test('fails closed when the available-UTXO response is missing or malformed', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
-  const record = { address, txid: 'd'.repeat(64), vout: 0, satoshi: 10000, scriptPk: '0014' + '22'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, inscriptions: [] };
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/all-utxo-data')) return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
-    if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false } });
-    if (url.pathname === `/v1/indexer/runes/utxo/${record.txid}/0/balance`) return Response.json({ code: 0, data: null });
+    if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { cursor: 0, total: 1, utxo: null } });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
     const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.231' }), { UNISAT_API_KEY: 'test-only' });
     assert.equal(response.status, 503);
     const data = await response.json();
-    assert.match(data.error, /temporarily unavailable/i);
-    assert.equal(data.code, 'RUNES_INVALID_RESPONSE');
+    assert.equal(data.code, 'UTXO_LIST_INVALID_RESPONSE');
   } finally { globalThis.fetch = previousFetch; }
 });
 
@@ -1384,7 +1383,7 @@ test('rejects an oversized UniSat page instead of skipping uninspected outpoints
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/all-utxo-data')) {
+    if (url.pathname.endsWith('/available-utxo-data')) {
       const utxo = Array.from({ length: 26 }, (_, index) => ({
         address,
         txid: index.toString(16).padStart(64, '0'),

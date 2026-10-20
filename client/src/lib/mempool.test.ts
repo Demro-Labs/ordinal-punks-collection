@@ -1,6 +1,6 @@
 import { LIVE_DATA_API_BASE } from "@/lib/live";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { confirmFractalSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, InsufficientSafeUtxosError, minimumSpendableSatsForScript, trackMempoolTransaction } from "./mempool";
+import { confirmFractalSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, InsufficientSafeUtxosError, minimumSpendableSatsForScript, trackMempoolTransaction, validateMempoolAddress } from "./mempool";
 
 const ADDRESS = "bc1qtestaddress0000000000000000000000000";
 
@@ -40,6 +40,23 @@ describe("minimumSpendableSatsForScript", () => {
     expect(minimumSpendableSatsForScript(`a914${"33".repeat(20)}87`)).toBe(540);
     expect(minimumSpendableSatsForScript(`76a914${"44".repeat(20)}88ac`)).toBe(546);
     expect(minimumSpendableSatsForScript("deadbeef")).toBe(600);
+  });
+});
+
+describe("validateMempoolAddress", () => {
+  it.each(["BITCOIN_MAINNET", "FRACTAL_BITCOIN_MAINNET"])("validates %s locally without depending on Mempool", async network => {
+    const fetchMock = vi.fn();
+    installWindowAndFetch(fetchMock as typeof fetch);
+    await validateMempoolAddress(network, "1BoatSLRHtKNngkdXEeobR76b53LETtpyT");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed addresses and unsupported networks locally", async () => {
+    const fetchMock = vi.fn();
+    installWindowAndFetch(fetchMock as typeof fetch);
+    await expect(validateMempoolAddress("BITCOIN_MAINNET", "not-a-bitcoin-address")).rejects.toThrow(/n’est pas valide/i);
+    await expect(validateMempoolAddress("UNKNOWN_NETWORK", "1BoatSLRHtKNngkdXEeobR76b53LETtpyT")).rejects.toThrow(/Unsupported mainnet network/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
