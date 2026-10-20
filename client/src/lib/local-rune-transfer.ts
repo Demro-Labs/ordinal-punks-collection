@@ -4,7 +4,7 @@ import * as ecc from "@bitcoinerlab/secp256k1";
 import type { AddressType, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
 import { fetchAddressOrdinals } from "@/lib/ordinals";
 import { fetchRuneBalance, fetchRuneUtxoPage, parseRuneAmountToBaseUnits, type RuneUtxo } from "@/lib/runes";
-import { getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress, type SpendableUtxo } from "@/lib/mempool";
+import { confirmSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress, type SpendableUtxo } from "@/lib/mempool";
 
 bitcoin.initEccLib(ecc);
 const NET = bitcoin.networks.bitcoin;
@@ -166,6 +166,8 @@ async function assertCurrent(plan: LocalRuneTransferPlan) {
     const live = safe.find(y=>outpoint(y.txid,y.vout)===outpoint(x.txid,x.vout));
     if (!live || live.satoshi!==x.satoshi || live.scriptPk.toLowerCase()!==x.scriptPk.toLowerCase()) throw new Error("Fee UTXO is no longer safe.");
   }
+  const feeInputSats = plan.feeInputs.reduce((total, input) => total + input.satoshi, 0);
+  await confirmSpendableUtxos(plan.network, plan.sourceAddress, feeInputSats, plan.feeInputs);
   const indexed = utxos.filter(x=>!inscribed.has(outpoint(x.txid,x.vout))&&x.runes.length===1&&x.runes[0].runeid===plan.runeid).reduce((n,x)=>n+BigInt(x.runes[0].amount),BigInt(0));
   if (indexed!==BigInt(balance.amount)) throw new Error("Rune balance and UTXO index disagree.");
 }
