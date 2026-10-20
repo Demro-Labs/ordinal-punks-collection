@@ -271,7 +271,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   if (collectAll && sourceTotal !== null && scannedCount < sourceTotal) {
     throw new Error(`Safe UTXO scan is incomplete: verified ${scannedCount} of ${sourceTotal} address outputs (scan cap ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). No transaction was signed or broadcast.`);
   }
-  if (!options.collectAll && safeSats < minimumSats) {
+  if (safeSats < minimumSats) {
     const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
     const zeroSafeBalanceHint = safeSats === 0 ? " No fee-safe UTXO was found. If this address only has its inscription output, fund the same network address with a separate confirmed BTC/FB output, then refresh; never spend the inscription output as fees." : "";
     const rejectionSummary = UTXO_REJECTION_KEYS
