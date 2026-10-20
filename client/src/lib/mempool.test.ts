@@ -63,8 +63,7 @@ describe("validateMempoolAddress", () => {
 describe("getSpendableUtxos", () => {
   it("scans the full 500-output window by default even when the first UTXO covers the minimum", async () => {
     const cursors: number[] = [];
-    installWindowAndFetch();
-    installWindowAndFetch(async input => {
+    installWindowAndFetch((async input => {
       const url = new URL(String(input));
       const cursor = Number(url.searchParams.get("cursor"));
       cursors.push(cursor);
