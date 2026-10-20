@@ -1686,8 +1686,12 @@ export default {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       const address = url.searchParams.get('address') || '';
       const isBrc20 = url.pathname === '/api/brc20/balances';
-      const chain = url.searchParams.get('chain') || (isBrc20 ? '' : 'FRACTAL_BITCOIN_MAINNET');
+      // Alkanes balance indexing is supported only on Bitcoin mainnet. Defaulting this
+      // endpoint to Fractal sends requests to an unsupported UniSat route and produces a
+      // misleading upstream 404. Reject explicit Fractal requests before contacting UniSat.
+      const chain = url.searchParams.get('chain') || (isBrc20 ? '' : 'BITCOIN_MAINNET');
       if (!validWalletAddress(address) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse ou réseau invalide.' }, { status: 400, headers: noStore });
+      if (!isBrc20 && chain !== 'BITCOIN_MAINNET') return Response.json({ error: 'Alkanes balance indexing is supported only on Bitcoin mainnet.' }, { status: 400, headers: noStore });
       const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
       try {
         const path = isBrc20
