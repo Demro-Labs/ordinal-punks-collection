@@ -1828,6 +1828,31 @@ export default {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
       return addressUtxos(request, env, headers);
     }
+    if (request.method === 'GET' && url.pathname === '/api/utxo-balance-summary') {
+      const noStore = { ...headers, 'Cache-Control': 'no-store' };
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
+      const chain = url.searchParams.get('chain') || '';
+      const address = url.searchParams.get('address') || '';
+      if (!['fractal', 'bitcoin'].includes(chain) || !validWalletAddress(address)) {
+        return Response.json({ error: 'Adresse ou réseau invalide.' }, { status: 400, headers: noStore });
+      }
+      const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
+      try {
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-balance?withLowFee=true`, env, { signal: AbortSignal.timeout(8000) });
+        const fields = ['totalBalance', 'totalUtxoCount', 'availableBalance', 'availableUtxoCount', 'unavailableBalance', 'unavailableUtxoCount'];
+        const values = Object.fromEntries(fields.map(key => [key, Number(source?.[key])]));
+        if (fields.some(key => !Number.isSafeInteger(values[key]) || values[key] < 0) ||
+            values.availableBalance + values.unavailableBalance !== values.totalBalance ||
+            values.availableUtxoCount + values.unavailableUtxoCount !== values.totalUtxoCount) {
+          throw new Error('Invalid UniSat available-balance response');
+        }
+        return Response.json({ chain, address, ...values, refreshedAt: new Date().toISOString() }, { headers: noStore });
+      } catch (error) {
+        const failure = error instanceof SpendableUtxoError ? error : null;
+        const code = failure?.code || (String(error?.message || '').includes('quota') ? 'UTXO_SUMMARY_UNISAT_RATE_LIMITED' : 'UTXO_SUMMARY_UNISAT_UNAVAILABLE');
+        return Response.json({ error: 'Le résumé des UTXO UniSat est temporairement indisponible.', code }, { status: 503, headers: noStore });
+      }
+    }
     if (request.method === 'GET' && url.pathname === '/api/spendable-utxos') {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
       try { return await spendableUtxos(request, env, headers); } catch (error) {
