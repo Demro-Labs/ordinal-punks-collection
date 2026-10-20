@@ -2003,7 +2003,7 @@ test('rejects inconsistent UniSat UTXO summary totals', async () => {
     unavailableBalance: 5000, unavailableUtxoCount: 2,
   } });
   try {
-    const response = await worker.fetch(makeRequest('/api/utxo-balance-summary?chain=fractal&address=bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', { ip: '192.0.2.233' }), { UNISAT_API_KEY: 'fractal-summary-test-key' });
+    const response = await worker.fetch(makeRequest('/api/utxo-balance-summary?chain=fractal&address=bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', { ip: '198.51.100.252' }), { UNISAT_API_KEY: 'fractal-summary-test-key' });
     assert.equal(response.status, 503);
     assert.equal((await response.json()).code, 'UTXO_SUMMARY_UNISAT_UNAVAILABLE');
   } finally { globalThis.fetch = previousFetch; }
