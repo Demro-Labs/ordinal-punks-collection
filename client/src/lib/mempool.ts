@@ -143,6 +143,84 @@ export async function getUtxoBalanceSummary(network: string, address: string): P
   return result as UtxoBalanceSummary;
 }
 
+export type AddressUtxoInventoryProgress = { scannedCount: number; totalCount: number };
+export type AddressUtxoInventoryScan = AddressUtxoInventoryProgress;
+type AddressUtxoInventoryPage = {
+  chain?: string; address?: string; cursor?: number; nextCursor?: number; total?: number; scannedCount?: number; utxo?: unknown[];
+};
+const ADDRESS_UTXO_PAGE_SIZE = 25;
+const MAX_ADDRESS_UTXO_PAGES = 40_000;
+const MAX_ADDRESS_UTXO_REQUESTS_PER_MINUTE = 120;
+const ADDRESS_UTXO_REQUEST_WINDOW_MS = 60_000;
+
+/** Enumerate and validate every indexed wallet output for inventory; this display-only set never authorizes spending. */
+export async function scanAddressUtxoInventory(network: string, address: string, options: { onProgress?: (progress: AddressUtxoInventoryProgress) => void } = {}): Promise<AddressUtxoInventoryScan> {
+  const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
+  if (!chain || !address || address.length > 100) throw new Error("Réseau ou adresse invalide pour l’inventaire UTXO.");
+
+  let cursor = 0;
+  let scannedCount = 0;
+  let totalCount: number | null = null;
+  let requestWindowStartedAt = Date.now();
+  let requestsInWindow = 0;
+  for (let pageNumber = 0; pageNumber < MAX_ADDRESS_UTXO_PAGES; pageNumber += 1) {
+    if (requestsInWindow >= MAX_ADDRESS_UTXO_REQUESTS_PER_MINUTE) {
+      const waitMs = Math.max(0, requestWindowStartedAt + ADDRESS_UTXO_REQUEST_WINDOW_MS - Date.now());
+      if (waitMs > 0) await new Promise<void>(resolve => window.setTimeout(resolve, waitMs));
+      requestWindowStartedAt = Date.now();
+      requestsInWindow = 0;
+    }
+    requestsInWindow += 1;
+    const query: URLSearchParams = new URLSearchParams({ chain, address, cursor: String(cursor), size: String(ADDRESS_UTXO_PAGE_SIZE) });
+    const page: AddressUtxoInventoryPage = await requestJson<AddressUtxoInventoryPage>(`${LIVE_DATA_API_BASE}/api/address-utxos?${query}`, 15_000);
+    const pageRows = page.utxo;
+    const pageScannedCount = page.scannedCount;
+    const nextCursor = page.nextCursor;
+    const pageTotal = page.total;
+    if (
+      page.chain !== chain || page.address !== address || page.cursor !== cursor || !Array.isArray(pageRows) ||
+      !Number.isSafeInteger(pageScannedCount) || pageScannedCount! < 0 || pageScannedCount! > ADDRESS_UTXO_PAGE_SIZE ||
+      !Number.isSafeInteger(nextCursor) || nextCursor !== cursor + pageScannedCount! ||
+      !Number.isSafeInteger(pageTotal) || pageTotal! < nextCursor! || pageRows.length !== pageScannedCount! ||
+      (totalCount !== null && pageTotal !== totalCount)
+    ) {
+      throw new Error("L’indexeur n’a pas confirmé une page d’inventaire UTXO cohérente. Les lignes partielles ne sont pas comptées.");
+    }
+
+    const pageOutpoints = new Set<string>();
+    const nullableArray = (value: unknown) => value === undefined || value === null || Array.isArray(value);
+    const rowsValid = pageRows.every(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+      const item = value as Record<string, unknown>;
+      const amount = normalizeSatoshiValue(item);
+      const outpoint = `${String(item.txid).toLowerCase()}:${String(item.vout)}`;
+      const validHeight = item.height === undefined || item.height === null || (Number.isSafeInteger(item.height) && (item.height as number) >= 0);
+      const validScript = item.scriptPk === undefined || item.scriptPk === null || (typeof item.scriptPk === "string" && /^(?:[a-f0-9]{2})+$/i.test(item.scriptPk));
+      const validSpent = item.isSpent === undefined || item.isSpent === null || typeof item.isSpent === "boolean";
+      if (typeof item.txid !== "string" || !/^[a-f0-9]{64}$/i.test(item.txid) ||
+          typeof item.vout !== "number" || !Number.isSafeInteger(item.vout) || item.vout < 0 || amount === null ||
+          pageOutpoints.has(outpoint) || !validHeight || !validScript || !validSpent ||
+          !nullableArray(item.inscriptions) || !nullableArray(item.runes) || !nullableArray(item.alkanes)) return false;
+      pageOutpoints.add(outpoint);
+      return true;
+    });
+    if (!rowsValid) throw new Error("Une sortie de l’inventaire UTXO est absente, dupliquée ou mal formée; le scan complet est refusé.");
+
+    const confirmedPageCount = pageScannedCount!;
+    const confirmedNextCursor = nextCursor!;
+    const confirmedTotal = pageTotal!;
+    scannedCount += confirmedPageCount;
+    totalCount = confirmedTotal;
+    options.onProgress?.({ scannedCount, totalCount: confirmedTotal });
+    if (confirmedNextCursor === confirmedTotal) return { scannedCount, totalCount: confirmedTotal };
+    if (confirmedPageCount === 0 || confirmedNextCursor === cursor) {
+      throw new Error(`Inventaire UTXO incomplet : ${scannedCount} sorties parcourues sur ${confirmedTotal}. L’indexeur n’a pas avancé.`);
+    }
+    cursor = confirmedNextCursor;
+  }
+  throw new Error(`Inventaire UTXO incomplet : ${scannedCount} sorties parcourues sur ${totalCount ?? "un total inconnu"}. La limite de pages est atteinte.`);
+}
+
 export type SpendableUtxo = { address: string; txid: string; vout: number; satoshi: number; scriptPk: string; height: number; inscriptionsRunesAlkanesChecked: true; isLowFee: boolean; isOpInRBF: boolean; inscriptions: []; sourceCursor?: number };
 export class InsufficientSafeUtxosError extends Error {
   constructor(message: string) { super(message); this.name = "InsufficientSafeUtxosError"; }
