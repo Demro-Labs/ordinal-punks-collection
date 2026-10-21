@@ -331,12 +331,12 @@ describe("trackMempoolTransaction network routing", () => {
     const urls: string[] = [];
     installWindowAndFetch(async input => {
       urls.push(String(input));
-      return Response.json({ confirmed: true, block_height: 123 });
+      return Response.json({ status: { confirmed: true, block_height: 123 } });
     });
 
     const receipt = await trackMempoolTransaction(txid, network);
 
-    expect(urls).toEqual([`${LIVE_DATA_API_BASE}/api/mempool/tx-status?chain=${encodeURIComponent(network)}&txid=${txid}`]);
+    expect(urls).toEqual([`${getMempoolConfig(network)!.api}/api/tx/${txid}`]);
     expect(receipt).toMatchObject({ txid, network: label, status: "confirmed", blockHeight: 123 });
   });
 
@@ -355,7 +355,7 @@ describe("Mempool fee fallback and Legacy transaction routing", () => {
   it.each([
     { network: "BITCOIN_MAINNET" },
     { network: "FRACTAL_BITCOIN_MAINNET" },
-  ])("falls back to the selected $network Mempool through the Worker proxy for current fees", async ({ network }) => {
+  ])("falls back to the selected $network Mempool REST endpoint for current fees", async ({ network }) => {
     const urls: string[] = [];
     installWindowAndFetch(async input => {
       const url = String(input);
@@ -366,7 +366,7 @@ describe("Mempool fee fallback and Legacy transaction routing", () => {
     const estimate = await getRecommendedFeeEstimate(network);
     expect(estimate).toMatchObject({ network, feeRate: 3, strategy: "single-provider-fallback", sources: { mempool: { feeRate: 3, available: true }, unisat: { feeRate: null, available: false } } });
     expect(urls).toHaveLength(2);
-    expect(urls[1]).toBe(`${LIVE_DATA_API_BASE}/api/mempool/fees?chain=${encodeURIComponent(network)}`);
+    expect(urls[1]).toBe(`${getMempoolConfig(network)!.api}/api/v1/fees/recommended`);
   });
 
   it.each(["BITCOIN_MAINNET", "FRACTAL_BITCOIN_MAINNET"])("uses a valid fallback fee when halfHourFee is present but invalid for %s", async network => {
@@ -386,7 +386,7 @@ describe("Mempool fee fallback and Legacy transaction routing", () => {
   it.each([
     { network: "BITCOIN_MAINNET", endpoint: "https://mempool.space" },
     { network: "FRACTAL_BITCOIN_MAINNET", endpoint: "https://mempool.fractalbitcoin.io" },
-  ])("fetches Legacy parent hex from the matching $network Mempool via the Worker proxy", async ({ network }) => {
+  ])("fetches Legacy parent hex from the matching $network Mempool REST endpoint", async ({ network }) => {
     const txid = "c".repeat(64);
     const rawHex = "02000000";
     const urls: string[] = [];
@@ -395,7 +395,7 @@ describe("Mempool fee fallback and Legacy transaction routing", () => {
       return new Response(rawHex, { status: 200, headers: { "Content-Type": "text/plain" } });
     });
     await expect(getMempoolRawTransaction(network, txid)).resolves.toBe(rawHex);
-    expect(urls).toEqual([`${LIVE_DATA_API_BASE}/api/mempool/tx-hex?chain=${encodeURIComponent(network)}&txid=${txid}`]);
+    expect(urls).toEqual([`${endpoint}/api/tx/${txid}/hex`]);
   });
 
   it("rejects an unknown network instead of routing Legacy inputs to the wrong chain", async () => {
