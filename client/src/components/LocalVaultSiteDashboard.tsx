@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, ExternalLink, RefreshCw, ShieldCheck, Wallet, WalletCards } from "lucide-react";
 import { ProtocolAssetsPanel } from "@/components/ProtocolAssetsPanel";
+import { TransactionControlCenter } from "@/components/TransactionControlCenter";
 import { LocalVaultActiveUtxosPanel } from "@/components/LocalVaultActiveUtxosPanel";
 import { clearLocalVaultSiteSession, LOCAL_VAULT_SESSION_EVENT, readLocalVaultSiteSession, type LocalVaultSite, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
 import { ADDRESS_SPECS, fetchAddressBalance, formatSats } from "@/lib/ordi-wallet";
@@ -123,6 +124,7 @@ export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSe
     </div>
 
     <div className="p-4 sm:p-6">
+      <TransactionControlCenter session={session} />
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2"><div><h4 className="font-display text-base font-semibold text-[#f3efe5]">Address accounts</h4><p className="mt-1 text-xs text-[#718092]">All four derivation types · separate BTC and FB balances</p></div><span className="font-mono text-[10px] uppercase tracking-[.12em] text-[#718092]">4 accounts</span></div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {ADDRESS_SPECS.map(spec => {
@@ -148,7 +150,7 @@ export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSe
       </div>
 
       <div className="mt-6 grid gap-4 xl:grid-cols-[1.05fr_.95fr]">
-        <section className="min-w-0 rounded-xl border border-[#27332f] bg-[#0d1310] p-4 sm:p-5" aria-label="UTXO review">
+        <section id="transaction-utxo-review" className="min-w-0 scroll-mt-24 rounded-xl border border-[#27332f] bg-[#0d1310] p-4 sm:p-5" aria-label="UTXO review">
           <div className="flex items-start gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#d99a54]/10 text-[#f2bd63]"><ShieldCheck size={17} /></div><div className="min-w-0"><h4 className="font-display text-base font-semibold text-[#f3efe5]">UTXO safety & selection</h4><p className="mt-1 text-xs leading-5 text-[#718092]">Network-specific output review for the selected account. Asset-bearing outputs must not be used as fee inputs.</p></div></div>
           <div className="mt-4"><LocalVaultActiveUtxosPanel address={session.addresses[session.activeAddressType].address} network={session.network} /></div>
         </section>
