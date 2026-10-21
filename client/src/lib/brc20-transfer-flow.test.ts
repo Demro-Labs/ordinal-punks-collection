@@ -3,6 +3,7 @@ import {
   buildBrc20TransferInscription,
   getBrc20TransferNextAction,
   getBrc20TransferStorageKey,
+  isConsistentBrc20PaymentState,
   parseBrc20TransferProgress,
   type Brc20TransferIdentity,
   type Brc20TransferProgress,
@@ -64,6 +65,15 @@ describe("BRC-20 transfer flow", () => {
     });
     expect(parseBrc20TransferProgress(raw, { ...identity, network: "FRACTAL_BITCOIN_MAINNET" })).toBeNull();
     expect(parseBrc20TransferProgress(raw, { ...identity, address: "bc1qother" })).toBeNull();
+  });
+
+  it("validates Local Vault payment state before restoring a saved order", () => {
+    expect(isConsistentBrc20PaymentState({ paymentStarted: false, paymentTxid: "", inscriptionId: "" })).toBe(true);
+    expect(isConsistentBrc20PaymentState({ paymentStarted: true, paymentTxid: "a".repeat(64), inscriptionId: "" })).toBe(true);
+    expect(isConsistentBrc20PaymentState({ paymentStarted: true, paymentTxid: "a".repeat(64), inscriptionId: `${"b".repeat(64)}i0` })).toBe(true);
+    expect(isConsistentBrc20PaymentState({ paymentStarted: false, paymentTxid: "a".repeat(64), inscriptionId: "" })).toBe(false);
+    expect(isConsistentBrc20PaymentState({ paymentStarted: false, paymentTxid: "", inscriptionId: `${"b".repeat(64)}i0` })).toBe(false);
+    expect(isConsistentBrc20PaymentState({ paymentStarted: true, paymentTxid: "bad", inscriptionId: "" })).toBe(false);
   });
 
   it("rejects corrupted or unsafe progress instead of allowing another payment", () => {
