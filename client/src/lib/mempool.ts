@@ -30,7 +30,11 @@ async function requestJson<T>(url: string, timeoutMs = 8_000, init?: RequestInit
       if (new URL(url).origin === new URL(LIVE_DATA_API_BASE).origin) {
         const failure = await response.json().catch(() => null) as { error?: unknown; code?: unknown } | null;
         if (failure?.code === "UTXO_CONFIRM_NOT_IN_AVAILABLE_SET") {
-          throw new Error("UTXO_CONFIRM_NOT_IN_AVAILABLE_SET: une ou plusieurs entrées ne figurent plus dans l’ensemble UTXO disponibles et sûrs du réseau. Actualisez les UTXO, reconstruisez le PSBT avec les sorties actuellement disponibles, puis recommencez l’examen. La vérification n’a pas été contournée et aucune transaction ne doit être diffusée.");
+          const missing = Array.isArray((failure as { missingOutpoints?: unknown }).missingOutpoints)
+            ? ((failure as { missingOutpoints: unknown[] }).missingOutpoints).filter((value): value is string => typeof value === "string" && /^[a-f0-9]{64}:\\d+$/i.test(value))
+            : [];
+          const outpoints = missing.length ? ` Entrées non retrouvées dans l’index UniSat : ${missing.join(", ")}.` : "";
+          throw new Error(`UTXO_CONFIRM_NOT_IN_AVAILABLE_SET: après deux scans, une ou plusieurs entrées PSBT ne figurent toujours pas dans l’ensemble UTXO disponibles et sûrs.${outpoints} Actualisez les UTXO et reconstruisez le PSBT à partir des sorties sûres actuelles. Ne réutilisez pas ces entrées sans confirmation; aucune signature ni diffusion n’a été effectuée.`);
         }
         if (failure?.code === "UTXO_CONFIRM_SCAN_LIMIT_REACHED" || failure?.code === "UTXO_CONFIRM_AVAILABLE_SCAN_INCOMPLETE") {
           throw new Error("La revalidation du scan UTXO n’a pas pu atteindre une page confirmée par l’indexeur. Actualisez les UTXO et reconstruisez le PSBT; aucune signature ni diffusion n’a été effectuée.");
