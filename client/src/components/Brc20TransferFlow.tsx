@@ -212,7 +212,7 @@ export function Brc20TransferFlow({
     progressRef.current = restored;
     setProgress(restored);
     setRecipient(restored?.recipient || "");
-    setAmountToTransfer(restored?.amount || amount);
+    setAmountToTransfer(restored?.amount || "");
     setValidatedRecipient(restored?.recipient || "");
     setFeeRate(restored?.feeRate || 1);
     setPaymentPreflight(null);
@@ -222,7 +222,7 @@ export function Brc20TransferFlow({
     setMessage(restored ? "An in-progress BRC-20 transfer was restored for this wallet and network." : "");
   }, [storageKey]);
   useEffect(() => {
-    if (!progressRef.current) setAmountToTransfer(amount);
+    if (!progressRef.current) setAmountToTransfer("");
   }, [amount, storageKey]);
   useEffect(() => {
     setOwnershipProofKey(null);
@@ -551,7 +551,7 @@ export function Brc20TransferFlow({
   const startAnotherTransfer = () => {
     clearProgress();
     setValidatedRecipient("");
-    setAmountToTransfer(amount);
+    setAmountToTransfer("");
     setRecipient("");
     setConfirmed(false);
     setOwnershipProofKey(null);
@@ -568,10 +568,10 @@ export function Brc20TransferFlow({
   return (
     <div className="mt-3 border border-[#d99a54]/50 bg-[#10151a] p-3">
       <p className="font-mono text-[10px] uppercase text-[#f2bd63]">
-        Create inscription, then send · {kind === "prog" ? "BRC20-Prog" : "Classic BRC-20"} {ticker}
+        Transfert BRC-20 · {kind === "prog" ? "BRC20-Prog" : "Classic BRC-20"} {ticker}
       </p>
       <p className="mt-1 font-mono text-[9px] leading-5 text-[#718092]">
-        Network: {chainLabel} · available: <strong className="text-[#70c7a0]">{amount}</strong>. Three separate actions: prepare the order, approve payment to create the transferable amount, then send the inscription to the recipient.
+        Réseau : {chainLabel} · disponible : <strong className="text-[#70c7a0]">{amount}</strong>. Saisissez le montant exact à transférer. Le montant inscrit dans le reçu sera celui créé puis envoyé ; aucune valeur maximale n’est sélectionnée automatiquement.
       </p>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <input
@@ -584,20 +584,20 @@ export function Brc20TransferFlow({
             if (progressRef.current) updateProgress({ recipient: nextRecipient.trim() });
           }}
           disabled={Boolean(busyAction)}
-          placeholder={`Recipient address · ${chainLabel}`}
+          placeholder={`Adresse du destinataire · ${chainLabel}`}
           className="min-h-11 border border-[#3b434d] bg-[#0b0d10] px-3 font-mono text-[10px] text-[#d9d3c6]"
         />
         <label className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#9ea7b3]">
-          Amount {kind === "prog" ? "BRC20-Prog" : "BRC-20"}
+          Montant à transférer ({kind === "prog" ? "BRC20-Prog" : "BRC-20"})
           <input
             value={amountToTransfer}
             onChange={event => { setAmountToTransfer(event.target.value); setConfirmed(false); }}
             disabled={Boolean(busyAction) || Boolean(progress)}
             inputMode="decimal"
-            className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0d10] px-3 font-mono text-xs normal-case text-[#d9d3c6]"
+            placeholder="Saisir le montant exact" className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0d10] px-3 font-mono text-xs normal-case text-[#d9d3c6]"
           />
           <span className="mt-1 block normal-case text-[#718092]">
-            Disponible : {amount} · frais : {activeFeeRate} sat/vB
+            Solde disponible : {amount} · frais réseau estimés : {activeFeeRate} sat/vB
           </span>
         </label>
       </div>
@@ -621,7 +621,7 @@ export function Brc20TransferFlow({
         />
         <span>
           <ShieldCheck size={12} className="mr-1 inline text-[#f2bd63]" />
-          I confirm the address, network, and amount. I understand that the transferable inscription is created first, and sending it to the address requires a separate UniSat approval.
+          Je confirme le réseau, le destinataire et le montant exact {amountToTransfer} {ticker}. L’inscription de transfert sera créée pour ce montant, puis son envoi nécessitera une approbation distincte dans UniSat.
         </span>
       </label>
       {confirmed && recipient.trim() && (
@@ -653,7 +653,7 @@ export function Brc20TransferFlow({
       {nextAction === "prepare" && (
         <button type="button" onClick={() => void prepareTransfer()} disabled={!canPrepare}
           className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
-          {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Preparing…</> : <><Send size={13} /> 1 · Préparer le reçu</>}
+          {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Preparing…</> : <><Send size={13} /> 1 · Pré-commander le transfert</>}
         </button>
       )}
       {nextAction === "pay" && progress && (

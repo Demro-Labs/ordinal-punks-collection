@@ -1151,9 +1151,6 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         <div className="mt-3 grid gap-2 sm:grid-cols-2">{Object.values(localVaultSession.addresses).map(item => <div key={item.type} className={`border p-2 ${item.type === localVaultSession.activeAddressType ? "border-[#70c7a0] bg-[#70c7a0]/10" : "border-[#2c323a]"}`}><p className="font-mono text-[9px] uppercase text-[#f2bd63]">{item.label}{item.type === localVaultSession.activeAddressType ? " · active" : ""}</p><p className="mt-1 break-all font-mono text-[9px] text-[#d9d3c6]">{item.address}</p></div>)}</div>
         <p className="mt-2 font-mono text-[10px] leading-5 text-[#9fe0bd]">{isWalletExtensionContext() ? "The extension keeps its own isolated vault. Import the recovery phrase separately into the website Local Vault; no keys are shared across origins." : `The local vault is available on this ${isMobileUniSatDevice() ? "mobile page" : "desktop page"}. UniSat remains a separate provider for wallet approvals, inscriptions, and native transfers.`}</p>
       </section>}
-      {address && chain?.enum && isSupportedMainnet(chain.enum) && (
-        <ProtocolAssetsPanel address={address} network={chain.enum as ProtocolNetwork} site={site} />
-      )}
       {localVaultSession && (!address || address !== localVaultSession.address || chain?.enum !== localVaultSession.network) && (
         <ProtocolAssetsPanel address={localVaultSession.address} network={localVaultSession.network} site={site} allowUniSatSigning={false} />
       )}
