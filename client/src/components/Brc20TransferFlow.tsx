@@ -573,8 +573,26 @@ export function Brc20TransferFlow({
             : "1 · Pré-commander le transfert";
   const canPay = nextAction === "pay" && !busyAction && confirmed && ownershipProofKey === ownershipContextKey &&
     validatedRecipient === recipient.trim();
+  const payButtonLabel = !confirmed
+    ? "Confirmer le montant et l’adresse"
+    : ownershipProofKey !== ownershipContextKey
+      ? "Valider la propriété dans UniSat"
+      : validatedRecipient !== recipient.trim()
+        ? "Vérifier l’adresse destinataire"
+        : paymentPreflight?.orderId === progress?.orderId
+          ? "2 · Confirmer le paiement avec UniSat"
+          : "2 · Vérifier les UTXO puis payer";
   const canSend = nextAction === "send-inscription" && !busyAction && Boolean(recipient.trim()) && confirmed &&
     validatedRecipient === recipient.trim() && ownershipProofKey === ownershipContextKey;
+  const sendButtonLabel = !recipient.trim()
+    ? "Saisir l’adresse destinataire"
+    : !confirmed
+      ? "Confirmer le montant et l’adresse"
+      : validatedRecipient !== recipient.trim()
+        ? "Vérifier l’adresse destinataire"
+        : ownershipProofKey !== ownershipContextKey
+          ? "Valider la propriété dans UniSat"
+          : "3 · Envoyer l’inscription à l’adresse";
 
   return (
     <div className="mt-3 border border-[#d99a54]/50 bg-[#10151a] p-3">
@@ -670,7 +688,7 @@ export function Brc20TransferFlow({
       {nextAction === "pay" && progress && (
         <button type="button" onClick={payForTransferInscription} disabled={!canPay}
           className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
-          {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Vérification des UTXO…</> : busyAction === "paying" ? <><Loader2 size={13} className="animate-spin" /> Attente de UniSat…</> : <><Send size={13} /> {paymentPreflight?.orderId === progress.orderId ? "2 · Confirmer le paiement avec UniSat" : "2 · Vérifier les UTXO puis payer"}</>}
+          {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Vérification des UTXO…</> : busyAction === "paying" ? <><Loader2 size={13} className="animate-spin" /> Attente de UniSat…</> : <><Send size={13} /> {payButtonLabel}</>}
         </button>
       )}
       {nextAction === "check-order" && progress && (
@@ -682,7 +700,7 @@ export function Brc20TransferFlow({
       {nextAction === "send-inscription" && progress && (
         <button type="button" onClick={sendTransferInscription} disabled={!canSend}
           className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
-          {busyAction === "sending" ? <><Loader2 size={13} className="animate-spin" /> Sending…</> : <><Send size={13} /> 3 · Send inscription to recipient</>}
+          {busyAction === "sending" ? <><Loader2 size={13} className="animate-spin" /> Envoi en cours…</> : <><Send size={13} /> {sendButtonLabel}</>}
         </button>
       )}
       {nextAction === "verify-transfer" && (
