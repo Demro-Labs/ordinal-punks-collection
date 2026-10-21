@@ -833,6 +833,12 @@ async function addressUtxos(request, env, corsHeaders) {
       return { txid, vout, satoshi, height, scriptPk, inscriptions, runes, alkanes, isSpent };
     });
     if (utxo.some(item => item === null)) throw new Error('Invalid UniSat UTXO item');
+    const seenOutpoints = new Set();
+    for (const item of utxo) {
+      const key = `${item.txid}:${item.vout}`;
+      if (seenOutpoints.has(key)) throw new Error('Duplicate outpoint in UniSat UTXO page');
+      seenOutpoints.add(key);
+    }
     const sourceCursor = source?.cursor === undefined ? cursor : Number(source.cursor);
     const sourceTotal = source?.total === undefined ? null : Number(source.total);
     if (!Number.isSafeInteger(sourceCursor) || sourceCursor !== cursor ||
@@ -874,6 +880,7 @@ async function spendableUtxos(request, env, corsHeaders) {
   const raw = source.utxo;
   if (raw.length > requestedSize) throw new SpendableUtxoError('UTXO_PAGE_OVERSIZED');
   const checked = [];
+  const pageOutpoints = new Set();
   // Safe, address-free rejection counters help distinguish indexer inconsistencies from
   // correctly rejected asset-bearing outputs. Never include addresses or outpoints here.
   const rejected = {
@@ -901,6 +908,11 @@ async function spendableUtxos(request, env, corsHeaders) {
   for (const item of raw.slice(0, 25)) {
     const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
     const vout = Number(item?.vout);
+    const outpointKey = `${txid}:${vout}`;
+    if (/^[a-f0-9]{64}$/.test(txid) && Number.isSafeInteger(vout) && vout >= 0) {
+      if (pageOutpoints.has(outpointKey)) throw new SpendableUtxoError('UTXO_PAGE_DUPLICATE_OUTPOINT');
+      pageOutpoints.add(outpointKey);
+    }
     const satoshi = normalizeSatoshiValue(item);
     const scriptPk = typeof item?.scriptPk === 'string' ? item.scriptPk.toLowerCase() : '';
     const height = Number(item?.height);
@@ -1029,12 +1041,15 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
   let sourceTotal = null;
   let scanComplete = false;
 
-  const inspectAvailablePage = (raw, cursor) => {
+  const inspectAvailablePage = (raw, cursor, seenOutpoints) => {
     for (const item of raw) {
       if (item?.address !== address) throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_ADDRESS_MISMATCH');
       const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
       const vout = Number(item?.vout);
+      if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0) throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_INVALID_OUTPOINT');
       const key = `${txid}:${vout}`;
+      if (seenOutpoints.has(key)) throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_DUPLICATE_OUTPOINT');
+      seenOutpoints.add(key);
       if (!candidateByOutpoint.has(key)) continue;
       const satoshi = normalizeSatoshiValue(item);
       const scriptPk = typeof item?.scriptPk === 'string' ? item.scriptPk.toLowerCase() : '';
@@ -1079,12 +1094,13 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
   let hintedSearchStable = true;
   if (candidatePageCursors) {
     let hintedTotal = null;
+    const hintedOutpoints = new Set();
     try {
       for (const cursor of candidatePageCursors) {
         const { raw, total } = await fetchAvailablePage(cursor, hintedTotal);
         hintedTotal ??= total;
         sourceTotal = total;
-        inspectAvailablePage(raw, cursor);
+        inspectAvailablePage(raw, cursor, hintedOutpoints);
         if (availableByOutpoint.size === candidateByOutpoint.size) break;
       }
     } catch (error) {
@@ -1103,6 +1119,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
       availableByOutpoint.clear();
       let cursor = 0;
       let expectedTotal = null;
+      const scannedOutpoints = new Set();
       sourceTotal = null;
       scanComplete = false;
       try {
@@ -1111,7 +1128,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
           const { raw, total } = await fetchAvailablePage(cursor, expectedTotal);
           sourceTotal = total;
           expectedTotal ??= total;
-          inspectAvailablePage(raw, cursor);
+          inspectAvailablePage(raw, cursor, scannedOutpoints);
           if (availableByOutpoint.size === candidateByOutpoint.size) break;
           const nextCursor = cursor + raw.length;
           if (raw.length === 0) {

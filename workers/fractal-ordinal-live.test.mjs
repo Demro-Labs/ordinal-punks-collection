@@ -1337,6 +1337,44 @@ test('Worker refuses an input whose value differs from the current UniSat outpoi
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('refuses duplicate outpoints in a complete spendable-UTXO confirmation page', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  const candidate = { address, txid: 'cd'.repeat(32), vout: 0, satoshi: 50000, scriptPk: '0014' + '68'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, inscriptions: [], runes: [], alkanes: [] };
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      return Response.json({ code: 0, data: { cursor: 0, total: 2, utxo: [candidate, { ...candidate, satoshi: 50000 }] } });
+    }
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const body = JSON.stringify({ chain: 'fractal', address, minimumSats: 40000, utxos: [{ txid: candidate.txid, vout: 0, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk }] });
+    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.246', body }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, 'UTXO_CONFIRM_AVAILABLE_DUPLICATE_OUTPOINT');
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('refuses duplicate outpoints in the display-only address UTXO page', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    assert.match(url.pathname, /\/all-utxo-data$/);
+    return Response.json({ code: 0, data: { cursor: 0, total: 2, utxo: [
+      { txid: 'ee'.repeat(32), vout: 0, satoshi: 1200, height: 100, scriptPk: '0014' + '22'.repeat(20), inscriptions: [], runes: [], alkanes: [], isSpent: false },
+      { txid: 'ee'.repeat(32), vout: 0, satoshi: 1200, height: 100, scriptPk: '0014' + '22'.repeat(20), inscriptions: [], runes: [], alkanes: [], isSpent: false },
+    ] } });
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/address-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.247' }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, 'ACTIVE_UTXO_UPSTREAM_CONNECTION_OR_RESPONSE');
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('fails closed when the available-UTXO response is missing or malformed', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
