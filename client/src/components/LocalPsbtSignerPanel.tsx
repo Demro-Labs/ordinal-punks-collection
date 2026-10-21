@@ -117,7 +117,8 @@ export function LocalPsbtSignerPanel({ wallet, network, site = "pokedex", initia
     {review && <div className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]">
       <p className="flex items-center gap-2 uppercase text-[#9fe0bd]"><CheckCircle2 size={13} /> Review before signing</p>
       <p className="mt-2">Inputs: {review.inputCount} · outputs: {review.outputCount}</p>
-      <p>Total inputs: {review.inputSats.toLocaleString("en-US")} sats · outputs: {review.outputSats.toLocaleString("en-US")} sats</p>
+      <div className="mt-2 border-t border-[#3b434d] pt-2"><p className="uppercase text-[#9fe0bd]">PSBT inputs · TXID:vout</p>{review.inputs.map((input, index) => <div key={`${input.txid}:${input.vout}`} className="mt-2 break-all border-b border-[#27332f] pb-2 last:border-0"><p>Input {index + 1}: {input.txid}:{input.vout}</p><p className="text-[#9ea7b3]">{input.valueSats.toLocaleString("en-US")} sats · script {input.scriptHex}</p></div>)}</div>
+      <p className="mt-2">Total inputs: {review.inputSats.toLocaleString("en-US")} sats · outputs: {review.outputSats.toLocaleString("en-US")} sats</p>
       <p>Exact fee: {review.feeSats.toLocaleString("en-US")} sats · estimated {review.feeRateSatVb.toFixed(2)} sat/vB</p>
       <div className="mt-2 space-y-1">{review.outputs.map((output, index) => <p key={`${output.address}:${index}`} className="break-all">Output {index + 1}: {output.valueSats.toLocaleString("en-US")} sats → {output.address}</p>)}</div>
       <label className="mt-3 flex min-h-11 items-start gap-2 py-2"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /> <span>I confirm these inputs, outputs, fees, and the {network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal mainnet"} network. A local signature will be created.</span></label>

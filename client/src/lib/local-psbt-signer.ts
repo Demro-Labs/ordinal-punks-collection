@@ -177,7 +177,13 @@ export async function reviewLocalPsbt(psbtHex: string, wallet: OrdiWalletRecord,
     inputs.push({ ...outpoint, valueSats, scriptHex });
   }
   if (!addressType || !sourceAddress || !Number.isSafeInteger(inputSats)) throw new Error("Impossible de déterminer le compte source du PSBT.");
-  await verifyInputs(network, sourceAddress, inputs, inputSats);
+  try {
+    await verifyInputs(network, sourceAddress, inputs, inputSats);
+  } catch (cause) {
+    const outpoints = inputs.map((input, index) => `Entrée ${index + 1}: ${input.txid}:${input.vout} (${input.valueSats.toLocaleString("fr-FR")} sats)`).join(" ; ");
+    const reason = cause instanceof Error ? cause.message : "Échec de vérification UTXO.";
+    throw new Error(`Vérification des entrées refusée sur ${network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"}. Entrées du PSBT à diagnostiquer : ${outpoints}. Motif : ${reason} Aucune signature ni diffusion n’a été effectuée.`);
+  }
 
   const outputs: ReviewedOutput[] = [];
   for (const output of psbt.txOutputs) {
