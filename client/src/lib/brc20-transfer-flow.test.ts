@@ -68,7 +68,7 @@ describe("BRC-20 transfer flow", () => {
     expect(parseBrc20TransferProgress(raw, { ...identity, address: "bc1qother" })).toBeNull();
   });
 
-  it("accepts only canonical txidi inscription identifiers before advancing to step two", () => {
+  it("accepts only canonical inscription identifiers before advancing to step two", () => {
     expect(isValidBrc20InscriptionId(`${"a".repeat(64)}i0`)).toBe(true);
     expect(isValidBrc20InscriptionId(`${"b".repeat(64)}i123`)).toBe(true);
     expect(isValidBrc20InscriptionId("pending")).toBe(false);
