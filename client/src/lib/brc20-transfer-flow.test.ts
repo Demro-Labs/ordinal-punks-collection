@@ -3,6 +3,7 @@ import {
   buildBrc20TransferInscription,
   getBrc20TransferNextAction,
   getBrc20TransferStorageKey,
+  isConsistentBrc20PaymentState,
   parseBrc20TransferProgress,
   type Brc20TransferIdentity,
   type Brc20TransferProgress,
@@ -56,7 +57,7 @@ describe("BRC-20 transfer flow", () => {
   });
 
   it("restores only valid progress belonging to the exact site, wallet and network", () => {
-    const raw = JSON.stringify({ ...progress, paymentTxid: "a".repeat(64), inscriptionId: `${"b".repeat(64)}i12` });
+    const raw = JSON.stringify({ ...progress, paymentStarted: true, paymentTxid: "a".repeat(64), inscriptionId: `${"b".repeat(64)}i12` });
     expect(parseBrc20TransferProgress(raw, identity)).toMatchObject({
       orderId: "order-123",
       paymentTxid: "a".repeat(64),
@@ -66,9 +67,23 @@ describe("BRC-20 transfer flow", () => {
     expect(parseBrc20TransferProgress(raw, { ...identity, address: "bc1qother" })).toBeNull();
   });
 
+  it("validates Local Vault payment state before restoring a saved order", () => {
+    expect(isConsistentBrc20PaymentState({ paymentStarted: false, paymentTxid: "", inscriptionId: "" })).toBe(true);
+    expect(isConsistentBrc20PaymentState({ paymentStarted: true, paymentTxid: "a".repeat(64), inscriptionId: "" })).toBe(true);
+    expect(isConsistentBrc20PaymentState({ paymentStarted: true, paymentTxid: "a".repeat(64), inscriptionId: `${"b".repeat(64)}i0` })).toBe(true);
+    expect(isConsistentBrc20PaymentState({ paymentStarted: false, paymentTxid: "a".repeat(64), inscriptionId: "" })).toBe(false);
+    expect(isConsistentBrc20PaymentState({ paymentStarted: false, paymentTxid: "", inscriptionId: `${"b".repeat(64)}i0` })).toBe(false);
+    expect(isConsistentBrc20PaymentState({ paymentStarted: true, paymentTxid: "bad", inscriptionId: "" })).toBe(false);
+  });
+
   it("rejects corrupted or unsafe progress instead of allowing another payment", () => {
     expect(parseBrc20TransferProgress("not-json", identity)).toBeNull();
     expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, payAmount: 0 }), identity)).toBeNull();
     expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, paymentTxid: "bad" }), identity)).toBeNull();
+    expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, paymentTxid: "a".repeat(64) }), identity)).toBeNull();
+    expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, inscriptionId: `${"b".repeat(64)}i0` }), identity)).toBeNull();
+    expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, transferStarted: true }), identity)).toBeNull();
+    expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, transferTxid: "c".repeat(64) }), identity)).toBeNull();
+    expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, paymentStarted: true, inscriptionId: `${"b".repeat(64)}i0`, transferStarted: true, transferTxid: "c".repeat(64) }), identity)).not.toBeNull();
   });
 });
