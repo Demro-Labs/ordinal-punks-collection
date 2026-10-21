@@ -155,7 +155,10 @@ export type WorkerSafeUtxoAttestation = {
 };
 type WorkerSafeUtxoConfirmationResponse = Omit<WorkerSafeUtxoAttestation, "sufficient"> & { sufficient: boolean };
 const SPENDABLE_UTXO_PAGE_SIZE = 25;
-const MAX_SPENDABLE_UTXO_PAGES = 20;
+// The Worker accepts cursors through 1,000,000; keep scanning until the reported total.
+const MAX_SPENDABLE_UTXO_PAGES = 40_000;
+const MAX_SPENDABLE_REQUESTS_PER_MINUTE = 120;
+const SPENDABLE_REQUEST_WINDOW_MS = 60_000;
 const UTXO_REJECTION_KEYS = [
   "identityMismatch", "invalidValue", "invalidScript", "unconfirmedOrInvalidHeight", "invalidFlags",
   "hasInscriptionOrUnknown", "detailMismatch", "spentOrUnknown", "hasRunes", "hasAlkanes",
@@ -209,7 +212,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0) {
     throw new Error("Invalid network, address, or amount for spendable UTXO verification.");
   }
-  // Local Vault fee discovery scans the complete bounded set (up to 500 outputs) by default.
+  // Local Vault fee discovery scans the complete indexer-reported set by default.
   // Callers may opt into an early stop only when they explicitly request collectAll: false.
   const collectAll = options.collectAll ?? true;
   const normalizedOutpoints = options.requiredOutpoints?.map(value => value.toLowerCase());
@@ -221,6 +224,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   let cursor = 0;
   let scannedCount = 0;
   let sourceTotal: number | null = null;
+  let expectedTotal: number | null = null;
   const rejectionTotals: UtxoRejectionDiagnostics = {
     identityMismatch: 0, invalidValue: 0, invalidScript: 0, unconfirmedOrInvalidHeight: 0, invalidFlags: 0,
     hasInscriptionOrUnknown: 0, detailMismatch: 0, spentOrUnknown: 0, hasRunes: 0, hasAlkanes: 0,
@@ -229,7 +233,16 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     unconfirmedOrInvalidHeight: 0, invalidFlags: 0, hasInscriptionOrUnknown: 0,
     detailMismatch: 0, spentOrUnknown: 0, hasRunes: 0, hasAlkanes: 0,
   };
+  let requestWindowStartedAt = Date.now();
+  let requestsInWindow = 0;
   for (let pageNumber = 0; pageNumber < MAX_SPENDABLE_UTXO_PAGES; pageNumber += 1) {
+    if (requestsInWindow >= MAX_SPENDABLE_REQUESTS_PER_MINUTE) {
+      const waitMs = Math.max(0, requestWindowStartedAt + SPENDABLE_REQUEST_WINDOW_MS - Date.now());
+      if (waitMs > 0) await new Promise<void>(resolve => window.setTimeout(resolve, waitMs));
+      requestWindowStartedAt = Date.now();
+      requestsInWindow = 0;
+    }
+    requestsInWindow += 1;
     const query = new URLSearchParams({ chain, address, cursor: String(cursor), size: String(SPENDABLE_UTXO_PAGE_SIZE) });
     if (options.mobile) query.set("mobile", "1");
     type SpendableUtxoPage = {
@@ -246,12 +259,14 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       page.chain !== chain || page.address !== address || page.cursor !== cursor || !Array.isArray(page.utxo) ||
       !Number.isSafeInteger(pageScannedCount) || pageScannedCount! < 0 || pageScannedCount! > SPENDABLE_UTXO_PAGE_SIZE ||
       !Number.isSafeInteger(nextCursor) || nextCursor !== cursor + pageScannedCount! ||
-      !Number.isSafeInteger(total) || total! < 0 || nextCursor! > total! || page.utxo.length > pageScannedCount!
+      !Number.isSafeInteger(total) || total! < 0 || nextCursor! > total! || page.utxo.length > pageScannedCount! ||
+      (expectedTotal !== null && total !== expectedTotal)
     ) {
       throw new Error("The server did not confirm a consistent safe-UTXO page for this address.");
     }
     scannedCount += pageScannedCount!;
     sourceTotal = total!;
+    expectedTotal ??= total!;
     if (page.diagnostics !== undefined) {
       let rejectedOnPage = 0;
       for (const key of UTXO_REJECTION_KEYS) {
@@ -294,7 +309,10 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       const byOutpoint = new Map(collected.map(item => [`${item.txid.toLowerCase()}:${item.vout}`, item]));
       if (requiredOutpoints.every(outpoint => byOutpoint.has(outpoint))) return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
     } else if (!collectAll && safeSats >= minimumSats) return [...collected].sort(compareSpendableUtxos);
-    if (pageScannedCount === 0 || nextCursor === total) break;
+    if (pageScannedCount === 0 && nextCursor! < total!) {
+      throw new Error(`Safe UTXO scan is incomplete: the indexer stopped at ${scannedCount} of ${total} address outputs. No transaction was signed or broadcast.`);
+    }
+    if (nextCursor === total) break;
     cursor = nextCursor!;
   }
   const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
@@ -304,10 +322,10 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     if (missing.length) throw new Error(`The live safe-UTXO index did not verify every exact PSBT input (${missing.join(", ")}). No transaction was signed or broadcast.`);
     return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
   }
-  // Never silently return a partial set when collectAll reaches the 500-output scan cap.
+  // Never silently return a partial set if the Worker cursor limit is reached.
   // An incomplete scan could omit fee UTXOs and misstate the address's safe balance.
   if (collectAll && sourceTotal !== null && scannedCount < sourceTotal) {
-    throw new Error(`Safe UTXO scan is incomplete: verified ${scannedCount} of ${sourceTotal} address outputs (scan cap ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). No transaction was signed or broadcast.`);
+    throw new Error(`Safe UTXO scan is incomplete: verified ${scannedCount} of ${sourceTotal} address outputs (Worker cursor limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). No transaction was signed or broadcast.`);
   }
   if (safeSats < minimumSats) {
     const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
@@ -322,7 +340,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       .map(key => `${UTXO_REJECTION_LABELS[key]}: ${rejectionSatsTotals[key].toLocaleString("en-US")} sats`)
       .join("; ");
     const rejectedValueHint = rejectedValueSummary ? ` Valeur des sorties rejetées par motif: ${rejectedValueSummary}.` : "";
-    throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} UniSat available outputs (limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}; protocol-asset outputs are excluded from this fee-safe scan). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.${diagnosticHint}${rejectedValueHint}${zeroSafeBalanceHint}`);
+    throw new InsufficientSafeUtxosError(`UniSat/Worker verified only ${safeSats.toLocaleString("en-US")} sats across ${collected.length} safe UTXOs after scanning ${scannedLabel} UniSat available outputs (Worker cursor limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}; protocol-asset outputs are excluded from this fee-safe scan). Minimum required: ${minimumSats.toLocaleString("en-US")} sats. No payment was started.${diagnosticHint}${rejectedValueHint}${zeroSafeBalanceHint}`);
   }
   return [...collected].sort(compareSpendableUtxos);
 }

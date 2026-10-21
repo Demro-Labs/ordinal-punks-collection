@@ -16,7 +16,10 @@ type ActiveUtxo = {
 };
 type UtxoPage = { chain: string; address: string; cursor: number; nextCursor: number; total: number; scannedCount: number; utxo: ActiveUtxo[] };
 const PAGE_SIZE = 25;
-const MAX_UTXOS = 500;
+// Keep in sync with the Worker cursor validation for /api/address-utxos.
+const MAX_UTXO_CURSOR = 1_000_000;
+const MAX_UTXO_REQUESTS_PER_MINUTE = 120;
+const UTXO_REQUEST_WINDOW_MS = 60_000;
 const short = (value: string) => `${value.slice(0, 10)}…${value.slice(-8)}`;
 function explainUtxoFailure(cause: unknown) {
   const raw = cause instanceof Error ? cause.message : "Impossible de récupérer les UTXO actifs.";
@@ -46,7 +49,17 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
       const collected: ActiveUtxo[] = [];
       let cursor = 0;
       let total = 0;
-      for (let pageNo = 0; pageNo < MAX_UTXOS / PAGE_SIZE; pageNo += 1) {
+      let expectedTotal: number | null = null;
+      let requestWindowStartedAt = Date.now();
+      let requestsInWindow = 0;
+      while (true) {
+        if (requestsInWindow >= MAX_UTXO_REQUESTS_PER_MINUTE) {
+          const waitMs = Math.max(0, requestWindowStartedAt + UTXO_REQUEST_WINDOW_MS - Date.now());
+          if (waitMs > 0) await new Promise<void>(resolve => window.setTimeout(resolve, waitMs));
+          requestWindowStartedAt = Date.now();
+          requestsInWindow = 0;
+        }
+        requestsInWindow += 1;
         const query = new URLSearchParams({ chain, address, cursor: String(cursor), size: String(PAGE_SIZE) });
         const response = await fetch(`${LIVE_DATA_API_BASE}/api/address-utxos?${query}`, { cache: "no-store", headers: { Accept: "application/json" } });
         const body = await response.json().catch(() => null) as UtxoPage | { error?: string; code?: string } | null;
@@ -54,15 +67,20 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
         if (!body || !("utxo" in body) || body.chain !== chain || body.address !== address || body.cursor !== cursor ||
             !Array.isArray(body.utxo) || !Number.isSafeInteger(body.scannedCount) || body.scannedCount < 0 ||
             body.scannedCount > PAGE_SIZE || body.nextCursor !== cursor + body.scannedCount ||
-            !Number.isSafeInteger(body.total) || body.total < body.nextCursor || body.utxo.length > body.scannedCount) {
+            !Number.isSafeInteger(body.total) || body.total < body.nextCursor || body.utxo.length > body.scannedCount ||
+            (expectedTotal !== null && body.total !== expectedTotal)) {
           throw new Error("L’indexeur n’a pas confirmé une page UTXO cohérente. Les données partielles ne sont pas affichées.");
         }
+        expectedTotal ??= body.total;
         collected.push(...body.utxo);
         total = body.total;
         cursor = body.nextCursor;
-        if (body.scannedCount === 0 || cursor >= total || cursor >= MAX_UTXOS) break;
+        if (cursor >= total) break;
+        if (body.scannedCount === 0 || cursor > MAX_UTXO_CURSOR || total > MAX_UTXO_CURSOR) {
+          throw new Error(`Scan UTXO incomplet : ${cursor} sorties vérifiées sur ${total}. L’indexeur n’a pas avancé ou sa limite de curseur (1 000 000) est atteinte. Aucune liste partielle n’est affichée.`);
+        }
       }
-      setItems(collected.slice(0, MAX_UTXOS));
+      setItems(collected);
       setSourceTotal(total);
       setUpdatedAt(new Date().toISOString());
       if (collected.length === 0 && total > 0) setError("L’indexeur signale des sorties mais n’a renvoyé aucune ligne UTXO valide.");
@@ -80,11 +98,11 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
   const safeTotal = items.filter(item => item.isSpent === false && (item.height ?? 0) > 0 && item.satoshi >= 600 && Array.isArray(item.inscriptions) && item.inscriptions.length === 0 && Array.isArray(item.runes) && item.runes.length === 0 && Array.isArray(item.alkanes) && item.alkanes.length === 0 && Boolean(item.scriptPk)).reduce((sum, item) => sum + item.satoshi, 0);
   return <section className="mt-3 border border-[#70c7a0]/40 bg-[#0e1513] p-3 sm:p-4" aria-labelledby="active-utxos-title">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h4 id="active-utxos-title" className="font-mono text-[10px] uppercase tracking-[.13em] text-[#9fe0bd]">Active UTXOs · {label}</h4><p className="mt-1 font-mono text-[9px] leading-4 text-[#718092]">Jusqu’à 500 sorties · affichage par pages de 25 · adresse active seulement</p></div>
+      <div><h4 id="active-utxos-title" className="font-mono text-[10px] uppercase tracking-[.13em] text-[#9fe0bd]">Active UTXOs · {label}</h4><p className="mt-1 font-mono text-[9px] leading-4 text-[#718092]">Scan complet jusqu’au total annoncé par l’indexeur · affichage par pages de 25 · adresse active seulement</p></div>
       <button type="button" onClick={() => void refresh()} disabled={busy} className="inline-flex min-h-10 items-center gap-2 border border-[#3b434d] px-3 font-mono text-[9px] uppercase text-[#d9d3c6] hover:border-[#70c7a0] disabled:opacity-50"><RefreshCw size={12} className={busy ? "animate-spin" : ""} /> Actualiser</button>
     </div>
     <div className="mt-3 grid gap-2 sm:grid-cols-3">
-      <div className="border border-[#2c323a] bg-[#10151a] p-2"><p className="font-mono text-[8px] uppercase text-[#718092]">Lignes récupérées</p><p className="mt-1 font-display text-lg text-[#f3efe5]">{items.length}{sourceTotal !== null ? ` / ${Math.min(sourceTotal, MAX_UTXOS)}` : ""}</p></div>
+      <div className="border border-[#2c323a] bg-[#10151a] p-2"><p className="font-mono text-[8px] uppercase text-[#718092]">Lignes récupérées</p><p className="mt-1 font-display text-lg text-[#f3efe5]">{items.length}{sourceTotal !== null ? ` / ${sourceTotal}` : ""}</p></div>
       <div className="border border-[#2c323a] bg-[#10151a] p-2"><p className="font-mono text-[8px] uppercase text-[#718092]">Total listé</p><p className="mt-1 font-display text-lg text-[#f3efe5]">{sourceTotal === null ? "—" : sourceTotal.toLocaleString("fr-FR")}</p></div>
       <div className="border border-[#2c323a] bg-[#10151a] p-2"><p className="font-mono text-[8px] uppercase text-[#718092]">Candidats indicatifs sans actifs de protocole</p><p className="mt-1 font-display text-lg text-[#f3efe5]">{safeTotal.toLocaleString("fr-FR")} sats</p></div>
     </div>
