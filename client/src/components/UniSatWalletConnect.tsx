@@ -17,6 +17,7 @@ import { UniSatWalletAuth } from "@/components/UniSatWalletAuth";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 import { ProtocolAssetsPanel } from "@/components/ProtocolAssetsPanel";
+import type { ProtocolNetwork } from "@/lib/protocol-balances";
 import { TransactionHistoryPanel } from "@/components/TransactionHistoryPanel";
 import { isLocalVaultSiteSession, isWalletExtensionContext, LOCAL_VAULT_SESSION_EVENT, readLocalVaultSiteSession, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
 import { getUniSatProvider } from "@/lib/unisat-provider";
@@ -1150,8 +1151,11 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
         <div className="mt-3 grid gap-2 sm:grid-cols-2">{Object.values(localVaultSession.addresses).map(item => <div key={item.type} className={`border p-2 ${item.type === localVaultSession.activeAddressType ? "border-[#70c7a0] bg-[#70c7a0]/10" : "border-[#2c323a]"}`}><p className="font-mono text-[9px] uppercase text-[#f2bd63]">{item.label}{item.type === localVaultSession.activeAddressType ? " · active" : ""}</p><p className="mt-1 break-all font-mono text-[9px] text-[#d9d3c6]">{item.address}</p></div>)}</div>
         <p className="mt-2 font-mono text-[10px] leading-5 text-[#9fe0bd]">{isWalletExtensionContext() ? "The extension keeps its own isolated vault. Import the recovery phrase separately into the website Local Vault; no keys are shared across origins." : `The local vault is available on this ${isMobileUniSatDevice() ? "mobile page" : "desktop page"}. UniSat remains a separate provider for wallet approvals, inscriptions, and native transfers.`}</p>
       </section>}
+      {address && chain?.enum && isSupportedMainnet(chain.enum) && (
+        <ProtocolAssetsPanel address={address} network={chain.enum as ProtocolNetwork} site={site} />
+      )}
       {localVaultSession && (!address || address !== localVaultSession.address || chain?.enum !== localVaultSession.network) && (
-        <ProtocolAssetsPanel address={localVaultSession.address} network={localVaultSession.network} site={site} />
+        <ProtocolAssetsPanel address={localVaultSession.address} network={localVaultSession.network} site={site} allowUniSatSigning={false} />
       )}
       <nav className="transaction-shortcut-nav sticky top-0 z-30 -mx-4 -mt-4 mb-1 flex gap-2 overflow-x-auto border-b border-[#2c323a] bg-[#14191f]/95 px-3 py-2 backdrop-blur sm:static sm:top-auto sm:z-auto sm:mx-0 sm:mt-0 sm:mb-3 sm:flex-wrap sm:overflow-visible sm:rounded-sm sm:border sm:border-[#3b434d] sm:bg-[#10151a] sm:px-4 sm:py-3" aria-label="Wallet and transaction actions">
         <p className="hidden w-full font-mono text-[9px] uppercase tracking-[0.18em] text-[#718092] sm:block">Wallet &amp; transaction shortcuts</p>
@@ -1386,7 +1390,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                 />
                 <span>I checked this inscription and destination. I understand the on-chain transfer cannot be reversed.</span>
               </label>
-              {!localVaultSession && confirmed && selectedInscription && destination.trim() && address && isSupportedMainnet(chain?.enum) && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={getProvider()} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
+              {confirmed && selectedInscription && destination.trim() && address && isSupportedMainnet(chain?.enum) && <UniSatOwnershipProof key={`${ownershipContextKey}:${ownershipProofVersion}`} site={site} address={address} network={chain?.enum ?? ""} provider={getProvider()} contextKey={ownershipContextKey} onVerified={setOwnershipProofKey} />}
               {mobileNativeReadyForContext && <p className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#70c7a0]" role="status">Pre-check complete. Wallet ownership check is valid. Tap again to open UniSat transaction confirmation.</p>}
               {isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) && (
                 <button
@@ -1397,18 +1401,10 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                   Open this page in UniSat
                 </button>
               )}
-              {localVaultSession && (
-                <div className="mt-3 border border-[#70c7a0]/50 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#9fe0bd]" role="status">
-                  <p className="uppercase tracking-[0.12em]">Local Ordi Wallet mode</p>
-                  <p className="mt-1 text-[#d9d3c6]">This UniSat panel cannot sign with your Local Vault. UniSat signing is disabled while Local Ordi Wallet is connected. Open the unlocked Ordi Wallet and select this inscription in the Live Ordinals &amp; Runes panel to prove ownership with local BIP-322, review the exact PSBT, sign locally, and broadcast only after confirmation.</p>
-                  <button type="button" onClick={() => window.dispatchEvent(new Event("ordi-wallet:open"))} className="mt-2 min-h-10 border border-[#70c7a0] px-3 uppercase text-[#9fe0bd]">Open Local Ordi Wallet</button>
-                </div>
-              )}
               <button
                 type="button"
                 onClick={() => mobileNativeReadyForContext ? openMobileNativeTransfer() : void sendSelectedInscription()}
                 disabled={
-                  Boolean(localVaultSession) ||
                   transferOutcomeUnclear ||
                   mobilePsbtTransferUnavailable ||
                   (isMobileBrowser() &&
@@ -1421,7 +1417,7 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
                 }
                 className="mt-3 border border-[#d99a54] bg-[#d99a54] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {localVaultSession ? "Use Local Ordi Wallet above" : transferOutcomeUnclear ? "Transfer status unknown — verify first" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? verifiedOrdinalTransfer ? "Preparing verified transfer…" : "Preparing transfer…" : mobileNativeReadyForContext ? "Approve in UniSat" : verifiedOrdinalTransfer ? "Prepare verified transfer" : isMobileUniSatDevice() ? "Prepare transfer" : "Review transfer in UniSat"}
+                {transferOutcomeUnclear ? "Transfer status unknown — verify first" : isMobileBrowser() && (!isUniSatMobileContext() || !providerAvailable) ? "Open in UniSat first" : transferBusy ? verifiedOrdinalTransfer ? "Preparing verified transfer…" : "Preparing transfer…" : mobileNativeReadyForContext ? "Approve in UniSat" : verifiedOrdinalTransfer ? "Prepare verified transfer" : isMobileUniSatDevice() ? "Prepare transfer" : "Review transfer in UniSat"}
               </button>
               {mobilePsbtTransferUnavailable ? (
                 <p
