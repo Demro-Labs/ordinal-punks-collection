@@ -35,6 +35,14 @@ async function requestJson<T>(url: string, timeoutMs = 8_000, init?: RequestInit
         if (failure?.code === "UTXO_CONFIRM_SCAN_LIMIT_REACHED" || failure?.code === "UTXO_CONFIRM_AVAILABLE_SCAN_INCOMPLETE") {
           throw new Error("La revalidation du scan UTXO n’a pas pu atteindre une page confirmée par l’indexeur. Actualisez les UTXO et reconstruisez le PSBT; aucune signature ni diffusion n’a été effectuée.");
         }
+        if (
+          failure?.code === "UTXO_CONFIRM_AVAILABLE_INVALID_RESPONSE" ||
+          failure?.code === "UTXO_CONFIRM_AVAILABLE_UNSTABLE_RESPONSE" ||
+          failure?.code === "UTXO_CONFIRM_AVAILABLE_CURSOR_MISMATCH" ||
+          failure?.code === "UTXO_CONFIRM_AVAILABLE_SNAPSHOT_CHANGED"
+        ) {
+          throw new Error("Les données UniSat ont changé ou sont incohérentes pendant la confirmation des UTXO. Actualisez le coffre, reconstruisez le PSBT et recommencez l’examen. Aucune signature ni diffusion n’a été effectuée.");
+        }
         const message = typeof failure?.error === "string" ? failure.error : `Live API HTTP ${response.status}`;
         const code = typeof failure?.code === "string" && /^[A-Z0-9_]{1,80}$/.test(failure.code) ? ` [${failure.code}]` : "";
         throw new Error(`${message}${code}`);
@@ -427,7 +435,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   return [...collected].sort(compareSpendableUtxos);
 }
 
-/** Recheck the exact PSBT inputs with the Fractal Worker before UniSat is asked to sign or pay. */
+/** Recheck the exact PSBT inputs with the Fractal Worker before the Local Vault signs or broadcasts. */
 export async function confirmSpendableUtxos(network: string, address: string, minimumSats: number, utxos: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk" | "sourceCursor">>): Promise<WorkerSafeUtxoAttestation> {
   const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
   if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0 || !Array.isArray(utxos) || utxos.length < 1 || utxos.length > 20) {

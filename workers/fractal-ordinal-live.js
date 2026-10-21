@@ -1051,56 +1051,85 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     }
   };
 
+  const recoverablePaginationErrors = new Set([
+    'UTXO_CONFIRM_AVAILABLE_CURSOR_MISMATCH',
+    'UTXO_CONFIRM_AVAILABLE_SNAPSHOT_CHANGED',
+  ]);
   const fetchAvailablePage = async (cursor, expectedTotal) => {
     const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${UTXO_CONFIRM_PAGE_SIZE}&withLowFee=true`, env));
     const raw = source?.utxo;
     const sourceCursor = Number(source?.cursor);
     const total = Number(source?.total);
-    if (!Array.isArray(raw) || raw.length > UTXO_CONFIRM_PAGE_SIZE || sourceCursor !== cursor || !Number.isSafeInteger(total) || total < cursor + raw.length || (expectedTotal !== null && total !== expectedTotal)) {
+    if (!Array.isArray(raw) || raw.length > UTXO_CONFIRM_PAGE_SIZE || !Number.isSafeInteger(total) || total < 0) {
       throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_INVALID_RESPONSE');
+    }
+    // UniSat's available set can change while the user reviews a PSBT. Treat
+    // cursor/total drift as a stale snapshot and retry from cursor 0, not as a
+    // malformed provider payload. A stable scan is still required before approval.
+    if (sourceCursor !== cursor || cursor > total || total < cursor + raw.length) {
+      throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_CURSOR_MISMATCH');
+    }
+    if (expectedTotal !== null && total !== expectedTotal) {
+      throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_SNAPSHOT_CHANGED');
     }
     return { raw, total };
   };
 
+  let hintedSearchStable = true;
   if (candidatePageCursors) {
     let hintedTotal = null;
-    for (const cursor of candidatePageCursors) {
-      const { raw, total } = await fetchAvailablePage(cursor, hintedTotal);
-      hintedTotal ??= total;
-      sourceTotal = total;
-      inspectAvailablePage(raw, cursor);
-      if (availableByOutpoint.size === candidateByOutpoint.size) break;
+    try {
+      for (const cursor of candidatePageCursors) {
+        const { raw, total } = await fetchAvailablePage(cursor, hintedTotal);
+        hintedTotal ??= total;
+        sourceTotal = total;
+        inspectAvailablePage(raw, cursor);
+        if (availableByOutpoint.size === candidateByOutpoint.size) break;
+      }
+    } catch (error) {
+      if (!(error instanceof SpendableUtxoError) || !recoverablePaginationErrors.has(error.code)) throw error;
+      hintedSearchStable = false;
+      availableByOutpoint.clear();
     }
   }
 
-  // Missing candidates after a hinted search are not yet proven absent: scan
-  // the complete current list from the beginning because pagination can drift
-  // by more than five pages while the user reviews a PSBT.
-  if (!candidatePageCursors || availableByOutpoint.size !== candidateByOutpoint.size) {
-    availableByOutpoint.clear();
-    let cursor = 0;
-    let expectedTotal = null;
-    sourceTotal = null;
-    scanComplete = false;
-    const maxPages = Math.ceil((MAX_UTXO_CONFIRM_CURSOR + UTXO_CONFIRM_PAGE_SIZE) / UTXO_CONFIRM_PAGE_SIZE);
-    for (let page = 0; page < maxPages; page += 1) {
-      const { raw, total } = await fetchAvailablePage(cursor, expectedTotal);
-      sourceTotal = total;
-      expectedTotal ??= total;
-      inspectAvailablePage(raw, cursor);
-      if (availableByOutpoint.size === candidateByOutpoint.size) break;
-      const nextCursor = cursor + raw.length;
-      if (raw.length === 0) {
-        if (cursor < total) {
-          if (cursor >= MAX_UTXO_CONFIRM_CURSOR) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
-          throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_SCAN_INCOMPLETE', 409);
+  // If the hint is stale or any input moved outside its search window, restart
+  // from cursor 0. Retry one complete pass if UniSat's available inventory
+  // changes during pagination; never attest against a mixed snapshot.
+  if (!candidatePageCursors || !hintedSearchStable || availableByOutpoint.size !== candidateByOutpoint.size) {
+    let scanSucceeded = false;
+    for (let attempt = 0; attempt < 2 && !scanSucceeded; attempt += 1) {
+      availableByOutpoint.clear();
+      let cursor = 0;
+      let expectedTotal = null;
+      sourceTotal = null;
+      scanComplete = false;
+      try {
+        const maxPages = Math.ceil((MAX_UTXO_CONFIRM_CURSOR + UTXO_CONFIRM_PAGE_SIZE) / UTXO_CONFIRM_PAGE_SIZE);
+        for (let page = 0; page < maxPages; page += 1) {
+          const { raw, total } = await fetchAvailablePage(cursor, expectedTotal);
+          sourceTotal = total;
+          expectedTotal ??= total;
+          inspectAvailablePage(raw, cursor);
+          if (availableByOutpoint.size === candidateByOutpoint.size) break;
+          const nextCursor = cursor + raw.length;
+          if (raw.length === 0) {
+            if (cursor < total) {
+              if (cursor >= MAX_UTXO_CONFIRM_CURSOR) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
+              throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_SCAN_INCOMPLETE', 409);
+            }
+            scanComplete = true;
+            break;
+          }
+          if (nextCursor === total) { scanComplete = true; break; }
+          if (nextCursor > MAX_UTXO_CONFIRM_CURSOR) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
+          cursor = nextCursor;
         }
-        scanComplete = true;
-        break;
+        scanSucceeded = true;
+      } catch (error) {
+        if (!(error instanceof SpendableUtxoError) || !recoverablePaginationErrors.has(error.code)) throw error;
+        if (attempt === 1) throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_UNSTABLE_RESPONSE', 503);
       }
-      if (nextCursor === total) { scanComplete = true; break; }
-      if (nextCursor > MAX_UTXO_CONFIRM_CURSOR) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
-      cursor = nextCursor;
     }
   } else {
     // Hinted pages can locate candidates but never prove the inventory was exhausted.

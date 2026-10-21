@@ -40,8 +40,8 @@ function taprootMessageSignature(account: OrdiAddress, message: string): string 
   if (!tweakedPublicKey) throw new Error("Unable to derive the local Taproot message-signing public key.");
   psbt.signInput(0, {
     publicKey: Buffer.from(tweakedPublicKey),
-    sign: (hash: Uint8Array) => Buffer.from(ecc.sign(hash, tweakedPrivateKey)),
-    signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(hash, tweakedPrivateKey)),
+    sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(tweakedPrivateKey))),
+    signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(tweakedPrivateKey))),
   });
   psbt.finalizeAllInputs();
   const witness = psbt.data.inputs[0]?.finalScriptWitness;
