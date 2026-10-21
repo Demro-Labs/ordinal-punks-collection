@@ -148,8 +148,10 @@ export async function signLocalOrdinalTransfer(local: LocalOrdinalPlan, wallet: 
   if (publicKey.length !== 33 || privateKey.length !== 32 || !ecc.isPrivate(privateKey) || !ecc.isPoint(publicKey) || !Buffer.from(ecc.pointFromScalar(privateKey, true) ?? []).equals(publicKey)) throw new Error("La clé privée locale ne correspond pas à l’adresse examinée.");
   const signer = { publicKey, sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(privateKey))) };
   const parityAdjustedKey = publicKey[0] === 3 ? Buffer.from(ecc.privateNegate(privateKey)) : privateKey;
-  const tapTweak = bitcoin.crypto.taggedHash("TapTweak", bitcoin.toXOnly(publicKey));
-  const tweakedPrivateKey = ecc.privateAdd(parityAdjustedKey, tapTweak);
+  // bitcoinjs-lib v7 returns Uint8Array from hash helpers; normalize ECC-boundary values
+  // to the Buffer implementation used by the local signer and its secp256k1 adapter.
+  const tapTweak = Buffer.from(bitcoin.crypto.taggedHash("TapTweak", Buffer.from(bitcoin.toXOnly(publicKey))));
+  const tweakedPrivateKey = ecc.privateAdd(Buffer.from(parityAdjustedKey), Buffer.from(tapTweak));
   if (!tweakedPrivateKey) throw new Error("Impossible de dériver la clé Taproot signataire.");
   const tweakedPublicKey = ecc.pointFromScalar(tweakedPrivateKey, true);
   if (!tweakedPublicKey) throw new Error("Impossible de dériver la clé publique Taproot signataire.");
