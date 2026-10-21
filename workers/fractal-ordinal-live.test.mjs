@@ -2011,7 +2011,7 @@ test('rejects Alkanes wallet routes on Fractal before calling UniSat', async () 
   try {
     for (const [index, suffix] of ['token-list', 'collection-list', 'utxo-list'].entries()) {
       const extra = suffix === 'utxo-list' ? '&alkaneid=2%3A1' : '';
-      const response = await worker.fetch(makeRequest(`/api/alkanes/${suffix}?chain=FRACTAL_BITCOIN_MAINNET&address=${address}${extra}`, { ip: `198.51.100.${101 + index}` }), { UNISAT_API_KEY: 'fractal-test-only' });
+      const response = await worker.fetch(makeRequest(`/api/alkanes/${suffix}?chain=FRACTAL_BITCOIN_MAINNET&address=${address}${extra}`, { ip: `203.0.113.${211 + index}` }), { UNISAT_API_KEY: 'fractal-test-only' });
       const data = await response.json();
       assert.equal(response.status, 400);
       assert.equal(data.code, 'ALKANES_CHAIN_UNSUPPORTED');
