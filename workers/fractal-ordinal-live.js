@@ -1125,6 +1125,12 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
           if (nextCursor > MAX_UTXO_CONFIRM_CURSOR) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
           cursor = nextCursor;
         }
+        // UniSat can reorder offset-paginated available outputs without changing `total`.
+        // If a complete pass misses an input, retry once from cursor 0 before declaring
+        // the outpoint unavailable. A second complete miss still fails closed.
+        if (scanComplete && availableByOutpoint.size !== candidateByOutpoint.size && attempt === 0) {
+          continue;
+        }
         scanSucceeded = true;
       } catch (error) {
         if (!(error instanceof SpendableUtxoError) || !recoverablePaginationErrors.has(error.code)) throw error;
