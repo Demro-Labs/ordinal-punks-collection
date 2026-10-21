@@ -146,7 +146,7 @@ export async function signLocalOrdinalTransfer(local: LocalOrdinalPlan, wallet: 
   const publicKey = Buffer.from(account.publicKey, "hex");
   const privateKey = Buffer.from(account.privateKey, "hex");
   if (publicKey.length !== 33 || privateKey.length !== 32 || !ecc.isPrivate(privateKey) || !ecc.isPoint(publicKey) || !Buffer.from(ecc.pointFromScalar(privateKey, true) ?? []).equals(publicKey)) throw new Error("La clé privée locale ne correspond pas à l’adresse examinée.");
-  const signer = { publicKey, sign: (hash: Uint8Array) => Buffer.from(ecc.sign(hash, privateKey)) };
+  const signer = { publicKey, sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(privateKey))) };
   const parityAdjustedKey = publicKey[0] === 3 ? Buffer.from(ecc.privateNegate(privateKey)) : privateKey;
   const tapTweak = bitcoin.crypto.taggedHash("TapTweak", bitcoin.toXOnly(publicKey));
   const tweakedPrivateKey = ecc.privateAdd(parityAdjustedKey, tapTweak);
@@ -155,8 +155,8 @@ export async function signLocalOrdinalTransfer(local: LocalOrdinalPlan, wallet: 
   if (!tweakedPublicKey) throw new Error("Impossible de dériver la clé publique Taproot signataire.");
   const taprootSigner = {
     publicKey: Buffer.from(tweakedPublicKey),
-    sign: (hash: Uint8Array) => Buffer.from(ecc.sign(hash, tweakedPrivateKey)),
-    signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(hash, tweakedPrivateKey)),
+    sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(tweakedPrivateKey))),
+    signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(tweakedPrivateKey))),
   };
   const psbt = bitcoin.Psbt.fromHex(local.plan.psbtHex, { network: bitcoin.networks.bitcoin });
   for (let index = 0; index < local.plan.inputs.length; index += 1) {
