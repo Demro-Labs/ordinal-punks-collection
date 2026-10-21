@@ -593,7 +593,18 @@ export default function Home() {
           </div>
         </div>
       </header>
-      <LocalVaultPagePanel site="punks" />
+      <nav aria-label="Primary navigation" className="sticky top-0 z-40 border-b border-[#d7b77b]/15 bg-[#0b0d10]/95 shadow-[0_8px_24px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+        <div className="mx-auto flex max-w-[1440px] items-center gap-2 overflow-x-auto px-5 py-2 sm:gap-3 sm:px-8 lg:px-12">
+          <a href="#top" className="shrink-0 rounded-md border border-[#d7b77b]/35 bg-[#d7b77b]/[0.08] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#e6d3a8] transition-colors hover:border-[#d7b77b]/70 hover:bg-[#d7b77b]/[0.14] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d7b77b]">Catalogue</a>
+          <a href="#local-vault" className="shrink-0 rounded-md px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#aeb7c1] transition-colors hover:bg-white/[0.04] hover:text-[#f3efe5] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d7b77b]">Wallet &amp; Vault</a>
+          <a href="#live-market" className="shrink-0 rounded-md px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#aeb7c1] transition-colors hover:bg-white/[0.04] hover:text-[#f3efe5] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d7b77b]">Live market</a>
+          <span className="ml-auto hidden shrink-0 font-mono text-[9px] uppercase tracking-[0.16em] text-[#657080] md:inline">10,000 inscribed pieces</span>
+          <a href="https://github.com/Demro-Labs/ordinal-punks-collection" target="_blank" rel="noreferrer" className="shrink-0 rounded-md px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#aeb7c1] transition-colors hover:text-[#d7b77b] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d7b77b]">Repository ↗</a>
+        </div>
+      </nav>
+      <div id="local-vault" className="scroll-mt-20">
+        <LocalVaultPagePanel site="punks" />
+      </div>
       <SiteOverviewPanel
         id="ordinal-punks-overview"
         eyebrow="Collection overview"
@@ -648,7 +659,7 @@ export default function Home() {
       />
       <div
         id="top"
-        className="mx-auto grid max-w-[1440px] lg:grid-cols-[220px_minmax(0,1fr)]"
+        className="scroll-mt-20 mx-auto grid max-w-[1440px] lg:grid-cols-[220px_minmax(0,1fr)]"
       >
         <aside className="hidden border-r border-[#2c323a] lg:block">
           <div className="sticky top-0 flex min-h-[calc(100vh-73px)] flex-col justify-between p-8">
@@ -735,7 +746,7 @@ export default function Home() {
               </div>
             </div>
           </section>
-          <div id="live-market" ref={marketRef} className="min-h-24">
+          <div id="live-market" ref={marketRef} className="min-h-24 scroll-mt-20">
             {marketReady ? (
               <Suspense fallback={<div className="flex min-h-24 items-center justify-center border-b border-[#2c323a] font-mono text-[10px] uppercase tracking-[0.14em] text-[#718092]">Preparing live market…</div>}>
                 <MarketPanel
