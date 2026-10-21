@@ -310,7 +310,7 @@ export function Brc20TransferFlow({
       };
       storeProgress(next);
       setValidatedRecipient(recipient.trim());
-      setMessage(`Order created · ${orderAmount.toLocaleString()} sats. Step 1/3 is ready: separately select “Pay to create inscription” in UniSat.`);
+      setMessage(`Reçu préparé · ${orderAmount.toLocaleString()} sats à payer. Vérifiez les détails du reçu ci-dessous, puis choisissez « Payer avec UniSat » pour ouvrir la confirmation dans UniSat.`);
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "Unable to prepare the transfer inscription.");
     } finally {
@@ -335,7 +335,7 @@ export function Brc20TransferFlow({
         .then(() => {
           if (progressRef.current?.orderId !== current.orderId || progressRef.current.paymentTxid) return;
           setPaymentPreflight({ orderId: current.orderId, expiresAt: Date.now() + 60_000 });
-          setMessage("Safe-UTXO preflight passed. Tap “Pay to create inscription” again within 60 seconds to open UniSat approval.");
+          setMessage("Vérification UTXO réussie. Appuyez de nouveau sur « Payer avec UniSat » dans les 60 secondes pour ouvrir l’approbation UniSat.");
         })
         .catch(cause => {
           const detail = cause instanceof Error ? cause.message : String(cause);
@@ -349,7 +349,7 @@ export function Brc20TransferFlow({
     storeProgress(attempted);
     setPaymentPreflight(null);
     setBusyAction("paying");
-    setMessage(`Approve the ${current.payAmount.toLocaleString()} sats payment in UniSat to create the transferable inscription.`);
+    setMessage(`Confirmez dans UniSat le paiement de ${current.payAmount.toLocaleString()} sats pour créer l’inscription transférable.`);
     let paymentRequest: Promise<string | { txid?: string }>;
     try {
       // Call UniSat synchronously in this explicit click handler to preserve the wallet user gesture.
@@ -636,16 +636,30 @@ export function Brc20TransferFlow({
         />
       )}
 
+      {progress && !progress.paymentStarted && !progress.paymentTxid && !progress.inscriptionId && (
+        <div className="mt-3 border border-[#d99a54]/60 bg-[#0b0d10] p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]" aria-label="Reçu de paiement BRC-20">
+          <p className="mb-1 uppercase tracking-[0.12em] text-[#f2bd63]">Reçu à vérifier avant paiement</p>
+          <p><span className="text-[#718092]">Réseau :</span> {chainLabel}</p>
+          <p><span className="text-[#718092]">Wallet signataire :</span> UniSat Wallet</p>
+          <p><span className="text-[#718092]">Opération :</span> {kind === "prog" ? "BRC20-Prog" : "BRC-20"} · {ticker}</p>
+          <p><span className="text-[#718092]">Montant du token :</span> {progress.amount} {ticker}</p>
+          <p className="break-all"><span className="text-[#718092]">Destinataire final :</span> {progress.recipient}</p>
+          <p className="break-all"><span className="text-[#718092]">Ordre :</span> {progress.orderId}</p>
+          <p className="break-all"><span className="text-[#718092]">Adresse de paiement :</span> {progress.payAddress}</p>
+          <p><span className="text-[#718092]">Paiement demandé :</span> {progress.payAmount.toLocaleString()} sats · frais réseau UniSat séparés</p>
+          <p className="mt-1 text-[#e0b45f]">La préparation du reçu n’envoie aucun paiement. Le paiement exige votre confirmation explicite dans UniSat.</p>
+        </div>
+      )}
       {nextAction === "prepare" && (
         <button type="button" onClick={() => void prepareTransfer()} disabled={!canPrepare}
           className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
-          {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Preparing…</> : <><Send size={13} /> 1 · Prepare transferable inscription</>}
+          {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Preparing…</> : <><Send size={13} /> 1 · Préparer le reçu</>}
         </button>
       )}
       {nextAction === "pay" && progress && (
         <button type="button" onClick={payForTransferInscription} disabled={!canPay}
           className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
-          {busyAction === "paying" ? <><Loader2 size={13} className="animate-spin" /> Paying…</> : <><Send size={13} /> 2 · Pay to create inscription</>}
+          {busyAction === "paying" ? <><Loader2 size={13} className="animate-spin" /> Paying…</> : <><Send size={13} /> 2 · Payer avec UniSat</>}
         </button>
       )}
       {nextAction === "check-order" && progress && (
