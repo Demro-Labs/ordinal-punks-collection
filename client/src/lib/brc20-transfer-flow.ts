@@ -61,7 +61,7 @@ export function isConsistentBrc20PaymentState(state: {
   const inscriptionId = state.inscriptionId ?? "";
   if (
     (paymentTxid !== "" && !isTxid(paymentTxid)) ||
-    (inscriptionId !== "" && (typeof inscriptionId !== "string" || !/^[a-f0-9]{64}i\\d+$/i.test(inscriptionId))) ||
+    (inscriptionId !== "" && (typeof inscriptionId !== "string" || !/^[a-f0-9]{64}i\d+$/i.test(inscriptionId))) ||
     ((paymentTxid !== "" || inscriptionId !== "") && !state.paymentStarted)
   ) return false;
   return true;
