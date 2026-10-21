@@ -42,6 +42,9 @@ const MAX_INSCRIBE_FILE_BYTES = 365 * 1024;
 const MAX_INSCRIBE_BODY_BYTES = 95_000_000;
 const MAX_UTXO_CONFIRM_BODY_BYTES = 20_000;
 const MAX_UTXO_CONFIRM_INPUTS = 20;
+const MAX_UTXO_CONFIRM_LEGACY_SCAN_PAGES = 20;
+const MAX_UTXO_CONFIRM_CURSOR = 1_000_000;
+const UTXO_CONFIRM_PAGE_SIZE = 25;
 const MAX_BRC20_PROG_ACTIVATION_BODY_BYTES = 100_000;
 const MAX_BRC20_PROG_ACTIVATION_INPUTS = 20;
 const MAX_BRC20_PROG_BALANCE_BODY_BYTES = 2_048;
@@ -1002,25 +1005,36 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     const vout = Number(candidate?.vout);
     const satoshi = normalizeSatoshiValue(candidate);
     const scriptPk = typeof candidate?.scriptPk === 'string' ? candidate.scriptPk.toLowerCase() : '';
+    const sourceCursor = candidate?.sourceCursor === undefined ? null : candidate.sourceCursor;
     const key = `${txid}:${vout}`;
-    if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) || !Number.isSafeInteger(satoshi) || satoshi < minimumSpendableSatsForScript(scriptPk) || candidateByOutpoint.has(key)) {
+    if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) || !Number.isSafeInteger(satoshi) || satoshi < minimumSpendableSatsForScript(scriptPk) ||
+        (sourceCursor !== null && (typeof sourceCursor !== 'number' || !Number.isSafeInteger(sourceCursor) || sourceCursor < 0 || sourceCursor > MAX_UTXO_CONFIRM_CURSOR || sourceCursor % UTXO_CONFIRM_PAGE_SIZE !== 0)) || candidateByOutpoint.has(key)) {
       throw new SpendableUtxoError('UTXO_CONFIRM_INVALID_CANDIDATE', 400);
     }
-    candidateByOutpoint.set(key, { txid, vout, satoshi, scriptPk });
+    candidateByOutpoint.set(key, { txid, vout, satoshi, scriptPk, sourceCursor });
   }
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
   const availableByOutpoint = new Map();
+  const allCandidatesHaveCursor = [...candidateByOutpoint.values()].every(candidate => candidate.sourceCursor !== null);
+  const candidatePageCursors = allCandidatesHaveCursor
+    ? [...new Set([...candidateByOutpoint.values()].map(candidate => candidate.sourceCursor))].sort((left, right) => left - right)
+    : null;
   let cursor = 0;
   let sourceTotal = null;
-  for (let page = 0; page < 20 && availableByOutpoint.size < candidateByOutpoint.size; page += 1) {
-    const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=25&withLowFee=true`, env));
+  let expectedTotal = null;
+  let scanComplete = false;
+  const maxPages = candidatePageCursors?.length ?? MAX_UTXO_CONFIRM_LEGACY_SCAN_PAGES;
+  for (let page = 0; page < maxPages && availableByOutpoint.size < candidateByOutpoint.size; page += 1) {
+    if (candidatePageCursors) cursor = candidatePageCursors[page];
+    const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${UTXO_CONFIRM_PAGE_SIZE}&withLowFee=true`, env));
     const raw = source?.utxo;
     const sourceCursor = Number(source?.cursor);
     const total = Number(source?.total);
-    if (!Array.isArray(raw) || raw.length > 25 || sourceCursor !== cursor || !Number.isSafeInteger(total) || total < cursor + raw.length) {
+    if (!Array.isArray(raw) || raw.length > UTXO_CONFIRM_PAGE_SIZE || sourceCursor !== cursor || !Number.isSafeInteger(total) || total < cursor + raw.length || (expectedTotal !== null && total !== expectedTotal)) {
       throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_INVALID_RESPONSE');
     }
     sourceTotal = total;
+    expectedTotal ??= total;
     for (const item of raw) {
       if (item?.address !== address) throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_ADDRESS_MISMATCH');
       const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
@@ -1037,13 +1051,31 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
           typeof item?.isLowFee !== 'boolean' || (item?.isOpInRBF !== undefined && typeof item.isOpInRBF !== 'boolean') ||
           runeMetadata.some(value => !Array.isArray(value) || value.length !== 0) || alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) continue;
       const candidate = candidateByOutpoint.get(key);
-      if (candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: typeof item.isOpInRBF === 'boolean' ? item.isOpInRBF : null });
+      if (candidate && (candidate.sourceCursor === null || candidate.sourceCursor === cursor) && candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: typeof item.isOpInRBF === 'boolean' ? item.isOpInRBF : null });
+    }
+    if (availableByOutpoint.size === candidateByOutpoint.size) break;
+    if (candidatePageCursors) {
+      if (page === candidatePageCursors.length - 1) scanComplete = true;
+      continue;
     }
     const nextCursor = cursor + raw.length;
-    if (raw.length === 0 || nextCursor === total) break;
+    if (raw.length === 0) {
+      if (cursor < total) {
+        if (cursor >= MAX_UTXO_CONFIRM_CURSOR) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
+        throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_SCAN_INCOMPLETE', 409);
+      }
+      scanComplete = true;
+      break;
+    }
+    if (nextCursor === total) { scanComplete = true; break; }
+    if (nextCursor > MAX_UTXO_CONFIRM_CURSOR) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
     cursor = nextCursor;
   }
-  if (sourceTotal === null || availableByOutpoint.size !== candidateByOutpoint.size) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_IN_AVAILABLE_SET', 409);
+  if (sourceTotal === null) throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_INVALID_RESPONSE');
+  if (availableByOutpoint.size !== candidateByOutpoint.size) {
+    if (!scanComplete) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
+    throw new SpendableUtxoError('UTXO_CONFIRM_NOT_IN_AVAILABLE_SET', 409);
+  }
   const verified = [];
   let safeSats = 0;
   for (const [key, candidate] of candidateByOutpoint) {

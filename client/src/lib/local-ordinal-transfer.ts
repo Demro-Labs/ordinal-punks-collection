@@ -76,6 +76,7 @@ async function assertFeeInputsStillSafe(network: OrdiNetwork, address: string, p
   const feeInputSats = feeInputs.reduce((total, input) => total + input.valueSats, 0);
   await confirmSpendableUtxos(network, address, feeInputSats, feeInputs.map(input => ({
     txid: input.txid, vout: input.vout, satoshi: input.valueSats, scriptPk: input.scriptHex,
+    sourceCursor: byOutpoint.get(`${input.txid.toLowerCase()}:${input.vout}`)!.sourceCursor,
   })));
 }
 
