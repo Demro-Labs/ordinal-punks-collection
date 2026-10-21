@@ -1,4 +1,5 @@
-import { ArrowRight, ExternalLink, ShieldCheck, Wallet } from "lucide-react";
+import { useState } from "react";
+import { ArrowRight, ExternalLink, ShieldCheck, Wallet, Coins, Image, Layers, LockKeyhole } from "lucide-react";
 import type { LocalVaultSiteSession } from "@/lib/local-vault-bridge";
 
 const explorerBase = (network: LocalVaultSiteSession["network"]) =>
@@ -8,6 +9,30 @@ export function TransactionControlCenter({ session }: { session: LocalVaultSiteS
   const networkLabel = session.network === "BITCOIN_MAINNET" ? "Bitcoin · BTC" : "Fractal Bitcoin · FB";
   const address = session.addresses[session.activeAddressType].address;
   const explorerAddress = `${explorerBase(session.network)}/address/${encodeURIComponent(address)}`;
+  type TransferAsset = "native" | "ordinal" | "brc20" | "runes" | "brc20prog" | "alkanes";
+  const [selectedAsset, setSelectedAsset] = useState<TransferAsset>("native");
+  const transferChoices: { id: TransferAsset; label: string; detail: string; icon: typeof Coins }[] = [
+    { id: "native", label: session.network === "BITCOIN_MAINNET" ? "BTC" : "FB", detail: "Paiement natif", icon: Coins },
+    { id: "ordinal", label: "Ordinals", detail: "Inscription existante", icon: Image },
+    { id: "brc20", label: "BRC-20 classique", detail: "Inscription TRANSFER", icon: Layers },
+    { id: "runes", label: "Runes", detail: "Runestone dédiée", icon: Coins },
+    { id: "brc20prog", label: "BRC20-Prog", detail: "Constructeur non validé", icon: LockKeyhole },
+    { id: "alkanes", label: "Alkanes", detail: "Constructeur non validé", icon: LockKeyhole },
+  ];
+  const blocked = selectedAsset === "brc20prog" || selectedAsset === "alkanes";
+  const target = selectedAsset === "ordinal" ? "#local-vault-assets"
+    : selectedAsset === "brc20" ? "#local-vault-brc20-transfer"
+    : selectedAsset === "runes" ? "#local-vault-runes" : "";
+  const pathLabel = selectedAsset === "brc20" ? "Parcours B · Préparer puis envoyer" : "Parcours A · Actif existant";
+  const pathDescription = selectedAsset === "brc20"
+    ? "Créez et payez d’abord l’inscription TRANSFER. Après indexation, examinez et signez séparément l’envoi final au destinataire. Ces deux transactions ne sont jamais automatiques."
+    : selectedAsset === "native"
+      ? "Préparez le paiement sur le réseau sélectionné, vérifiez le destinataire, les frais et les entrées, puis signez localement et diffusez après confirmation explicite."
+      : selectedAsset === "ordinal"
+        ? "Sélectionnez l’inscription, prouvez sa propriété si demandé, vérifiez la sortie qui la porte et les entrées de frais, puis signez localement."
+        : selectedAsset === "runes"
+          ? "Choisissez le Rune et le montant. Le constructeur Runestone doit vérifier les entrées et sorties; les UTXO portant des actifs ne peuvent pas payer les frais."
+          : "Ce protocole reste bloqué jusqu’à l’ajout d’un constructeur dédié et de validations indépendantes des actifs et sorties.";
 
   return (
     <section className="mb-6 overflow-hidden rounded-xl border border-[#d7b77b]/35 bg-[linear-gradient(135deg,rgba(215,183,123,.08),rgba(13,19,16,.96)_52%)]" aria-labelledby="transaction-control-center-title">
@@ -23,9 +48,28 @@ export function TransactionControlCenter({ session }: { session: LocalVaultSiteS
         <span className="inline-flex items-center gap-2 rounded-full border border-[#d7b77b]/30 bg-[#0b100f]/70 px-3 py-2 font-mono text-[9px] uppercase tracking-[.1em] text-[#e4c98f]"><span className="h-1.5 w-1.5 rounded-full bg-[#d7b77b]" /> Réseau sélectionné · {networkLabel}</span>
       </div>
 
-      <div className="mb-4 grid gap-3 md:grid-cols-2" aria-label="Parcours A et B des transferts Local Vault">
-        <article className="rounded-lg border border-[#70c7a0]/30 bg-[#0b100f]/75 p-3"><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#9fe0bd]">Parcours A · actif existant</p><p className="mt-1 text-xs leading-5 text-[#9ea7b3]">Choisir l’actif existant, vérifier le réseau, le destinataire et tous les UTXO, examiner la transaction, signer dans le Local Vault puis confirmer la diffusion.</p></article>
-        <article className="rounded-lg border border-[#d7b77b]/30 bg-[#0b100f]/75 p-3"><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#e4c98f]">Parcours B · préparation requise</p><p className="mt-1 text-xs leading-5 text-[#9ea7b3]">Pour BRC-20 classique, créer d’abord l’inscription TRANSFER puis envoyer cette inscription dans une transaction distincte. Les autres protocoles utilisent leur constructeur dédié; aucun transfert n’est lancé automatiquement.</p></article>
+      <div className="mb-4 rounded-lg border border-[#d7b77b]/30 bg-[#0b100f]/75 p-3 sm:p-4" aria-label="Assistant intelligent de transfert Local Vault">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div><p className="font-mono text-[9px] uppercase tracking-[.14em] text-[#d7b77b]">Assistant de transfert</p><h5 className="mt-1 text-sm font-semibold text-[#f3efe5]">Que souhaitez-vous envoyer ?</h5></div>
+          <span className="rounded border border-[#27332f] px-2 py-1 font-mono text-[9px] text-[#9ea7b3]">{networkLabel}</span>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
+          {transferChoices.map(choice => {
+            const Icon = choice.icon;
+            const isBlocked = choice.id === "brc20prog" || choice.id === "alkanes";
+            return <button key={choice.id} type="button" aria-pressed={selectedAsset === choice.id} onClick={() => setSelectedAsset(choice.id)} className={`min-h-[76px] rounded-lg border p-3 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d7b77b] ${selectedAsset === choice.id ? "border-[#d7b77b] bg-[#d7b77b]/10" : "border-[#27332f] bg-[#10151a] hover:border-[#56616d]"}`}>
+              <span className="flex items-center gap-2 text-xs font-semibold text-[#f3efe5]"><Icon size={14} />{choice.label}</span>
+              <span className={`mt-1 block text-[10px] leading-4 ${isBlocked ? "text-[#e6a69b]" : "text-[#9ea7b3]"}`}>{choice.detail}</span>
+            </button>;
+          })}
+        </div>
+        <div className={`mt-3 rounded-lg border p-3 ${blocked ? "border-[#a45e54]/50 bg-[#a45e54]/5" : "border-[#70c7a0]/30 bg-[#70c7a0]/5"}`}>
+          <p className={`font-mono text-[9px] uppercase tracking-[.12em] ${blocked ? "text-[#e6a69b]" : "text-[#9fe0bd]"}`}>{blocked ? "Transfert indisponible · sécurité" : pathLabel}</p>
+          <p className="mt-1 text-xs leading-5 text-[#c5cbd2]">{pathDescription}</p>
+          {blocked ? <p className="mt-2 text-[10px] leading-4 text-[#e6a69b]">Aucune signature ni diffusion ne sera proposée pour cet actif tant que les contrôles spécialisés ne sont pas validés.</p>
+            : target ? <a href={target} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded border border-[#d7b77b]/50 px-3 text-xs font-semibold text-[#e4c98f] hover:bg-[#d7b77b]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d7b77b]">Ouvrir le parcours <ArrowRight size={13} /></a>
+            : <button type="button" onClick={() => window.dispatchEvent(new Event("ordi-wallet:open"))} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded border border-[#d7b77b]/50 px-3 text-xs font-semibold text-[#e4c98f] hover:bg-[#d7b77b]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d7b77b]"><Wallet size={13} /> Ouvrir Ordi Wallet <ArrowRight size={13} /></button>}
+        </div>
       </div>
       <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-4">
         <article className="rounded-lg border border-[#27332f] bg-[#0b100f]/75 p-3">
