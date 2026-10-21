@@ -129,6 +129,8 @@ export function Brc20TransferFlow({
   const [message, setMessage] = useState("");
   const [scannedInscriptions, setScannedInscriptions] = useState<ScannedBrc20Inscription[]>([]);
   const [selectedInscriptionId, setSelectedInscriptionId] = useState("");
+  const [inscriptionFilter, setInscriptionFilter] = useState("");
+  const [inscriptionSort, setInscriptionSort] = useState<"amount-desc" | "amount-asc" | "id">("amount-desc");
   const hiddenInscriptionStorageKey = `brc20-hidden-inscriptions:${site}:${network}:${address.toLowerCase()}:${ticker.toLowerCase()}`;
   const [hiddenInscriptionIds, setHiddenInscriptionIds] = useState<string[]>(() => {
     try {
@@ -147,6 +149,13 @@ export function Brc20TransferFlow({
   const nextAction = getBrc20TransferNextAction(progress);
   const activeFeeRate = progress?.feeRate || feeRate;
   const amountWithinBalance = decimalCompare(progress?.amount ?? amountToTransfer, amount) <= 0;
+  const visibleScannedInscriptions = scannedInscriptions
+    .filter(item => `${item.ticker} ${item.amount} ${item.inscriptionId} ${item.location || ""}`.toLowerCase().includes(inscriptionFilter.trim().toLowerCase()))
+    .sort((left, right) => inscriptionSort === "id"
+      ? left.inscriptionId.localeCompare(right.inscriptionId)
+      : inscriptionSort === "amount-asc"
+        ? decimalCompare(left.amount, right.amount) || left.inscriptionId.localeCompare(right.inscriptionId)
+        : decimalCompare(right.amount, left.amount) || left.inscriptionId.localeCompare(right.inscriptionId));
 
   useEffect(() => () => {
     mobilePsbtReviewResolverRef.current?.resolve(false);
@@ -311,6 +320,7 @@ export function Brc20TransferFlow({
         if (payload.detail.length === 0) throw new Error("L’indexeur UniSat a renvoyé une page vide avant la fin de l’inventaire.");
         start += payload.detail.length;
       }
+      if (new Set(all.map(item => item.inscriptionId.toLowerCase())).size !== all.length) throw new Error("UniSat a renvoyé des inscriptions dupliquées entre les pages. Le scan est arrêté et aucun transfert n’a été effectué.");
       if (total === null || all.length !== total) throw new Error("Le scan est incomplet (limite de 10 000 inscriptions ou pagination instable). Aucun transfert n’a été effectué.");
       const visible = all.filter(item => !hiddenInscriptionIds.includes(item.inscriptionId));
       setScannedInscriptions(visible);
@@ -822,11 +832,26 @@ export function Brc20TransferFlow({
           </div>
         )}
         {scannedInscriptions.length > 0 && (
-          <div className="mt-3 overflow-x-auto">
+          <>
+          <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
+            <input type="search" value={inscriptionFilter} onChange={event => setInscriptionFilter(event.target.value)}
+              aria-label="Filtrer les inscriptions par montant ou identifiant"
+              placeholder="Rechercher montant ou inscription ID…"
+              className="min-h-10 min-w-0 border border-[#3b434d] bg-[#0b0d10] px-3 font-mono text-[10px] text-[#d9d3c6]" />
+            <select value={inscriptionSort} onChange={event => setInscriptionSort(event.target.value as "amount-desc" | "amount-asc" | "id")}
+              aria-label="Trier les inscriptions"
+              className="min-h-10 border border-[#3b434d] bg-[#0b0d10] px-3 font-mono text-[10px] text-[#d9d3c6]">
+              <option value="amount-desc">Montant · décroissant</option>
+              <option value="amount-asc">Montant · croissant</option>
+              <option value="id">Identifiant · A à Z</option>
+            </select>
+          </div>
+          <p className="mt-2 font-mono text-[9px] text-[#718092]">{visibleScannedInscriptions.length} résultat(s) affiché(s) sur {scannedInscriptions.length} inscription(s) visibles. Le filtre et le tri ne modifient pas les données UniSat.</p>
+          {visibleScannedInscriptions.length > 0 ? <div className="mt-3 overflow-x-auto">
             <table className="w-full border-collapse text-left font-mono text-[9px]">
               <thead><tr className="border-b border-[#3b434d] text-[#718092]"><th className="p-2">Choisir</th><th className="p-2">Ticker</th><th className="p-2">Montant</th><th className="p-2">Inscription ID</th><th className="p-2">Action</th></tr></thead>
               <tbody>
-                {scannedInscriptions.map(item => (
+                {visibleScannedInscriptions.map(item => (
                   <tr key={item.inscriptionId} className={selectedInscriptionId === item.inscriptionId ? "border-b border-[#d99a54] bg-[#d99a54]/10" : "border-b border-[#3b434d]"}>
                     <td className="p-2"><input aria-label={`Sélectionner ${item.ticker} ${item.amount}`} type="radio" name={`brc20-inscription-${site}-${network}`} checked={selectedInscriptionId === item.inscriptionId} onChange={() => { setSelectedInscriptionId(item.inscriptionId); setAmountToTransfer(item.amount); setConfirmed(false); setValidatedRecipient(""); setOwnershipProofKey(null); }} /></td>
                     <td className="p-2 text-[#f2bd63]">{item.ticker}</td><td className="p-2">{item.amount}</td><td className="max-w-[16rem] break-all p-2 text-[#9ea7b3]">{item.inscriptionId}</td><td className="p-2"><button type="button" onClick={() => hideScannedInscription(item.inscriptionId)} disabled={Boolean(busyAction)} aria-label={`Masquer le reçu ${item.inscriptionId} de la liste`} className="border border-[#3b434d] px-2 py-1 text-[9px] uppercase text-[#aeb6c2] hover:border-[#d99a54] hover:text-[#f2bd63] disabled:opacity-40">Masquer</button></td>
@@ -834,7 +859,8 @@ export function Brc20TransferFlow({
                 ))}
               </tbody>
             </table>
-          </div>
+          </div> : <p className="mt-3 border border-[#3b434d] p-3 font-mono text-[10px] text-[#9ea7b3]">Aucune inscription ne correspond à cette recherche. Effacez le filtre pour revoir la liste complète.</p>}
+          </>
         )}
         {selectedInscriptionId && (
           <p className="mt-2 break-all font-mono text-[9px] text-[#70c7a0]">Inscription sélectionnée : {selectedInscriptionId}. Cliquez sur « Payer les frais et transférer » pour ouvrir la demande UniSat : vérifiez les frais réseau et approuvez le paiement dans le wallet. Seule cette inscription sera envoyée à l’adresse destinataire.</p>
