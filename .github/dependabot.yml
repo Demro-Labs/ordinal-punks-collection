@@ -16,6 +16,9 @@ updates:
       - dependency-name: "react-resizable-panels"
         update-types:
           - "version-update:semver-major"
+      - dependency-name: "react-day-picker"
+        update-types:
+          - "version-update:semver-major"
     groups:
       development-minor-and-patch:
         dependency-type: development
