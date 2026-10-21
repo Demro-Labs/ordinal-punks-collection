@@ -776,7 +776,6 @@ export function Brc20TransferFlow({
           className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
           {busyAction === "sending" ? <><Loader2 size={13} className="animate-spin" /> Envoi en cours…</> : <><Send size={13} /> {sendButtonLabel}</>}
         </button>
-      )}
         </>
       )}
       {nextAction === "verify-transfer" && (
