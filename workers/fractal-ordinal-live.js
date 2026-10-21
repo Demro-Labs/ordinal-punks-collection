@@ -954,7 +954,9 @@ async function spendableUtxos(request, env, corsHeaders) {
     const hasExplicitAssetFreeMarkers =
       Array.isArray(item?.runes) && item.runes.length === 0 &&
       Array.isArray(item?.alkanes) && item.alkanes.length === 0 &&
-      Array.isArray(item?.inscriptions) && item.inscriptions.length === 0;
+      Array.isArray(item?.inscriptions) && item.inscriptions.length === 0 &&
+      Number.isSafeInteger(Number(item?.height)) && Number(item.height) > 0 &&
+      item?.isSpent === false;
     let detail = null;
     if (!hasExplicitAssetFreeMarkers) {
       detail = await spendableUtxoStage('UTXO_DETAIL', () => uniNetwork(base, `/v1/indexer/utxo/${txid}/${vout}`, env));
