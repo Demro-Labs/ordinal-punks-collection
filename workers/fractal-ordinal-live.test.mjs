@@ -2067,3 +2067,82 @@ test('returns validated total/available UTXO summaries for Bitcoin and Fractal w
     }
   } finally { globalThis.fetch = previousFetch; }
 });
+
+
+test('Worker restarts confirmation from cursor zero when UniSat changes the available-set total during hinted lookup', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  const candidate = { address, txid: 'aa'.repeat(32), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  const cursors = [];
+  let cursor25Calls = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      const cursor = Number(url.searchParams.get('cursor'));
+      cursors.push(cursor);
+      if (cursor === 25) cursor25Calls += 1;
+      const total = cursor === 25 && cursor25Calls === 1 ? 27 : 26;
+      const count = Math.min(25, total - cursor);
+      const utxo = Array.from({ length: count }, (_, offset) => {
+        const index = cursor + offset;
+        if (index === 25) return candidate;
+        return {
+          address, txid: (index + 1).toString(16).padStart(64, '0'), vout: 0, satoshi: 10000,
+          scriptPk: '0014' + '55'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, inscriptions: [],
+        };
+      });
+      return Response.json({ code: 0, data: { cursor, total, utxo } });
+    }
+    if (url.pathname === `/v1/indexer/utxo/${candidate.txid}/0`) return Response.json({ code: 0, data: candidate });
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const body = JSON.stringify({ chain: 'fractal', address, minimumSats: 40000, utxos: [{ txid: candidate.txid, vout: 0, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk, sourceCursor: 0 }] });
+    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.241', body }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(data));
+    assert.equal(data.sufficient, true);
+    assert.equal(data.verifiedUtxoCount, 1);
+    assert.deepEqual(cursors, [0, 25, 0, 25]);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('Worker retries a complete UTXO confirmation scan once when the available inventory changes mid-scan', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  const candidate = { address, txid: 'bb'.repeat(32), vout: 0, satoshi: 50000, scriptPk: '0014' + '66'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  const cursors = [];
+  let cursor25Calls = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      const cursor = Number(url.searchParams.get('cursor'));
+      cursors.push(cursor);
+      if (cursor === 25) cursor25Calls += 1;
+      const total = cursor === 25 && cursor25Calls === 1 ? 27 : 26;
+      const count = Math.min(25, total - cursor);
+      const utxo = Array.from({ length: count }, (_, offset) => {
+        const index = cursor + offset;
+        if (index === 25) return candidate;
+        return {
+          address, txid: (index + 1001).toString(16).padStart(64, '0'), vout: 0, satoshi: 10000,
+          scriptPk: '0014' + '77'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, inscriptions: [],
+        };
+      });
+      return Response.json({ code: 0, data: { cursor, total, utxo } });
+    }
+    if (url.pathname === `/v1/indexer/utxo/${candidate.txid}/0`) return Response.json({ code: 0, data: candidate });
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const body = JSON.stringify({ chain: 'fractal', address, minimumSats: 40000, utxos: [{ txid: candidate.txid, vout: 0, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk }] });
+    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.242', body }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(data));
+    assert.equal(data.sufficient, true);
+    assert.equal(data.verifiedUtxoCount, 1);
+    assert.deepEqual(cursors, [0, 25, 0, 25]);
+  } finally { globalThis.fetch = previousFetch; }
+});
