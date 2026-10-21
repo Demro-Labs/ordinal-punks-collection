@@ -1667,21 +1667,6 @@ test('preserves the 1000-file Inscribe limit and rejects file 1001 before upstre
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('caps the per-isolate client table under rotating IPs', async () => {
-  let blocked = false;
-  for (let i = 0; i < 10002; i += 1) {
-    const ip = `198.51.${Math.floor(i / 256)}.${i % 256}`;
-    const response = await worker.fetch(makeRequest('/api/market?collectionId=invalid', { ip }), {});
-    if (response.status === 429) {
-      blocked = true;
-      break;
-    }
-    assert.equal(response.status, 400);
-  }
-  assert.equal(blocked, true);
-});
-
-
 function createAuthStorageMock() {
   const state = { challenge: null, session: null, ipCounts: new Map() };
   const binding = {
@@ -2244,3 +2229,19 @@ test('Worker retries a complete UTXO confirmation scan once when the available i
     assert.deepEqual(cursors, [0, 25, 0, 25]);
   } finally { globalThis.fetch = previousFetch; }
 });
+
+test('caps the per-isolate client table under rotating IPs', async () => {
+  let blocked = false;
+  for (let i = 0; i < 10002; i += 1) {
+    const ip = `198.51.${Math.floor(i / 256)}.${i % 256}`;
+    const response = await worker.fetch(makeRequest('/api/market?collectionId=invalid', { ip }), {});
+    if (response.status === 429) {
+      blocked = true;
+      break;
+    }
+    assert.equal(response.status, 400);
+  }
+  assert.equal(blocked, true);
+});
+
+
