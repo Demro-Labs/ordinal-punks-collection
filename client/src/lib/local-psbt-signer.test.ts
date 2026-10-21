@@ -90,6 +90,20 @@ describe("Local Vault BTC/FB PSBT signer", () => {
     await expect(reviewLocalPsbt(makePsbt("native-segwit", Buffer.from("6a01ff", "hex")).hex, wallet, network)).rejects.toThrow(/dust|OP_RETURN/i);
   });
 
+  it("reports an uncertain broadcast outcome when the response body cannot be read", async () => {
+    const prepared = makePsbt();
+    vi.mocked(getSpendableUtxos).mockResolvedValue([prepared.utxo]);
+    const review = await reviewLocalPsbt(prepared.hex, wallet, network);
+    const signed = await signLocalPsbt(prepared.hex, wallet, review);
+    const tx = await finalizeLocalPsbt(signed, wallet, review);
+    vi.mocked(getSpendableUtxos).mockResolvedValue([prepared.utxo]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      text: vi.fn().mockRejectedValue(new Error("socket reset after submission")),
+    }));
+    await expect(broadcastLocalPsbt(network, tx.rawTxHex, tx.txid, wallet, review))
+      .rejects.toThrow(new RegExp("Résultat de diffusion incertain.*" + tx.txid));
+  });
+
   it("refuses broadcast when the exact confirmed asset-free input is no longer verified", async () => {
     const prepared = makePsbt();
     vi.mocked(getSpendableUtxos).mockResolvedValue([prepared.utxo]);

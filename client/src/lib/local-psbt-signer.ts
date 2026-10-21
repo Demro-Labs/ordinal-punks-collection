@@ -266,12 +266,13 @@ export async function broadcastLocalPsbt(network: OrdiNetwork, rawTxHex: string,
   // Broadcast only the finalized, locally signed transaction to the matching chain.
   // Mempool returns the transaction id as plain text, not a JSON object.
   let response: Response;
+  let responseText: string;
   try {
     response = await fetch(config.api + "/api/tx", { method: "POST", headers: { "Content-Type": "text/plain", Accept: "text/plain" }, body: tx.toHex(), cache: "no-store" });
+    responseText = (await response.text()).trim().replace(/^"|"$/g, "");
   } catch {
-    throw new Error("Résultat de diffusion incertain. Vérifiez le TXID " + expectedTxid + " sur " + config.explorer + " avant toute nouvelle tentative.");
+    throw new Error("Résultat de diffusion incertain. Vérifiez le TXID " + expectedTxid + " sur " + config.explorer + " avant toute nouvelle tentative; la transaction peut déjà avoir atteint le réseau.");
   }
-  const responseText = (await response.text()).trim().replace(/^"|"$/g, "");
   const returned = /^[a-f0-9]{64}$/i.test(responseText) ? responseText.toLowerCase() : "";
   if (!response.ok || returned !== expectedTxid.toLowerCase()) {
     const detail = responseText && responseText.length < 240 ? " (" + responseText + ")" : "";
