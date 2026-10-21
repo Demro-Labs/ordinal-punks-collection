@@ -238,7 +238,7 @@ export function Brc20TransferFlow({
   const scanBrc20Inscriptions = async () => {
     const provider = wallet();
     if (!provider?.getInscriptions) { setMessage("UniSat ne fournit pas getInscriptions. Mettez le portefeuille à jour."); return; }
-    const activeAccounts = await provider.getAccounts?.().catch(() => []);
+    const activeAccounts: string[] = provider.getAccounts ? await provider.getAccounts().catch((): string[] => []) : [];
     if (!activeAccounts?.includes(address)) { setMessage("Connectez le wallet UniSat correspondant à l’adresse affichée avant de scanner."); return; }
     setBusyAction("scanning");
     setMessage("Lecture des inscriptions transférables depuis l’indexeur UniSat sécurisé…");
