@@ -713,6 +713,9 @@ async function walletProtocolAssets(request, env, headers) {
   if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain) || !validWalletAddress(address) || start === null || limit === null || limit < 1) {
     return Response.json({ error: 'Réseau, adresse ou pagination protocolaire invalide.' }, { status: 400, headers: noStore });
   }
+  if (path.startsWith('/api/alkanes/') && chain !== 'BITCOIN_MAINNET') {
+    return Response.json({ error: 'Alkanes indexing is supported only on Bitcoin mainnet.', code: 'ALKANES_CHAIN_UNSUPPORTED' }, { status: 400, headers: noStore });
+  }
   if (path === '/api/alkanes/utxo-list' && !validAlkaneId(alkaneid)) {
     return Response.json({ error: 'Identifiant Alkane invalide.' }, { status: 400, headers: noStore });
   }
