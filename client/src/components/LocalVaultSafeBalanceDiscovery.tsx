@@ -16,6 +16,8 @@ type ScanRow = {
   unavailableUtxos: number | null;
   availableSats: number | null;
   unavailableSats: number | null;
+  scannedUtxos?: number;
+  scanTotalUtxos?: number;
   summaryError?: string;
   balanceError?: string;
   safeError?: string;
@@ -90,6 +92,12 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
           const safe = await getSpendableUtxos(network, address, 1, {
             collectAll: true,
             allowInsufficientSafeBalance: true,
+            onProgress: scan => {
+              row = { ...row, scannedUtxos: scan.scannedCount, scanTotalUtxos: scan.totalCount };
+              results[results.length - 1] = row;
+              setRows([...results]);
+              setProgress(`${label} · UTXO disponibles ${scan.scannedCount.toLocaleString("fr-FR")}/${scan.totalCount.toLocaleString("fr-FR")}`);
+            },
           });
           row = {
             ...row,
@@ -132,7 +140,7 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
         {busy ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} {busy ? `Analyse ${progress || "…"}` : "Scanner les 4 adresses"}
       </button>
     </div>
-    <p className="mt-2 font-mono text-[9px] leading-4 text-[#718092]">BTC/FB · Legacy, Nested SegWit, Native SegWit, Taproot. Scan séquentiel pour respecter le quota du Worker. La pagination suit le total annoncé par UniSat (curseur maximal : 1 000 000 sorties). Inscriptions, Runes, Alkanes, poussières et sorties non vérifiées restent exclues des sats sûrs.</p>
+    <p className="mt-2 font-mono text-[9px] leading-4 text-[#718092]">BTC/FB · Legacy, Nested SegWit, Native SegWit, Taproot. Scan séquentiel et paginé jusqu’au total annoncé par UniSat (curseur maximal : 1 000 000 sorties). « Sûr vérifié » ne compte que les UTXO confirmés sans actifs; il peut donc être inférieur au nombre parcouru.</p>
     {busy && progress && <p className="mt-2 font-mono text-[9px] leading-4 text-[#f2bd63]" role="status" aria-live="polite">{progress}</p>}
     {notice && <p className="mt-2 font-mono text-[9px] leading-4 text-[#9ea7b3]" role="status">{notice}</p>}
     {rows && <div className="mt-3 space-y-2">
@@ -145,10 +153,11 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
           </div>
           <div className="mt-2 grid gap-1 sm:grid-cols-2">
             <p className="font-mono text-[9px] text-[#9ea7b3]">UTXO indexés : {row.totalUtxos === null ? "—" : row.totalUtxos} · disponibles UniSat : {row.availableUtxos === null ? "—" : row.availableUtxos} · indisponibles : {row.unavailableUtxos === null ? "—" : row.unavailableUtxos}</p>
+            <p className="font-mono text-[9px] text-[#9ea7b3]">UTXO disponibles parcourus : {row.scannedUtxos === undefined ? "—" : `${row.scannedUtxos.toLocaleString("fr-FR")} / ${row.scanTotalUtxos?.toLocaleString("fr-FR")}`}</p>
             <p className="font-mono text-[9px] text-[#9ea7b3]">Sats disponibles UniSat : {row.availableSats === null ? "—" : `${row.availableSats.toLocaleString("fr-FR")} sats`} · indisponibles : {row.unavailableSats === null ? "—" : `${row.unavailableSats.toLocaleString("fr-FR")} sats`}</p>
             <p className="font-mono text-[9px] text-[#9ea7b3]">Confirmé : {row.confirmedSats === null ? "—" : `${row.confirmedSats.toLocaleString("fr-FR")} sats`}</p>
             <p className="font-mono text-[9px] text-[#9ea7b3]">Mempool : {row.pendingSats === null ? "—" : `${row.pendingSats.toLocaleString("fr-FR")} sats`}</p>
-            <p className="font-mono text-[9px] text-[#9fe0bd]">Sûr vérifié : {row.safeSats === null ? "—" : `${row.safeSats.toLocaleString("fr-FR")} sats · ${row.safeUtxos} UTXO`}</p>
+            <p className="font-mono text-[9px] text-[#9fe0bd]">Sûrs vérifiés (sous-ensemble) : {row.safeSats === null ? "—" : `${row.safeSats.toLocaleString("fr-FR")} sats · ${row.safeUtxos} UTXO`}</p>
           </div>
           <p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#718092]">{row.address || "Adresse absente"}</p>
           {row.summaryError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Résumé UTXO : {row.summaryError}</p>}
