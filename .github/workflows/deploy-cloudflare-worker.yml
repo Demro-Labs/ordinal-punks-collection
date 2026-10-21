@@ -55,6 +55,12 @@ jobs:
       - name: Run client unit tests
         run: pnpm exec vitest run client/src/lib
 
+      - name: Run Local Vault UTXO safety tests
+        run: pnpm exec vitest run client/src/lib/protocol-utxo-safety.test.ts
+
+      - name: Build desktop Local Vault extension
+        run: pnpm run build:extension
+
       - name: Check shared Worker syntax
         run: node --check workers/fractal-ordinal-live.js
 
