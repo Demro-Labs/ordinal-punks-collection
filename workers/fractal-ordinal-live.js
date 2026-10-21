@@ -1806,9 +1806,9 @@ export default {
       const normalizeTransferable = rawDetail => {
         if (!Array.isArray(rawDetail)) throw new Error('Invalid UniSat transferable inscription list');
         return rawDetail.map(item => {
-          if (typeof item?.inscriptionId !== 'string' || !/^[a-f0-9]{64}i\\d+$/i.test(item.inscriptionId) ||
-              typeof item?.data?.amt !== 'string' || !/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(item.data.amt) ||
-              item.data.amt === '0' || /^0+\\.0+$/.test(item.data.amt)) throw new Error('Invalid UniSat transferable inscription item');
+          if (typeof item?.inscriptionId !== 'string' || !/^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId) ||
+              typeof item?.data?.amt !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(item.data.amt) ||
+              item.data.amt === '0' || /^0+\.0+$/.test(item.data.amt)) throw new Error('Invalid UniSat transferable inscription item');
           return { inscriptionId: item.inscriptionId.toLowerCase(), amount: item.data.amt };
         });
       };
