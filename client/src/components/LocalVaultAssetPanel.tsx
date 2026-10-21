@@ -99,6 +99,19 @@ export function LocalVaultAssetPanel({
     finally { setBusy(false); }
   }
   return <section className="mt-4 border border-[#70c7a0]/35 bg-[#101a16] p-3 sm:p-4" aria-labelledby="local-vault-assets-title">
+      <div className="mt-4 grid gap-3 md:grid-cols-2" aria-label="Parcours de transfert Local Vault">
+        <article className="border border-[#70c7a0]/40 bg-[#0b0f13] p-3">
+          <p className="font-mono text-[9px] uppercase tracking-[.14em] text-[#9fe0bd]">Parcours A · Actif existant</p>
+          <h3 className="mt-1 font-display text-base text-[#f3efe5]">Sélectionner puis envoyer</h3>
+          <p className="mt-1 font-mono text-[10px] leading-5 text-[#9ea7b3]">Pour BTC/FB, Ordinals, une inscription BRC-20 TRANSFER déjà créée et Runes : sélectionner l’actif, prouver la propriété si nécessaire, contrôler les entrées/sorties et frais, signer localement, puis confirmer séparément la diffusion.</p>
+        </article>
+        <article className="border border-[#d99a54]/40 bg-[#0b0f13] p-3">
+          <p className="font-mono text-[9px] uppercase tracking-[.14em] text-[#f2bd63]">Parcours B · Préparer puis envoyer</p>
+          <h3 className="mt-1 font-display text-base text-[#f3efe5]">Deux étapes si le protocole l’exige</h3>
+          <p className="mt-1 font-mono text-[10px] leading-5 text-[#9ea7b3]">Pour BRC-20 classique : préparer et payer la création de l’inscription TRANSFER, vérifier qu’elle est indexée, puis effectuer une seconde revue, signature locale et diffusion vers le destinataire. Pour BTC/FB et Runes, la préparation construit la transaction propre au protocole, sans inventer d’inscription TRANSFER.</p>
+        </article>
+        <p className="md:col-span-2 border border-[#a45e54]/40 p-2 font-mono text-[9px] leading-4 text-[#e6a69b]">BRC20-Prog et Alkanes restent bloqués dans le Local Vault tant que leurs constructeurs dédiés et validations indépendantes ne sont pas disponibles. Ne pas utiliser un signataire générique. Les UTXO contenant une inscription, Rune ou Alkane ne doivent jamais payer les frais.</p>
+      </div>
     <LocalVaultBrc20TransferPanel wallet={wallet} network={network} addressType={addressType} site={site} completedInscriptionId={brc20CompletedId} onCreated={(inscriptionId, target) => {
       void (async () => {
         // The order API can reveal the inscription before the address indexer lists it.
