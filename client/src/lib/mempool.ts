@@ -70,8 +70,9 @@ export async function getMempoolRawTransaction(network: string, txid: string) {
   const config = getMempoolConfig(network);
   if (!config) throw new Error("No Mempool endpoint is configured for this network.");
   if (!/^[a-f0-9]{64}$/i.test(txid)) throw new Error("The previous transaction id is invalid.");
-  const query = new URLSearchParams({ chain: network, txid });
-  return requestText(`${LIVE_DATA_API_BASE}/api/mempool/tx-hex?${query}`);
+  // Use the chain-specific Mempool API for the parent transaction hex.
+  // Safe UTXO selection still comes from the Worker/UniSat asset-aware index.
+  return requestText(config.api + "/api/tx/" + encodeURIComponent(txid) + "/hex");
 }
 
 export type FeeEstimateSource = { feeRate: number | null; available: boolean };
@@ -105,7 +106,8 @@ export async function getRecommendedFeeEstimate(network: string): Promise<FeeEst
     workerFailure = error instanceof Error ? error.message : "The fee Worker is temporarily unavailable.";
   }
   try {
-    const direct = await requestJson<{ halfHourFee?: number; fastestFee?: number; hourFee?: number; economyFee?: number; minimumFee?: number }>(`${LIVE_DATA_API_BASE}/api/mempool/fees?chain=${encodeURIComponent(network)}`);
+    // Direct, chain-specific Mempool fallback; never reuse stale fee estimates.
+    const direct = await requestJson<{ halfHourFee?: number; fastestFee?: number; hourFee?: number; economyFee?: number; minimumFee?: number }>(config.api + "/api/v1/fees/recommended");
     // A present but invalid preferred field must not mask a valid fallback rate.
     const rawRate = [direct.halfHourFee, direct.fastestFee, direct.hourFee, direct.economyFee, direct.minimumFee]
       .find(value => value !== undefined && Number.isFinite(Number(value)) && Number(value) >= 1 && Number(value) <= 10_000);
@@ -494,10 +496,12 @@ export async function trackMempoolTransaction(txid: string, network: string, onU
   emit("checking", "Searching for the transaction in Mempool…");
   for (let attempt = 0; attempt < 180; attempt += 1) {
     try {
-      const query = new URLSearchParams({ chain: network, txid });
-      const status = await requestJson<{ confirmed?: boolean; block_height?: number }>(`${LIVE_DATA_API_BASE}/api/mempool/tx-status?${query}`, 10_000);
-      if (status.confirmed) return emit("confirmed", "Transaction confirmed on-chain.", typeof status.block_height === "number" ? status.block_height : null);
-      emit("pending", "Transaction visible dans le mempool, en attente de confirmation.");
+      // Read the transaction from the selected network Mempool API.
+      // A missing transaction is not reported as pending; it is retried below.
+      const tx = await requestJson<{ status?: { confirmed?: boolean; block_height?: number } }>(config.api + "/api/tx/" + encodeURIComponent(txid), 10_000);
+      if (tx.status?.confirmed) return emit("confirmed", "Transaction confirmée sur la chaîne.", typeof tx.status.block_height === "number" ? tx.status.block_height : null);
+      if (tx.status && tx.status.confirmed === false) emit("pending", "Transaction visible dans le mempool du réseau sélectionné, en attente de confirmation.");
+      else throw new Error("Mempool n’a pas fourni un statut de transaction vérifiable.");
     } catch (error) {
       emit("error", error instanceof Error ? `${error.message}. Nouvelle tentative automatique.` : "Mempool est temporairement indisponible. Nouvelle tentative automatique.");
     }
