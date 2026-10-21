@@ -2116,8 +2116,9 @@ test('Worker retries a complete UTXO confirmation scan once when the available i
   let cursor25Calls = 0;
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
-    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer bitcoin-test-only');
     if (url.pathname.endsWith('/available-utxo-data')) {
+      assert.equal(url.origin, 'https://open-api.unisat.io');
       const cursor = Number(url.searchParams.get('cursor'));
       cursors.push(cursor);
       if (cursor === 25) cursor25Calls += 1;
@@ -2137,8 +2138,8 @@ test('Worker retries a complete UTXO confirmation scan once when the available i
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
-    const body = JSON.stringify({ chain: 'fractal', address, minimumSats: 40000, utxos: [{ txid: candidate.txid, vout: 0, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk }] });
-    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.242', body }), { UNISAT_API_KEY: 'test-only' });
+    const body = JSON.stringify({ chain: 'bitcoin', address, minimumSats: 40000, utxos: [{ txid: candidate.txid, vout: 0, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk }] });
+    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.242', body }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
     const data = await response.json();
     assert.equal(response.status, 200, JSON.stringify(data));
     assert.equal(data.sufficient, true);
