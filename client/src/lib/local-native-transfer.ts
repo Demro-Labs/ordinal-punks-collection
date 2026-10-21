@@ -5,6 +5,11 @@ import type { AddressType, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wall
 import { getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress, type SpendableUtxo } from "@/lib/mempool";
 import { parseFbAmountToSats } from "@/lib/native-fb-send";
 
+// Ensure bitcoinjs-lib and ECC adapters see the same browser Buffer implementation
+// even when this transfer builder is imported without the PSBT signer module.
+const globalWithBuffer = globalThis as typeof globalThis & { Buffer?: typeof Buffer };
+if (!globalWithBuffer.Buffer) globalWithBuffer.Buffer = Buffer;
+
 const MAX_INPUTS = 20;
 const DUST_SATS = 546;
 const MAX_FEE_RATE = 1_000;

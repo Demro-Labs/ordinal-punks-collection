@@ -29,6 +29,9 @@ async function requestJson<T>(url: string, timeoutMs = 8_000, init?: RequestInit
     if (!response.ok) {
       if (new URL(url).origin === new URL(LIVE_DATA_API_BASE).origin) {
         const failure = await response.json().catch(() => null) as { error?: unknown; code?: unknown } | null;
+        if (failure?.code === "UTXO_CONFIRM_NOT_IN_AVAILABLE_SET") {
+          throw new Error("UTXO_CONFIRM_NOT_IN_AVAILABLE_SET: une ou plusieurs entrées ne figurent plus dans l’ensemble UTXO disponibles et sûrs du réseau. Actualisez les UTXO, reconstruisez le PSBT avec les sorties actuellement disponibles, puis recommencez l’examen. La vérification n’a pas été contournée et aucune transaction ne doit être diffusée.");
+        }
         const message = typeof failure?.error === "string" ? failure.error : `Live API HTTP ${response.status}`;
         const code = typeof failure?.code === "string" && /^[A-Z0-9_]{1,80}$/.test(failure.code) ? ` [${failure.code}]` : "";
         throw new Error(`${message}${code}`);
