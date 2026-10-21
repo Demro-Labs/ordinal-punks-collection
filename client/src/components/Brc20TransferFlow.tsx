@@ -49,7 +49,8 @@ type OrderStatus = {
 };
 type SiteName = "punks" | "pokedex";
 type Brc20Kind = "classic" | "prog";
-type BusyAction = "" | "preparing" | "paying" | "waiting" | "checking-recipient" | "sending";
+type BusyAction = "" | "scanning" | "preparing" | "paying" | "waiting" | "checking-recipient" | "sending";
+type ScannedBrc20Inscription = { inscriptionId: string; location?: string; ticker: string; amount: string };
 type MobilePsbtReview = { plan: OrdinalTransferPlan; recipient: string; inscriptionId: string; networkLabel: string; feeSourceLabel: string };
 type MobilePsbtReviewResolver = { resolve: (result: boolean | string) => void; reject: (cause: unknown) => void };
 const API_BASE = (
@@ -126,6 +127,8 @@ export function Brc20TransferFlow({
   const mobilePsbtSignerRef = useRef<((plan: OrdinalTransferPlan) => Promise<string>) | null>(null);
   const [busyAction, setBusyAction] = useState<BusyAction>("");
   const [message, setMessage] = useState("");
+  const [scannedInscriptions, setScannedInscriptions] = useState<ScannedBrc20Inscription[]>([]);
+  const [selectedInscriptionId, setSelectedInscriptionId] = useState("");
   const [feeRate, setFeeRate] = useState(initialProgress?.feeRate || 1);
   const [paymentPreflight, setPaymentPreflight] = useState<{ orderId: string; expiresAt: number } | null>(null);
   const [transferFeePreflight, setTransferFeePreflight] = useState<{ inscriptionId: string; recipient: string; expiresAt: number } | null>(null);
@@ -231,6 +234,93 @@ export function Brc20TransferFlow({
     setOwnershipProofVersion(value => value + 1);
     setTransferFeePreflight(null);
   }, [ownershipContextKey]);
+
+  const scanBrc20Inscriptions = async () => {
+    const provider = wallet();
+    if (!provider?.getInscriptions) { setMessage("UniSat ne fournit pas getInscriptions. Mettez le portefeuille à jour."); return; }
+    setBusyAction("scanning");
+    setMessage("Scan des inscriptions UniSat en cours…");
+    setScannedInscriptions([]);
+    setSelectedInscriptionId("");
+    try {
+      const all: Array<{ inscriptionId?: string; location?: string }> = [];
+      const pageSize = 100;
+      let total = 0;
+      for (let cursor = 0; cursor < 200_000; cursor += pageSize) {
+        const page = await provider.getInscriptions(cursor, pageSize);
+        if (!page || !Number.isSafeInteger(page.total) || !Array.isArray(page.list) || page.list.length > pageSize) {
+          throw new Error("Réponse UniSat invalide; le scan est arrêté sans effectuer de transfert.");
+        }
+        total = page.total;
+        all.push(...page.list);
+        if (all.length >= total || page.list.length === 0) break;
+      }
+      if (all.length < total) throw new Error("Le scan n’a pas parcouru toutes les inscriptions du wallet. Aucun transfert n’a été effectué.");
+      const ids = all.filter(item => typeof item.inscriptionId === "string" && /^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId));
+      const base = network === "BITCOIN_MAINNET" ? "https://ordinals.com" : "https://fractal.ordinals.com";
+      const found: ScannedBrc20Inscription[] = [];
+      for (let start = 0; start < ids.length; start += 5) {
+        const batch = ids.slice(start, start + 5);
+        const parsed = await Promise.all(batch.map(async item => {
+          try {
+            const response = await fetch(`${base}/content/${encodeURIComponent(item.inscriptionId!)}`, { cache: "no-store" });
+            if (!response.ok) return null;
+            const payload = await response.text();
+            if (payload.length > 16_384) return null;
+            const json = JSON.parse(payload) as { p?: unknown; op?: unknown; tick?: unknown; amt?: unknown };
+            if (String(json.p).toLowerCase() !== "brc-20" || String(json.op).toLowerCase() !== "transfer" ||
+              String(json.tick).toLowerCase() !== ticker.toLowerCase() || typeof json.amt !== "string" && typeof json.amt !== "number") return null;
+            const tokenAmount = String(json.amt);
+            if (!validDecimal(tokenAmount)) return null;
+            return { inscriptionId: item.inscriptionId!, location: item.location, ticker: String(json.tick), amount: tokenAmount } as ScannedBrc20Inscription;
+          } catch { return null; }
+        }));
+        found.push(...parsed.filter((item): item is ScannedBrc20Inscription => Boolean(item)));
+      }
+      setScannedInscriptions(found);
+      setMessage(found.length ? `${found.length} inscription(s) BRC-20 de transfert ${ticker} trouvée(s). Sélectionnez-en une avant l’envoi.` : `Aucune inscription de transfert BRC-20 ${ticker} trouvée. Vérifiez le réseau UniSat et l’indexeur d’inscriptions.`);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Échec du scan des inscriptions BRC-20.");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const sendSelectedBrc20Inscription = async () => {
+    const provider = wallet();
+    const selected = scannedInscriptions.find(item => item.inscriptionId === selectedInscriptionId);
+    const target = recipient.trim();
+    if (!selected || !provider?.sendInscription) { setMessage("Sélectionnez une inscription BRC-20 et vérifiez que UniSat prend en charge sendInscription."); return; }
+    if (!target || !confirmed || validatedRecipient !== target || ownershipProofKey !== ownershipContextKey) {
+      setMessage("Confirmez le destinataire et le montant, vérifiez l’adresse et terminez la preuve de propriété UniSat avant le transfert.");
+      return;
+    }
+    setBusyAction("sending");
+    setMessage("Vérification du réseau et de l’adresse avant la demande de transfert UniSat…");
+    try {
+      await validateMempoolAddress(network, target);
+      const currentAccounts = await provider.getAccounts?.();
+      if (!currentAccounts?.includes(address)) throw new Error("L’adresse active du wallet a changé. Reconnectez UniSat et recommencez.");
+      const chain = await provider.getChain?.();
+      const expectedChain = network === "BITCOIN_MAINNET" ? "BITCOIN_MAINNET" : "FRACTAL_BITCOIN_MAINNET";
+      if (chain?.enum && chain.enum !== expectedChain) throw new Error("Le réseau UniSat ne correspond pas au réseau sélectionné. Aucun transfert demandé.");
+      // A separate explicit user click requests the transfer in UniSat; this does not create or pay for a new inscription.
+      const result = await provider.sendInscription(target, selected.inscriptionId, { feeRate });
+      const txid = txidOf(result);
+      if (!/^[a-f0-9]{64}$/i.test(txid)) throw new Error("UniSat n’a pas renvoyé de TXID valide. Vérifiez UniSat et le mempool avant toute nouvelle tentative.");
+      setMessage(`Inscription BRC-20 ${selected.ticker} (${selected.amount}) envoyée. TXID : ${txid}`);
+      setSelectedInscriptionId("");
+      setConfirmed(false);
+      setValidatedRecipient("");
+      setOwnershipProofKey(null);
+      setScannedInscriptions(items => items.filter(item => item.inscriptionId !== selected.inscriptionId));
+      onDone();
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "État du transfert incertain. Vérifiez UniSat et le mempool avant de réessayer.");
+    } finally {
+      setBusyAction("");
+    }
+  };
 
   const pollOrder = async (id: string) => {
     for (let attempt = 0; attempt < 60; attempt += 1) {
@@ -678,6 +768,36 @@ export function Brc20TransferFlow({
       <p className="mt-1 font-mono text-[9px] leading-5 text-[#718092]">
         Réseau : {chainLabel} · disponible : <strong className="text-[#70c7a0]">{amount}</strong>. Saisissez le montant exact à transférer. Le montant inscrit dans le reçu sera celui créé puis envoyé ; aucune valeur maximale n’est sélectionnée automatiquement.
       </p>
+      <section className="mt-3 border border-[#d99a54]/50 bg-[#0b0d10] p-3" aria-label="Scanner les inscriptions BRC-20">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#f2bd63]">Inscriptions BRC-20 détenues · {ticker}</p>
+            <p className="mt-1 font-mono text-[9px] leading-4 text-[#718092]">Scanne le portefeuille UniSat sur {chainLabel}, filtre les inscriptions « transfer » du ticker sélectionné et permet de choisir celle à envoyer.</p>
+          </div>
+          <button type="button" onClick={() => void scanBrc20Inscriptions()} disabled={Boolean(busyAction)}
+            className="inline-flex min-h-10 items-center gap-2 border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] disabled:opacity-40">
+            {busyAction === "scanning" ? <><Loader2 size={13} className="animate-spin" /> Scan…</> : "Scanner les inscriptions"}
+          </button>
+        </div>
+        {scannedInscriptions.length > 0 && (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full border-collapse text-left font-mono text-[9px]">
+              <thead><tr className="border-b border-[#3b434d] text-[#718092]"><th className="p-2">Choisir</th><th className="p-2">Ticker</th><th className="p-2">Montant</th><th className="p-2">Inscription ID</th></tr></thead>
+              <tbody>
+                {scannedInscriptions.map(item => (
+                  <tr key={item.inscriptionId} className={selectedInscriptionId === item.inscriptionId ? "border-b border-[#d99a54] bg-[#d99a54]/10" : "border-b border-[#3b434d]"}>
+                    <td className="p-2"><input aria-label={`Sélectionner ${item.ticker} ${item.amount}`} type="radio" name={`brc20-inscription-${site}-${network}`} checked={selectedInscriptionId === item.inscriptionId} onChange={() => { setSelectedInscriptionId(item.inscriptionId); setAmountToTransfer(item.amount); setConfirmed(false); setValidatedRecipient(""); setOwnershipProofKey(null); }} /></td>
+                    <td className="p-2 text-[#f2bd63]">{item.ticker}</td><td className="p-2">{item.amount}</td><td className="max-w-[16rem] break-all p-2 text-[#9ea7b3]">{item.inscriptionId}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {selectedInscriptionId && (
+          <p className="mt-2 break-all font-mono text-[9px] text-[#70c7a0]">Inscription sélectionnée : {selectedInscriptionId}. L’envoi utilisera uniquement cette inscription ; les frais du transfert seront approuvés séparément dans UniSat.</p>
+        )}
+      </section>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <input
           value={recipient}
@@ -706,7 +826,7 @@ export function Brc20TransferFlow({
           </span>
         </label>
       </div>
-      {progress && progress.inscriptionId && validatedRecipient !== recipient.trim() && recipient.trim() && (
+      {(progress?.inscriptionId || selectedInscriptionId) && validatedRecipient !== recipient.trim() && recipient.trim() && (
         <button
           type="button"
           onClick={() => void validateChangedRecipient()}
@@ -741,6 +861,13 @@ export function Brc20TransferFlow({
         />
       )}
 
+      {selectedInscriptionId && !progress && (
+        <button type="button" onClick={() => void sendSelectedBrc20Inscription()}
+          disabled={Boolean(busyAction) || !confirmed || !recipient.trim() || validatedRecipient !== recipient.trim() || ownershipProofKey !== ownershipContextKey}
+          className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
+          {busyAction === "sending" ? <><Loader2 size={13} className="animate-spin" /> Envoi en cours…</> : <><Send size={13} /> Transférer l’inscription sélectionnée avec UniSat</>}
+        </button>
+      )}
       {progress && !progress.paymentStarted && !progress.paymentTxid && !progress.inscriptionId && (
         <div className="mt-3 border border-[#d99a54]/60 bg-[#0b0d10] p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]" aria-label="Reçu de paiement BRC-20">
           <p className="mb-1 uppercase tracking-[0.12em] text-[#f2bd63]">Reçu à vérifier avant paiement</p>
