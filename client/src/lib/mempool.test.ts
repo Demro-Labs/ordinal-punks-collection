@@ -1,6 +1,6 @@
 import { LIVE_DATA_API_BASE } from "@/lib/live";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { confirmFractalSpendableUtxos, confirmSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, InsufficientSafeUtxosError, minimumSpendableSatsForScript, trackMempoolTransaction, validateMempoolAddress } from "./mempool";
+import { confirmFractalSpendableUtxos, confirmSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, InsufficientSafeUtxosError, minimumSpendableSatsForScript, scanAddressUtxoInventory, trackMempoolTransaction, validateMempoolAddress } from "./mempool";
 
 const ADDRESS = "bc1qtestaddress0000000000000000000000000";
 
@@ -17,6 +17,20 @@ function makeSafeUtxo(overrides: Record<string, unknown> = {}) {
     isOpInRBF: true,
     inscriptions: [],
     ...overrides,
+  };
+}
+
+function makeIndexedAddressUtxo(index: number) {
+  return {
+    txid: index.toString(16).padStart(64, "0"),
+    vout: 0,
+    satoshi: 600,
+    scriptPk: `0014${"11".repeat(20)}`,
+    height: 100,
+    inscriptions: [],
+    runes: null,
+    alkanes: null,
+    isSpent: false,
   };
 }
 
@@ -389,5 +403,41 @@ describe("Mempool fee fallback and Legacy transaction routing", () => {
     installWindowAndFetch(fetchMock as typeof fetch);
     await expect(getMempoolRawTransaction("UNKNOWN_NETWORK", "c".repeat(64))).rejects.toThrow(/No Mempool endpoint/i);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("scanAddressUtxoInventory", () => {
+  it("parcourt les 500 UTXO totaux sur toutes les pages séparément du set safe", async () => {
+    const cursors: number[] = [];
+    const progress: Array<{ scannedCount: number; totalCount: number }> = [];
+    installWindowAndFetch((async input => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/api/address-utxos");
+      expect(url.searchParams.get("size")).toBe("25");
+      const cursor = Number(url.searchParams.get("cursor"));
+      cursors.push(cursor);
+      const scannedCount = Math.min(25, 500 - cursor);
+      const utxo = Array.from({ length: scannedCount }, (_, index) => makeIndexedAddressUtxo(cursor + index));
+      return Response.json({ chain: "fractal", address: ADDRESS, cursor, nextCursor: cursor + scannedCount, total: 500, scannedCount, utxo });
+    }) as typeof fetch);
+
+    const result = await scanAddressUtxoInventory("FRACTAL_BITCOIN_MAINNET", ADDRESS, { onProgress: page => progress.push(page) });
+
+    expect(cursors).toHaveLength(20);
+    expect(cursors[0]).toBe(0);
+    expect(cursors.at(-1)).toBe(475);
+    expect(progress).toHaveLength(20);
+    expect(progress.at(-1)).toEqual({ scannedCount: 500, totalCount: 500 });
+    expect(result).toEqual({ scannedCount: 500, totalCount: 500 });
+  });
+
+  it("refuse un inventaire si une page ne contient pas toutes les lignes annoncées", async () => {
+    installWindowAndFetch(async () => Response.json({
+      chain: "fractal", address: ADDRESS, cursor: 0, nextCursor: 1, total: 1, scannedCount: 1, utxo: [],
+    }));
+
+    await expect(scanAddressUtxoInventory("FRACTAL_BITCOIN_MAINNET", ADDRESS))
+      .rejects.toThrow(/page d’inventaire UTXO cohérente/i);
   });
 });

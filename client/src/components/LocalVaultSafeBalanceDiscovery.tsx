@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Check, Copy, Loader2, Search, Wallet } from "lucide-react";
-import { getSpendableUtxos, getUtxoBalanceSummary } from "@/lib/mempool";
+import { getSpendableUtxos, getUtxoBalanceSummary, scanAddressUtxoInventory } from "@/lib/mempool";
 import { ADDRESS_SPECS, fetchAddressBalance, type AddressType, type OrdiNetwork, type OrdiWalletRecord } from "@/lib/ordi-wallet";
 
 type ScanRow = {
@@ -16,15 +16,23 @@ type ScanRow = {
   unavailableUtxos: number | null;
   availableSats: number | null;
   unavailableSats: number | null;
+  inventoryScannedUtxos?: number;
+  inventoryTotalUtxos?: number;
   scannedUtxos?: number;
   scanTotalUtxos?: number;
   summaryError?: string;
   balanceError?: string;
+  inventoryError?: string;
   safeError?: string;
+  consistencyError?: string;
 };
 
 function errorMessage(reason: unknown, fallback: string) {
   return reason instanceof Error ? reason.message : fallback;
+}
+
+function addConsistencyWarning(row: ScanRow, message: string): ScanRow {
+  return { ...row, consistencyError: row.consistencyError ? `${row.consistencyError} ${message}` : message };
 }
 
 export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddressType, onSelectAddressType }: {
@@ -56,7 +64,7 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
             type: spec.type, address, confirmedSats: null, pendingSats: null, totalSats: null,
             safeSats: null, safeUtxos: null, totalUtxos: null, availableUtxos: null,
             unavailableUtxos: null, availableSats: null, unavailableSats: null,
-            balanceError: "Adresse absente du coffre.", safeError: "Adresse absente du coffre.",
+            balanceError: "Adresse absente du coffre.", inventoryError: "Adresse absente du coffre.", safeError: "Adresse absente du coffre.",
           });
           setRows([...results]);
           continue;
@@ -87,6 +95,26 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
         results.push(row);
         setRows([...results]);
 
+        setProgress(`${label} · inventaire complet`);
+        try {
+          const inventory = await scanAddressUtxoInventory(network, address, {
+            onProgress: scan => {
+              row = { ...row, inventoryScannedUtxos: scan.scannedCount, inventoryTotalUtxos: scan.totalCount };
+              results[results.length - 1] = row;
+              setRows([...results]);
+              setProgress(`${label} · inventaire ${scan.scannedCount.toLocaleString("fr-FR")}/${scan.totalCount.toLocaleString("fr-FR")}`);
+            },
+          });
+          row = { ...row, inventoryScannedUtxos: inventory.scannedCount, inventoryTotalUtxos: inventory.totalCount };
+          if (summaryResult.status === "fulfilled" && inventory.totalCount !== summaryResult.value.totalUtxoCount) {
+            row = addConsistencyWarning(row, `Le résumé UniSat annonce ${summaryResult.value.totalUtxoCount} UTXO, mais l’inventaire complet en confirme ${inventory.totalCount}.`);
+          }
+        } catch (error) {
+          row = { ...row, inventoryError: errorMessage(error, "Inventaire complet UTXO indisponible.") };
+        }
+        results[results.length - 1] = row;
+        setRows([...results]);
+
         setProgress(`${label} · UTXO sûrs`);
         try {
           const safe = await getSpendableUtxos(network, address, 1, {
@@ -99,21 +127,21 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
               setProgress(`${label} · UTXO disponibles ${scan.scannedCount.toLocaleString("fr-FR")}/${scan.totalCount.toLocaleString("fr-FR")}`);
             },
           });
-          row = {
-            ...row,
-            safeSats: safe.reduce((sum, item) => sum + item.satoshi, 0),
-            safeUtxos: safe.length,
-          };
+          const safeSats = safe.reduce((sum, item) => sum + item.satoshi, 0);
+          row = { ...row, safeSats, safeUtxos: safe.length };
+          if (summaryResult.status === "fulfilled" && (safe.length !== summaryResult.value.availableUtxoCount || safeSats !== summaryResult.value.availableBalance)) {
+            row = addConsistencyWarning(row, `UniSat annonce ${summaryResult.value.availableUtxoCount} UTXO disponibles (${summaryResult.value.availableBalance.toLocaleString("fr-FR")} sats), mais la validation stricte confirme ${safe.length} (${safeSats.toLocaleString("fr-FR")} sats).`);
+          }
         } catch (error) {
           row = { ...row, safeError: errorMessage(error, "Scan UTXO sûr indisponible.") };
         }
         results[results.length - 1] = row;
         setRows([...results]);
       }
-      if (results.some(row => row.balanceError || row.safeError || row.summaryError)) {
+      if (results.some(row => row.balanceError || row.safeError || row.summaryError || row.inventoryError || row.consistencyError)) {
         setNotice("Scan terminé avec erreurs signalées par adresse. Une erreur d’indexeur n’est pas affichée comme un solde zéro.");
       } else {
-        setNotice("Scan terminé pour les quatre adresses. Les soldes confirmés, mempool et sûrs sont séparés; les sorties d’actifs restent protégées.");
+        setNotice("Scan terminé pour les quatre adresses. L’inventaire complet et les UTXO disponibles pour frais sont vérifiés séparément; les sorties exclues restent hors du solde sûr.");
       }
     } catch (error) {
       setNotice(`Scan interrompu : ${errorMessage(error, "erreur inattendue")}. Les lignes déjà terminées restent affichées.`);
@@ -140,7 +168,7 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
         {busy ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} {busy ? `Analyse ${progress || "…"}` : "Scanner les 4 adresses"}
       </button>
     </div>
-    <p className="mt-2 font-mono text-[9px] leading-4 text-[#718092]">BTC/FB · Legacy, Nested SegWit, Native SegWit, Taproot. Scan séquentiel et paginé jusqu’au total annoncé par UniSat (curseur maximal : 1 000 000 sorties). « Sûr vérifié » ne compte que les UTXO confirmés sans actifs; il peut donc être inférieur au nombre parcouru.</p>
+    <p className="mt-2 font-mono text-[9px] leading-4 text-[#718092]">BTC/FB · Legacy, Nested SegWit, Native SegWit, Taproot. Scan séquentiel et paginé de tout l’inventaire, puis vérification séparée des seuls UTXO UniSat disponibles pour frais. Le solde total peut inclure des sorties qui restent exclues du solde sûr.</p>
     {busy && progress && <p className="mt-2 font-mono text-[9px] leading-4 text-[#f2bd63]" role="status" aria-live="polite">{progress}</p>}
     {notice && <p className="mt-2 font-mono text-[9px] leading-4 text-[#9ea7b3]" role="status">{notice}</p>}
     {rows && <div className="mt-3 space-y-2">
@@ -153,16 +181,19 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
           </div>
           <div className="mt-2 grid gap-1 sm:grid-cols-2">
             <p className="font-mono text-[9px] text-[#9ea7b3]">UTXO indexés : {row.totalUtxos === null ? "—" : row.totalUtxos} · disponibles UniSat : {row.availableUtxos === null ? "—" : row.availableUtxos} · indisponibles : {row.unavailableUtxos === null ? "—" : row.unavailableUtxos}</p>
-            <p className="font-mono text-[9px] text-[#9ea7b3]">UTXO disponibles parcourus : {row.scannedUtxos === undefined ? "—" : `${row.scannedUtxos.toLocaleString("fr-FR")} / ${row.scanTotalUtxos?.toLocaleString("fr-FR")}`}</p>
+            <p className="font-mono text-[9px] text-[#9ea7b3]">Inventaire UTXO parcouru : {row.inventoryScannedUtxos === undefined ? "—" : `${row.inventoryScannedUtxos.toLocaleString("fr-FR")} / ${row.inventoryTotalUtxos?.toLocaleString("fr-FR")}`}</p>
+            <p className="font-mono text-[9px] text-[#9ea7b3]">UTXO disponibles UniSat vérifiés : {row.scannedUtxos === undefined ? "—" : `${row.scannedUtxos.toLocaleString("fr-FR")} / ${row.scanTotalUtxos?.toLocaleString("fr-FR")}`}</p>
             <p className="font-mono text-[9px] text-[#9ea7b3]">Sats disponibles UniSat : {row.availableSats === null ? "—" : `${row.availableSats.toLocaleString("fr-FR")} sats`} · indisponibles : {row.unavailableSats === null ? "—" : `${row.unavailableSats.toLocaleString("fr-FR")} sats`}</p>
             <p className="font-mono text-[9px] text-[#9ea7b3]">Confirmé : {row.confirmedSats === null ? "—" : `${row.confirmedSats.toLocaleString("fr-FR")} sats`}</p>
             <p className="font-mono text-[9px] text-[#9ea7b3]">Mempool : {row.pendingSats === null ? "—" : `${row.pendingSats.toLocaleString("fr-FR")} sats`}</p>
-            <p className="font-mono text-[9px] text-[#9fe0bd]">Sûrs vérifiés (sous-ensemble) : {row.safeSats === null ? "—" : `${row.safeSats.toLocaleString("fr-FR")} sats · ${row.safeUtxos} UTXO`}</p>
+            <p className="font-mono text-[9px] text-[#9fe0bd]">Sûrs vérifiés pour frais (sous-ensemble) : {row.safeSats === null ? "—" : `${row.safeSats.toLocaleString("fr-FR")} sats · ${row.safeUtxos} UTXO`}</p>
           </div>
           <p className="mt-1 break-all font-mono text-[9px] leading-4 text-[#718092]">{row.address || "Adresse absente"}</p>
           {row.summaryError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Résumé UTXO : {row.summaryError}</p>}
           {row.balanceError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Solde total : {row.balanceError}</p>}
+          {row.inventoryError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Inventaire UTXO : {row.inventoryError}</p>}
           {row.safeError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Scan UTXO sûr : {row.safeError}</p>}
+          {row.consistencyError && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]">Écart de vérification : {row.consistencyError}</p>}
           <div className="mt-2 flex flex-wrap gap-2">
             {row.address && <button type="button" onClick={() => void copyAddress(row.address)} className="inline-flex min-h-9 items-center gap-1 border border-[#3b434d] px-2 font-mono text-[9px] text-[#9ea7b3]">{copied === row.address ? <Check size={12} /> : <Copy size={12} />} Copier l’adresse</button>}
             {!row.balanceError && !row.safeError && onSelectAddressType && <button type="button" onClick={() => onSelectAddressType(row.type)} disabled={selectedAddressType === row.type} className="min-h-9 border border-[#d99a54]/70 px-2 font-mono text-[9px] text-[#f2bd63] disabled:opacity-40">{selectedAddressType === row.type ? "Adresse sélectionnée" : "Utiliser cette adresse"}</button>}
