@@ -88,10 +88,10 @@ describe("getSpendableUtxos", () => {
       });
     }) as typeof fetch);
     const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1_700, { onProgress: scan => progress.push(scan) });
-    expect(cursors).toHaveLength(21);
+    expect(cursors).toHaveLength(20);
     expect(cursors[0]).toBe(0);
-    expect(cursors.at(-1)).toBe(500);
-    expect(progress).toHaveLength(21);
+    expect(cursors.at(-1)).toBe(475);
+    expect(progress).toHaveLength(20);
     expect(progress.at(-1)).toEqual({ scannedCount: 500, totalCount: 500, safeUtxoCount: 1 });
     expect(result).toHaveLength(1);
     expect(result[0].satoshi).toBe(600_000);
@@ -437,10 +437,10 @@ describe("scanAddressUtxoInventory", () => {
 
     const result = await scanAddressUtxoInventory("FRACTAL_BITCOIN_MAINNET", ADDRESS, { onProgress: page => progress.push(page) });
 
-    expect(cursors).toHaveLength(20);
+    expect(cursors).toHaveLength(21);
     expect(cursors[0]).toBe(0);
-    expect(cursors.at(-1)).toBe(475);
-    expect(progress).toHaveLength(20);
+    expect(cursors.at(-1)).toBe(500);
+    expect(progress).toHaveLength(21);
     expect(progress.at(-1)).toEqual({ scannedCount: 525, totalCount: 525 });
     expect(result).toEqual({ scannedCount: 525, totalCount: 525 });
   });
