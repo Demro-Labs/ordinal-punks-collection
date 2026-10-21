@@ -66,7 +66,7 @@ export function LocalVaultRuneTransferPanel({ wallet, network, addressType, site
     finally { setBusy(false); }
   };
 
-  return <article className="min-w-0 border border-[#2c323a] bg-[#0b0f13] p-3">
+  return <article id="local-vault-runes" className="min-w-0 scroll-mt-6 border border-[#2c323a] bg-[#0b0f13] p-3">
     <div className="flex items-center gap-2 text-[#d7a9ff]"><ShieldCheck size={14}/><h3 className="font-mono text-[10px] uppercase">Parcours A · Runes · Local Vault PSBT</h3></div>
     <p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Runestone built and signed locally by Ordi Wallet. UniSat is not used as a wallet signer. The read-only indexer is used to verify Rune-bearing UTXOs; the vault refuses mixed Rune/Ordinal inputs and incomplete index data.</p>
     {loading && <p className="mt-2 font-mono text-[10px] text-[#718092]">Loading Rune balances…</p>}
