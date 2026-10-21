@@ -3,8 +3,8 @@ import { Loader2, RefreshCw, ShieldCheck, Wallet } from "lucide-react";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
 import { LocalVaultSafeBalanceDiscovery } from "@/components/LocalVaultSafeBalanceDiscovery";
 import { fetchProtocolBalances, type Brc20Balance } from "@/lib/protocol-balances";
-import { buildBrc20TransferInscription, isConsistentBrc20PaymentState } from "@/lib/brc20-transfer-flow";
-import { getRecommendedFeeEstimate } from "@/lib/mempool";
+import { buildBrc20TransferInscription, isConsistentBrc20PaymentState, isValidBrc20InscriptionId } from "@/lib/brc20-transfer-flow";
+import { getRecommendedFeeEstimate, validateMempoolAddress } from "@/lib/mempool";
 import { prepareLocalNativeTransfer } from "@/lib/local-native-transfer";
 import { broadcastLocalPsbt, finalizeLocalPsbt, reviewLocalPsbt, signLocalPsbt, type LocalPsbtReview } from "@/lib/local-psbt-signer";
 import type { AddressType, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
@@ -92,6 +92,9 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
     if (loading) { setError("Attendez la fin de l’actualisation des soldes avant de créer un ordre."); return; }
     setBusy(true); setError(""); setMessage("");
     try {
+      // Reject a malformed or wrong-network recipient before creating a paid order.
+      // Bitcoin and Fractal share address encodings, but the selected network is still bound below.
+      await validateMempoolAddress(network, recipient.trim());
       // Revalidate the protocol balance immediately before creating the inscription order.
       // A previously displayed balance is not authorization to spend a BRC-20 amount.
       const fresh = await fetchProtocolBalances(address, network);
@@ -177,7 +180,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
       const response = await fetch(API + "/api/inscribe/order?" + new URLSearchParams({ orderId: order.orderId, chain: network }), { cache: "no-store", headers: { Accept: "application/json" } });
       const data = await response.json().catch(() => null) as { status?: string; files?: Array<{ inscriptionId?: string }>; error?: string } | null;
       if (!response.ok || !data) throw new Error(data?.error || "Impossible de lire l’ordre.");
-      const id = data.files?.find(file => typeof file.inscriptionId === "string")?.inscriptionId || "";
+      const id = data.files?.find(file => isValidBrc20InscriptionId(file.inscriptionId))?.inscriptionId || "";
       if (!id) { setMessage("Inscription pas encore indexée (état: " + (data.status || "inconnu") + "). Aucun nouveau paiement n’a été envoyé; réessayez plus tard."); return; }
       const next = { ...order, inscriptionId: id }; saveOrder(next); setMessage("Inscription créée: " + id + ". Sélectionnez-la ci-dessous pour envoyer les jetons au destinataire."); onCreated(id, order.recipient);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Vérification de l’ordre échouée. Ne payez pas à nouveau."); }
