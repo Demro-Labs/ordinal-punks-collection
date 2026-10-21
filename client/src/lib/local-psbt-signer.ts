@@ -3,7 +3,6 @@ import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
 import type { AddressType, OrdiAddress, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
 import { confirmSpendableUtxos, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
-import { LIVE_DATA_API_BASE } from "@/lib/live";
 
 const globalWithBuffer = globalThis as typeof globalThis & { Buffer?: typeof Buffer };
 if (!globalWithBuffer.Buffer) globalWithBuffer.Buffer = Buffer;
