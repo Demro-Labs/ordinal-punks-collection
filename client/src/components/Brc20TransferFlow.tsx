@@ -134,7 +134,7 @@ export function Brc20TransferFlow({
     : "";
   const nextAction = getBrc20TransferNextAction(progress);
   const activeFeeRate = progress?.feeRate || feeRate;
-  const amountWithinBalance = Boolean(progress) || decimalCompare(amountToTransfer, amount) <= 0;
+  const amountWithinBalance = decimalCompare(progress?.amount ?? amountToTransfer, amount) <= 0;
 
   useEffect(() => () => {
     mobilePsbtReviewResolverRef.current?.resolve(false);
@@ -318,38 +318,54 @@ export function Brc20TransferFlow({
     }
   };
 
+  const checkPaymentUtxos = async () => {
+    const current = progressRef.current;
+    if (!current || getBrc20TransferNextAction(current) !== "pay") {
+      setMessage("Aucun reçu prêt à payer. Préparez d’abord le reçu de transfert.");
+      return;
+    }
+    if (!confirmed || !ownershipContextKey || ownershipProofKey !== ownershipContextKey || validatedRecipient !== recipient.trim()) {
+      setMessage("Confirmez le destinataire, vérifiez l’adresse et terminez la preuve de propriété avant de vérifier les UTXO.");
+      return;
+    }
+    setBusyAction("preparing");
+    setPaymentPreflight(null);
+    setMessage("Vérification des UTXO confirmés sans Ordinals, Runes ni Alkanes pour payer le reçu. Aucun paiement n’est envoyé à cette étape.");
+    try {
+      await ensureNativePaymentBalance(network, address, current.payAmount, current.feeRate, "inscribe-payment", { mobile: isMobileUniSatDevice() });
+      if (progressRef.current?.orderId !== current.orderId || progressRef.current.paymentTxid) {
+        throw new Error("Le reçu a changé pendant la vérification. Aucun paiement n’a été demandé.");
+      }
+      setPaymentPreflight({ orderId: current.orderId, expiresAt: Date.now() + 60_000 });
+      setMessage("UTXO vérifiés. Appuyez maintenant sur « Payer avec UniSat » dans les 60 secondes pour ouvrir l’approbation du portefeuille.");
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      setPaymentPreflight(null);
+      setMessage(`Paiement bloqué avant l’approbation UniSat. Aucun paiement n’a été envoyé. ${detail} Conservez ce reçu et ne créez pas de doublon. Après avoir ajouté un UTXO confirmé distinct sans Ordinals, Runes ni Alkanes, relancez la vérification. Outil UTXO UniSat : https://unisat.io/utxo`);
+    } finally {
+      setBusyAction("");
+    }
+  };
+
   const payForTransferInscription = () => {
     const provider = wallet();
     const current = progressRef.current;
-    if (!provider?.sendBitcoin) { setMessage("This UniSat version does not provide sendBitcoin."); return; }
-    if (!current || getBrc20TransferNextAction(current) !== "pay") { setMessage("No inscription payment is ready for approval."); return; }
+    if (!provider?.sendBitcoin) { setMessage("Cette version d’UniSat ne fournit pas sendBitcoin."); return; }
+    if (!current || getBrc20TransferNextAction(current) !== "pay") { setMessage("Aucun paiement d’inscription n’est prêt pour approbation."); return; }
     if (!confirmed || !ownershipContextKey || ownershipProofKey !== ownershipContextKey || validatedRecipient !== recipient.trim()) {
-      setMessage("Confirm the recipient, verify the address, and complete the ownership proof before payment."); return;
+      setMessage("Confirmez le destinataire, vérifiez l’adresse et terminez la preuve de propriété avant le paiement.");
+      return;
     }
-    // Verify confirmed, asset-free funds before opening the wallet approval prompt.
-    // Keep preflight separate from approval so UniSat Mobile retains its user gesture.
     if (!paymentPreflight || paymentPreflight.orderId !== current.orderId || Date.now() >= paymentPreflight.expiresAt) {
-      setBusyAction("preparing");
-      setMessage("Checking confirmed, asset-free UTXOs for the inscription payment and network fees. No payment has been requested.");
-      void ensureNativePaymentBalance(network, address, current.payAmount, current.feeRate, "inscribe-payment", { mobile: isMobileUniSatDevice() })
-        .then(() => {
-          if (progressRef.current?.orderId !== current.orderId || progressRef.current.paymentTxid) return;
-          setPaymentPreflight({ orderId: current.orderId, expiresAt: Date.now() + 60_000 });
-          setMessage("Vérification UTXO réussie. Appuyez de nouveau sur « Payer avec UniSat » dans les 60 secondes pour ouvrir l’approbation UniSat.");
-        })
-        .catch(cause => {
-          const detail = cause instanceof Error ? cause.message : String(cause);
-          setPaymentPreflight(null);
-          setMessage(`Payment blocked before wallet approval. No payment was sent. ${detail} Keep this existing order; do not create another one. After funding a separate confirmed UTXO without Ordinals, Runes or Alkanes, rerun this check. UniSat UTXO tool: https://unisat.io/utxo`);
-        })
-        .finally(() => setBusyAction(""));
+      setPaymentPreflight(null);
+      setMessage("La vérification UTXO est absente ou expirée. Appuyez d’abord sur « Vérifier les UTXO »; aucun paiement n’a été demandé.");
       return;
     }
     const attempted: Brc20TransferProgress = { ...current, recipient: recipient.trim(), paymentStarted: true };
     storeProgress(attempted);
     setPaymentPreflight(null);
     setBusyAction("paying");
-    setMessage(`Confirmez dans UniSat le paiement de ${current.payAmount.toLocaleString()} sats pour créer l’inscription transférable.`);
+    setMessage(`Confirmez dans UniSat le paiement de ${current.payAmount.toLocaleString()} sats pour créer l’inscription contenant exactement ${current.amount} ${ticker}.`);
     let paymentRequest: Promise<string | { txid?: string }>;
     try {
       // Call UniSat synchronously in this explicit click handler to preserve the wallet user gesture.
@@ -357,23 +373,23 @@ export function Brc20TransferFlow({
     } catch (cause) {
       if (isUserRejection(cause)) storeProgress({ ...attempted, paymentStarted: false });
       setBusyAction("");
-      setMessage(cause instanceof Error ? cause.message : "UniSat could not open the payment request.");
+      setMessage(cause instanceof Error ? cause.message : "UniSat n’a pas pu ouvrir la demande de paiement.");
       return;
     }
     void (async () => {
       try {
         const paymentTxid = txidOf(await paymentRequest);
-        if (!/^[a-f0-9]{64}$/i.test(paymentTxid)) throw new Error("UniSat did not return a confirmed TXID. Check wallet activity before taking any further action.");
+        if (!/^[a-f0-9]{64}$/i.test(paymentTxid)) throw new Error("UniSat n’a pas retourné de TXID valide. Vérifiez l’activité du portefeuille avant toute nouvelle action.");
         const paid: Brc20TransferProgress = { ...attempted, paymentTxid };
         storeProgress(paid);
         setBusyAction("waiting");
-        setMessage(`Payment ${paymentTxid} submitted. Waiting for the transfer inscription to be created…`);
+        setMessage(`Paiement ${paymentTxid} envoyé. Attente de la création de l’inscription de transfert…`);
         const inscriptionId = await pollOrder(current.orderId);
         storeProgress({ ...paid, inscriptionId });
-        setMessage(`Step 2/3 complete: inscription ${inscriptionId} was created. Verify the address, then separately select “Send inscription” to transfer the tokens.`);
+        setMessage(`Inscription créée : ${inscriptionId}. Le montant inscrit est ${current.amount} ${ticker}. Vérifiez le destinataire puis appuyez séparément sur « Envoyer l’inscription ».`);
       } catch (cause) {
         if (isUserRejection(cause)) storeProgress({ ...attempted, paymentStarted: false, paymentTxid: "" });
-        setMessage(cause instanceof Error ? cause.message : "Payment or inscription status is uncertain. Check UniSat before retrying.");
+        setMessage(cause instanceof Error ? cause.message : "L’état du paiement ou de l’inscription est incertain. Vérifiez UniSat avant de réessayer.");
       } finally {
         setBusyAction("");
       }
@@ -573,15 +589,15 @@ export function Brc20TransferFlow({
             : "1 · Pré-commander le transfert";
   const canPay = nextAction === "pay" && !busyAction && confirmed && ownershipProofKey === ownershipContextKey &&
     validatedRecipient === recipient.trim();
+  const payPrerequisitesMet = confirmed && ownershipProofKey === ownershipContextKey && validatedRecipient === recipient.trim();
+  const paymentPreflightValid = Boolean(progress && paymentPreflight?.orderId === progress.orderId && Date.now() < paymentPreflight.expiresAt);
   const payButtonLabel = !confirmed
     ? "Confirmer le montant et l’adresse"
     : ownershipProofKey !== ownershipContextKey
       ? "Valider la propriété dans UniSat"
       : validatedRecipient !== recipient.trim()
         ? "Vérifier l’adresse destinataire"
-        : paymentPreflight?.orderId === progress?.orderId
-          ? "2 · Confirmer le paiement avec UniSat"
-          : "2 · Vérifier les UTXO puis payer";
+        : "2 · Payer avec UniSat";
   const canSend = nextAction === "send-inscription" && !busyAction && Boolean(recipient.trim()) && confirmed &&
     validatedRecipient === recipient.trim() && ownershipProofKey === ownershipContextKey;
   const sendButtonLabel = !recipient.trim()
@@ -672,6 +688,8 @@ export function Brc20TransferFlow({
           <p><span className="text-[#718092]">Wallet signataire :</span> UniSat Wallet</p>
           <p><span className="text-[#718092]">Opération :</span> {kind === "prog" ? "BRC20-Prog" : "BRC-20"} · {ticker}</p>
           <p><span className="text-[#718092]">Montant du token :</span> {progress.amount} {ticker}</p>
+          <p className="mt-1 text-[#718092]">JSON exact de l’inscription :</p>
+          <pre className="overflow-x-auto whitespace-pre-wrap break-all border border-[#3b434d] bg-[#10151a] p-2 text-[#70c7a0]">{buildBrc20TransferInscription(ticker, progress.amount)}</pre>
           <p className="break-all"><span className="text-[#718092]">Destinataire final :</span> {progress.recipient}</p>
           <p className="break-all"><span className="text-[#718092]">Ordre :</span> {progress.orderId}</p>
           <p className="break-all"><span className="text-[#718092]">Adresse de paiement :</span> {progress.payAddress}</p>
@@ -686,10 +704,16 @@ export function Brc20TransferFlow({
         </button>
       )}
       {nextAction === "pay" && progress && (
-        <button type="button" onClick={payForTransferInscription} disabled={!canPay}
-          className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
-          {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Vérification des UTXO…</> : busyAction === "paying" ? <><Loader2 size={13} className="animate-spin" /> Attente de UniSat…</> : <><Send size={13} /> {payButtonLabel}</>}
-        </button>
+        <>
+          <button type="button" onClick={() => void checkPaymentUtxos()} disabled={!canPay || Boolean(busyAction) || paymentPreflightValid}
+            className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#3b434d] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#d9d3c6] disabled:opacity-40">
+            {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Vérification des UTXO…</> : <><ShieldCheck size={13} /> {paymentPreflightValid ? "UTXO vérifiés · valides 60 s" : "2 · Vérifier les UTXO"}</>}
+          </button>
+          <button type="button" onClick={payForTransferInscription} disabled={!canPay || Boolean(busyAction) || !paymentPreflightValid}
+            className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
+            {busyAction === "paying" ? <><Loader2 size={13} className="animate-spin" /> Attente de UniSat…</> : <><Send size={13} /> {payButtonLabel}</>}
+          </button>
+        </>
       )}
       {nextAction === "check-order" && progress && (
         <button type="button" onClick={() => void checkOrder()} disabled={Boolean(busyAction)}
