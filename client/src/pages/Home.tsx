@@ -558,7 +558,7 @@ export default function Home() {
     return record ? `${PUNKS_IMAGE_BASE}${record.fileName}` : null;
   };
   return (
-    <div className="min-h-screen bg-[#0b0d10] text-[#f3efe5]">
+    <div className="premium-site-shell min-h-screen bg-[#0b0d10] text-[#f3efe5]">
       <header className="border-b border-[#2c323a] bg-[#0b0d10]/95 backdrop-blur-sm">
         <div className="mx-auto flex max-w-[1440px] items-center justify-between px-5 py-4 sm:px-8 lg:px-12">
           <a
