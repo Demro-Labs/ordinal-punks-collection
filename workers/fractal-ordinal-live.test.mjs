@@ -2236,7 +2236,7 @@ test('Worker retries a complete UTXO confirmation scan once when the available i
   };
   try {
     const body = JSON.stringify({ chain: 'bitcoin', address, minimumSats: 40000, utxos: [{ txid: candidate.txid, vout: 0, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk }] });
-    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.252', body }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.253', body }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
     const data = await response.json();
     assert.equal(response.status, 200, JSON.stringify(data));
     assert.equal(data.sufficient, true);
