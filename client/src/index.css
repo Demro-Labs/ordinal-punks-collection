@@ -93,3 +93,71 @@ input:focus-visible, select:focus-visible { outline: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+
+/* Premium Obsidian theme — shared visual system for site, Local Vault and UniSat panels. */
+:root {
+  --radius: 0.7rem;
+  --background: oklch(0.105 0.012 255);
+  --foreground: oklch(0.94 0.018 82);
+  --card: oklch(0.145 0.016 255);
+  --card-foreground: oklch(0.94 0.018 82);
+  --popover: oklch(0.145 0.016 255);
+  --popover-foreground: oklch(0.94 0.018 82);
+  --primary: oklch(0.79 0.105 78);
+  --primary-foreground: oklch(0.13 0.014 255);
+  --secondary: oklch(0.19 0.018 255);
+  --secondary-foreground: oklch(0.91 0.014 82);
+  --muted: oklch(0.18 0.016 255);
+  --muted-foreground: oklch(0.68 0.018 255);
+  --accent: oklch(0.72 0.105 75);
+  --accent-foreground: oklch(0.12 0.012 255);
+  --border: oklch(0.29 0.022 255 / 82%);
+  --input: oklch(0.25 0.02 255);
+  --ring: oklch(0.76 0.11 78);
+}
+html { color-scheme: dark; }
+body {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(ellipse at 12% -10%, rgba(184, 139, 77, 0.11), transparent 42%),
+    radial-gradient(ellipse at 92% 0%, rgba(75, 95, 125, 0.10), transparent 38%),
+    linear-gradient(180deg, #0d1015 0%, #090b0f 100%);
+  background-attachment: fixed;
+  letter-spacing: 0.005em;
+}
+::selection { color: #0b0d10; background: #d7b77b; }
+:focus-visible { outline-color: #d7b77b; }
+button, [role="button"], a[href], input, select, textarea {
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 180ms ease, transform 180ms ease, color 160ms ease;
+}
+button:not(:disabled), [role="button"]:not([aria-disabled="true"]) { border-radius: 0.55rem; }
+button:not(:disabled):hover, [role="button"]:not([aria-disabled="true"]):hover {
+  filter: brightness(1.055);
+}
+button:disabled { cursor: not-allowed; filter: saturate(0.55); opacity: 0.48; }
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select, textarea {
+  border-color: rgba(149, 159, 176, 0.25);
+  border-radius: 0.55rem;
+  background-color: rgba(13, 16, 22, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.018);
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):hover,
+select:hover, textarea:hover { border-color: rgba(215, 183, 123, 0.48); }
+input:focus, select:focus, textarea:focus {
+  border-color: rgba(215, 183, 123, 0.8) !important;
+  box-shadow: 0 0 0 3px rgba(215, 183, 123, 0.12);
+}
+[role="dialog"], [data-transaction-dialog], .unisat-wallet-panel {
+  border-color: rgba(215, 183, 123, 0.2);
+}
+.unisat-wallet-panel, [data-transaction-dialog] {
+  border-radius: 0.9rem;
+  box-shadow: 0 22px 70px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.025);
+}
+hr { border-color: rgba(149, 159, 176, 0.18); }
+table { border-color: rgba(149, 159, 176, 0.18); }
+thead { color: #d9c69e; }
+tbody tr { transition: background-color 150ms ease; }
+tbody tr:hover { background-color: rgba(215, 183, 123, 0.045); }
