@@ -1,0 +1,145 @@
+name: AI Wallet Diagnostics Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "client/**"
+      - "workers/**"
+      - "scripts/**"
+      - "wrangler.jsonc"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/ai-wallet-diagnostics.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ai-wallet-diagnostics-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Run diagnostics (failures are collected, never bypassed)
+        id: checks
+        shell: bash
+        run: |
+          set +e
+          mkdir -p diagnostics
+          run_check() {
+            name="$1"; shift
+            printf '\n## %s\n\nCommand: `%s`\n\n' "$name" "$*" >> diagnostics/report.md
+            "$@" > "diagnostics/${name//[^a-zA-Z0-9_-]/_}.log" 2>&1
+            rc=$?
+            printf 'Exit code: %s\n\n' "$rc" >> diagnostics/report.md
+            tail -n 100 "diagnostics/${name//[^a-zA-Z0-9_-]/_}.log" >> diagnostics/report.md
+            printf '\n\n' >> diagnostics/report.md
+            echo "${name}=$rc" >> "$GITHUB_OUTPUT"
+            return 0
+          }
+          echo "# Wallet / deployment diagnostics" > diagnostics/report.md
+          echo "- Repository: ${GITHUB_REPOSITORY}" >> diagnostics/report.md
+          echo "- Commit: ${GITHUB_SHA}" >> diagnostics/report.md
+          echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> diagnostics/report.md
+          run_check install pnpm install --frozen-lockfile
+          if grep -q '^install=0$' "$GITHUB_OUTPUT"; then
+            run_check typecheck pnpm run check
+            run_check client_tests pnpm exec vitest run client/src/lib
+            run_check utxo_safety pnpm exec vitest run client/src/lib/protocol-utxo-safety.test.ts
+            run_check app_build pnpm run build
+            run_check extension_build pnpm run build:extension
+            run_check dependency_audit pnpm audit --audit-level=low
+            if [ -f wrangler.jsonc ]; then
+              run_check wrangler_dry_run pnpm dlx wrangler@4.151.0 deploy --dry-run --outdir=/tmp/wrangler-dry-run
+            fi
+            if [ -f workers/fractal-ordinal-live.js ]; then
+              run_check worker_syntax node --check workers/fractal-ordinal-live.js
+              if [ -f workers/fractal-ordinal-live.test.mjs ]; then
+                run_check worker_tests node --test workers/fractal-ordinal-live.test.mjs
+              fi
+            fi
+          else
+            echo "Checks after install were skipped because frozen-lockfile installation failed." >> diagnostics/report.md
+          fi
+          if grep -Eq '=[1-9][0-9]*$' "$GITHUB_OUTPUT"; then
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Add AI diagnosis (optional OPENAI_API_KEY)
+        if: always()
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            printf '\n## AI analysis unavailable\n\nAdd OPENAI_API_KEY as a GitHub Actions secret to enable AI triage. No secret value is required in the workflow file.\n' >> diagnostics/report.md
+            exit 0
+          fi
+          # Only sanitized command output is sent; never send env vars, wallet data, keys, or transaction payloads.
+          REPORT="$(cat diagnostics/report.md)"
+          jq -n --arg report "$REPORT" '{
+            model: "gpt-4.1-mini",
+            instructions: "You are a cautious senior engineer diagnosing two public-facing Bitcoin/Fractal Ordinals wallet web apps. Analyze only the supplied CI report. Return concise Markdown: probable root causes, evidence, safe next steps, and tests needed. Never suggest bypassing UTXO freshness/availability checks, PSBT validation, signatures, or network separation. Never request private keys, seed phrases, raw signed transactions, API tokens, or secrets. Do not claim a fix was applied. If evidence is insufficient, say so.",
+            input: $report
+          }' > diagnostics/request.json
+          code=$(curl --silent --show-error --output diagnostics/ai-response.json --write-out '%{http_code}' https://api.openai.com/v1/responses \
+            -H "Authorization: Bearer ${OPENAI_API_KEY}" -H "Content-Type: application/json" \
+            --data-binary @diagnostics/request.json)
+          if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
+            node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync("diagnostics/ai-response.json","utf8"));const s=(d.output||[]).flatMap(x=>x.content||[]).filter(x=>x.type==="output_text").map(x=>x.text).join("\n");fs.writeFileSync("diagnostics/ai-diagnosis.md",s||"AI returned no text.")'
+            printf '\n## AI diagnosis (advisory; not an applied fix)\n\n' >> diagnostics/report.md
+            cat diagnostics/ai-diagnosis.md >> diagnostics/report.md
+          else
+            printf '\n## AI analysis failed\n\nOpenAI Responses API returned HTTP %s. See run logs for status; the API response body is not copied into the report.\n' "$code" >> diagnostics/report.md
+          fi
+          rm -f diagnostics/request.json diagnostics/ai-response.json
+
+      - name: Open a supervised diagnostic issue on failure
+        if: steps.checks.outputs.failed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="AI wallet diagnostics failed: run ${GITHUB_RUN_ID}"
+          gh issue create --title "$title" --body-file diagnostics/report.md || {
+            echo "Issue creation failed (possibly missing the bug label or issue permission). The report artifact is still retained."
+          }
+
+      - name: Fail workflow if diagnostics found errors
+        if: steps.checks.outputs.failed == 'true'
+        run: exit 1
+
+      - name: Upload diagnostic report
+        if: always()
+        uses: actions/upload-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: wallet-diagnostics-${{ github.run_id }}
+          path: diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
