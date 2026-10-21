@@ -88,14 +88,27 @@ describe("getSpendableUtxos", () => {
       });
     }) as typeof fetch);
     const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1_700, { onProgress: scan => progress.push(scan) });
-    expect(cursors).toHaveLength(20);
+    expect(cursors).toHaveLength(21);
     expect(cursors[0]).toBe(0);
-    expect(cursors.at(-1)).toBe(475);
-    expect(progress).toHaveLength(20);
+    expect(cursors.at(-1)).toBe(500);
+    expect(progress).toHaveLength(21);
     expect(progress.at(-1)).toEqual({ scannedCount: 500, totalCount: 500, safeUtxoCount: 1 });
     expect(result).toHaveLength(1);
     expect(result[0].satoshi).toBe(600_000);
   });
+  it("refuse un UTXO sûr répété entre plusieurs pages", async () => {
+    installWindowAndFetch((async input => {
+      const cursor = Number(new URL(String(input)).searchParams.get("cursor"));
+      return Response.json({
+        chain: "fractal", address: ADDRESS, cursor, nextCursor: cursor + 25, total: 50, scannedCount: 25,
+        utxo: [makeSafeUtxo({ txid: "f".repeat(64), vout: 0, satoshi: 600_000 })],
+      });
+    }) as typeof fetch);
+
+    await expect(getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1))
+      .rejects.toThrow(/repeated outpoint.*across pages/i);
+  });
+
   it.each([
     { label: "P2WPKH", scriptPk: `0014${"11".repeat(20)}`, satoshi: 294 },
     { label: "P2TR", scriptPk: `5120${"22".repeat(32)}`, satoshi: 330 },
@@ -408,7 +421,7 @@ describe("Mempool fee fallback and Legacy transaction routing", () => {
 
 
 describe("scanAddressUtxoInventory", () => {
-  it("parcourt les 500 UTXO totaux sur toutes les pages séparément du set safe", async () => {
+  it("parcourt plus de 500 UTXO sur toutes les pages séparément du set safe", async () => {
     const cursors: number[] = [];
     const progress: Array<{ scannedCount: number; totalCount: number }> = [];
     installWindowAndFetch((async input => {
@@ -417,9 +430,9 @@ describe("scanAddressUtxoInventory", () => {
       expect(url.searchParams.get("size")).toBe("25");
       const cursor = Number(url.searchParams.get("cursor"));
       cursors.push(cursor);
-      const scannedCount = Math.min(25, 500 - cursor);
+      const scannedCount = Math.min(25, 525 - cursor);
       const utxo = Array.from({ length: scannedCount }, (_, index) => makeIndexedAddressUtxo(cursor + index));
-      return Response.json({ chain: "fractal", address: ADDRESS, cursor, nextCursor: cursor + scannedCount, total: 500, scannedCount, utxo });
+      return Response.json({ chain: "fractal", address: ADDRESS, cursor, nextCursor: cursor + scannedCount, total: 525, scannedCount, utxo });
     }) as typeof fetch);
 
     const result = await scanAddressUtxoInventory("FRACTAL_BITCOIN_MAINNET", ADDRESS, { onProgress: page => progress.push(page) });
@@ -428,8 +441,20 @@ describe("scanAddressUtxoInventory", () => {
     expect(cursors[0]).toBe(0);
     expect(cursors.at(-1)).toBe(475);
     expect(progress).toHaveLength(20);
-    expect(progress.at(-1)).toEqual({ scannedCount: 500, totalCount: 500 });
-    expect(result).toEqual({ scannedCount: 500, totalCount: 500 });
+    expect(progress.at(-1)).toEqual({ scannedCount: 525, totalCount: 525 });
+    expect(result).toEqual({ scannedCount: 525, totalCount: 525 });
+  });
+
+  it("refuse un outpoint répété entre deux pages de l’inventaire", async () => {
+    installWindowAndFetch((async input => {
+      const cursor = Number(new URL(String(input)).searchParams.get("cursor"));
+      const utxo = Array.from({ length: 25 }, (_, index) =>
+        makeIndexedAddressUtxo(cursor === 0 ? index : index === 0 ? 0 : cursor + index));
+      return Response.json({ chain: "fractal", address: ADDRESS, cursor, nextCursor: cursor + 25, total: 50, scannedCount: 25, utxo });
+    }) as typeof fetch);
+
+    await expect(scanAddressUtxoInventory("FRACTAL_BITCOIN_MAINNET", ADDRESS))
+      .rejects.toThrow(/sortie.*dupliquée|dupliquée.*inventaire/i);
   });
 
   it("refuse un inventaire si une page ne contient pas toutes les lignes annoncées", async () => {
