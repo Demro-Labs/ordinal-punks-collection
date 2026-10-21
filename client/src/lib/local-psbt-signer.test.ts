@@ -89,9 +89,7 @@ describe("Local Vault BTC/FB PSBT signer", () => {
     const tampered = bitcoin.Psbt.fromHex(signed);
     const signature = tampered.data.inputs[0].partialSig?.[0];
     expect(signature).toBeDefined();
-    const badSignature = Buffer.from(signature!.signature);
-    badSignature[0] ^= 1;
-    tampered.updateInput(0, { partialSig: [{ pubkey: Buffer.from(signature!.pubkey), signature: badSignature }] });
+    signature!.signature[0] ^= 1;
     await expect(finalizeLocalPsbt(tampered.toHex(), wallet, review)).rejects.toThrow(/signature locale est absente ou invalide/i);
   });
 
