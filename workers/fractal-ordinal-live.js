@@ -767,11 +767,12 @@ async function walletProtocolAssets(request, env, headers) {
 
 
 class SpendableUtxoError extends Error {
-  constructor(code, status = 503) {
+  constructor(code, status = 503, details = {}) {
     super(code);
     this.name = 'SpendableUtxoError';
     this.code = code;
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -1145,7 +1146,8 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
   if (sourceTotal === null) throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_INVALID_RESPONSE');
   if (availableByOutpoint.size !== candidateByOutpoint.size) {
     if (!scanComplete) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
-    throw new SpendableUtxoError('UTXO_CONFIRM_NOT_IN_AVAILABLE_SET', 409);
+    const missingOutpoints = [...candidateByOutpoint.keys()].filter(key => !availableByOutpoint.has(key));
+    throw new SpendableUtxoError('UTXO_CONFIRM_NOT_IN_AVAILABLE_SET', 409, { missingOutpoints });
   }
   const verified = [];
   let safeSats = 0;
@@ -1981,7 +1983,7 @@ export default {
         const failure = error instanceof SpendableUtxoError ? error : new SpendableUtxoError('UTXO_CONFIRM_FAILED');
         const message = failure.status === 400 ? 'Invalid UTXO confirmation request.' : failure.status === 409 ? 'The selected UTXO set was not confirmed as safe and spendable.' : 'Live UniSat data is temporarily unavailable.';
         if (failure.status !== 400) console.warn('Spendable UTXO confirmation failed', { code: failure.code });
-        return Response.json({ error: message, code: failure.code }, { status: failure.status, headers: noStore });
+        return Response.json({ error: message, code: failure.code, ...(Array.isArray(failure.details?.missingOutpoints) ? { missingOutpoints: failure.details.missingOutpoints } : {}) }, { status: failure.status, headers: noStore });
       }
     }
     if (request.method === 'POST' && url.pathname === '/api/inscribe/order') {
