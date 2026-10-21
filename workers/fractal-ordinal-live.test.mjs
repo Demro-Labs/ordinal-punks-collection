@@ -1067,7 +1067,7 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     const txid = url.pathname.startsWith('/v1/indexer/utxo/') ? pathParts[4] : pathParts[5];
     const record = records.find(item => item.txid === txid);
     if (url.pathname.startsWith('/v1/indexer/utxo/')) {
-      return Response.json({ code: 0, data: { ...record, isSpent: false } });
+      return Response.json({ code: 0, data: { ...record, isSpent: false, runes: record.runes ?? [], alkanes: record.alkanes ?? [] } });
     }
     if (url.pathname.startsWith('/v1/indexer/runes/utxo/')) {
       return Response.json({ code: 0, data: txid === records[1].txid ? [{ runeid: '1:1', amount: '1' }] : [] });
@@ -1117,7 +1117,7 @@ test('desktop and mobile use the available-UTXO API without calling the unsuppor
       upstreamMobileModes.push(url.searchParams.get('mobile'));
       return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
     }
-    if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false } });
+    if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false, runes: [], alkanes: [] } });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
@@ -1143,7 +1143,7 @@ test('uses explicit asset-free metadata to avoid per-UTXO detail calls during di
   const records = Array.from({ length: 25 }, (_, index) => ({
     address, txid: (index + 1).toString(16).padStart(64, '0'), vout: 0,
     satoshi: 120000, scriptPk: '0014' + '77'.repeat(20), height: 100,
-    isLowFee: false, isOpInRBF: false, inscriptions: [], runes: [], alkanes: [],
+    isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [], runes: [], alkanes: [],
   }));
   const calls = [];
   globalThis.fetch = async input => {
@@ -1179,7 +1179,7 @@ test('reports safe-UTXO rejection reasons without exposing addresses or outpoint
     if (url.pathname.endsWith('/available-utxo-data')) {
       return Response.json({ code: 0, data: { total: 3, utxo: [valid, unconfirmed, inscription] } });
     }
-    if (url.pathname === `/v1/indexer/utxo/${valid.txid}/0`) return Response.json({ code: 0, data: { ...valid, isSpent: false } });
+    if (url.pathname === `/v1/indexer/utxo/${valid.txid}/0`) return Response.json({ code: 0, data: { ...valid, isSpent: false, runes: [], alkanes: [] } });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
@@ -2236,7 +2236,7 @@ test('Worker retries a complete UTXO confirmation scan once when the available i
   };
   try {
     const body = JSON.stringify({ chain: 'bitcoin', address, minimumSats: 40000, utxos: [{ txid: candidate.txid, vout: 0, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk }] });
-    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.242', body }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.252', body }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
     const data = await response.json();
     assert.equal(response.status, 200, JSON.stringify(data));
     assert.equal(data.sufficient, true);
