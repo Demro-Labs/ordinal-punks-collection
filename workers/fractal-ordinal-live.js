@@ -946,43 +946,55 @@ async function spendableUtxos(request, env, corsHeaders) {
       rejectedSats.hasInscriptionOrUnknown += satoshi;
       continue;
     }
-    const detail = await spendableUtxoStage('UTXO_DETAIL', () => uniNetwork(base, `/v1/indexer/utxo/${txid}/${vout}`, env));
-    if (
-      String(detail?.txid || '').toLowerCase() !== txid || Number(detail?.vout) !== vout ||
-      detail?.address !== address || normalizeSatoshiValue(detail) !== satoshi ||
-      String(detail?.scriptPk || '').toLowerCase() !== scriptPk
-    ) {
-      rejected.detailMismatch += 1;
-      rejectedSats.detailMismatch += satoshi;
-      continue;
-    }
-    if (!Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0) {
-      rejected.unconfirmedOrInvalidHeight += 1;
-      rejectedSats.unconfirmedOrInvalidHeight += satoshi;
-      continue;
-    }
-    if (detail?.isSpent !== false) {
-      rejected.spentOrUnknown += 1;
-      rejectedSats.spentOrUnknown += satoshi;
-      continue;
-    }
-    if (typeof (detail?.isOpInRBF === undefined ? false : detail.isOpInRBF) !== 'boolean') {
-      rejected.invalidFlags += 1;
-      continue;
-    }
-    if (!Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0) {
-      rejected.hasInscriptionOrUnknown += 1;
-      rejectedSats.hasInscriptionOrUnknown += satoshi;
-      continue;
+    // available-utxo-data is the authoritative spendable inventory. If it explicitly
+    // includes empty Runes and Alkanes arrays, plus an empty inscriptions array, we can
+    // defer the per-outpoint detail request until signing-time confirmation. This avoids
+    // one extra UniSat HTTP call for every ordinary UTXO during a 500-output scan.
+    // If either protocol marker is missing, keep the conservative detail lookup below.
+    const hasExplicitAssetFreeMarkers =
+      Array.isArray(item?.runes) && item.runes.length === 0 &&
+      Array.isArray(item?.alkanes) && item.alkanes.length === 0 &&
+      Array.isArray(item?.inscriptions) && item.inscriptions.length === 0;
+    let detail = null;
+    if (!hasExplicitAssetFreeMarkers) {
+      detail = await spendableUtxoStage('UTXO_DETAIL', () => uniNetwork(base, `/v1/indexer/utxo/${txid}/${vout}`, env));
+      if (
+        String(detail?.txid || '').toLowerCase() !== txid || Number(detail?.vout) !== vout ||
+        detail?.address !== address || normalizeSatoshiValue(detail) !== satoshi ||
+        String(detail?.scriptPk || '').toLowerCase() !== scriptPk
+      ) {
+        rejected.detailMismatch += 1;
+        rejectedSats.detailMismatch += satoshi;
+        continue;
+      }
+      if (!Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0) {
+        rejected.unconfirmedOrInvalidHeight += 1;
+        rejectedSats.unconfirmedOrInvalidHeight += satoshi;
+        continue;
+      }
+      if (detail?.isSpent !== false) {
+        rejected.spentOrUnknown += 1;
+        rejectedSats.spentOrUnknown += satoshi;
+        continue;
+      }
+      if (typeof (detail?.isOpInRBF === undefined ? false : detail.isOpInRBF) !== 'boolean') {
+        rejected.invalidFlags += 1;
+        continue;
+      }
+      if (!Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0) {
+        rejected.hasInscriptionOrUnknown += 1;
+        rejectedSats.hasInscriptionOrUnknown += satoshi;
+        continue;
+      }
     }
     const runeMetadata = [item?.runes, detail?.runes].filter(value => value !== undefined);
-    if (runeMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
+    if (runeMetadata.length === 0 || runeMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
       rejected.hasRunes += 1;
       rejectedSats.hasRunes += satoshi;
       continue;
     }
     const alkaneMetadata = [item?.alkanes, detail?.alkanes].filter(value => value !== undefined);
-    if (alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
+    if (alkaneMetadata.length === 0 || alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
       rejected.hasAlkanes += 1;
       rejectedSats.hasAlkanes += satoshi;
       continue;
