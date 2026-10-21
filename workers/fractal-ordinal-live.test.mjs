@@ -1256,7 +1256,7 @@ test('Worker confirmation scans past 500 available outputs to find the exact PSB
 test('Worker finds a still-safe PSBT input when the available-UTXO pagination cursor drifts', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
-  const candidate = { address, txid: (526).toString(16).padStart(64, '0'), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  const candidate = { address, txid: (701).toString(16).padStart(64, '0'), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
   const cursors = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
@@ -1264,15 +1264,15 @@ test('Worker finds a still-safe PSBT input when the available-UTXO pagination cu
     if (url.pathname.endsWith('/available-utxo-data')) {
       const cursor = Number(url.searchParams.get('cursor'));
       cursors.push(cursor);
-      const count = Math.min(25, 526 - cursor);
+      const count = Math.min(25, 701 - cursor);
       const utxo = Array.from({ length: count }, (_, offset) => {
         const index = cursor + offset;
-        return index === 525 ? candidate : {
+        return index === 700 ? candidate : {
           address, txid: (index + 1).toString(16).padStart(64, '0'), vout: 0, satoshi: 10000,
           scriptPk: '0014' + '55'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, inscriptions: [],
         };
       });
-      return Response.json({ code: 0, data: { cursor, total: 526, utxo } });
+      return Response.json({ code: 0, data: { cursor, total: 701, utxo } });
     }
     if (url.pathname === `/v1/indexer/utxo/${candidate.txid}/0`) return Response.json({ code: 0, data: candidate });
     throw new Error(`Unexpected upstream URL: ${url}`);
@@ -1284,7 +1284,7 @@ test('Worker finds a still-safe PSBT input when the available-UTXO pagination cu
     assert.equal(response.status, 200, JSON.stringify(data));
     assert.equal(data.sufficient, true);
     assert.equal(data.verifiedUtxoCount, 1);
-    assert.ok(cursors.includes(525), `expected the shifted page to be checked, got ${cursors}`);
+    assert.ok(cursors.includes(700), `expected the far-shifted page to be checked, got ${cursors}`);
   } finally { globalThis.fetch = previousFetch; }
 });
 
