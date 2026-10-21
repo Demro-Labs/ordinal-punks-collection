@@ -48,6 +48,31 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
+      # Keep production deployment gated by the same quality checks as PR CI.
+      - name: Type-check application
+        run: pnpm check
+
+      - name: Run client unit tests
+        run: pnpm exec vitest run client/src/lib
+
+      - name: Run Local Vault UTXO safety tests
+        run: pnpm exec vitest run client/src/lib/protocol-utxo-safety.test.ts
+
+      - name: Build desktop Local Vault extension
+        run: pnpm run build:extension
+
+      - name: Check shared Worker syntax
+        run: node --check workers/fractal-ordinal-live.js
+
+      - name: Test Worker request guards
+        run: node --test workers/fractal-ordinal-live.test.mjs
+
+      - name: Audit dependencies
+        run: pnpm audit --audit-level=low
+
+      - name: Build application
+        run: pnpm build
+
       - name: Validate Wrangler bundle without publishing
         run: pnpm dlx wrangler@4.151.0 deploy --dry-run --outdir=/tmp/fractal-worker-dry-run
 
