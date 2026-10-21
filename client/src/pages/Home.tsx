@@ -30,6 +30,7 @@ import { COLLECTION_DATA_URL, COLLECTION_GENERATED_AT, INSCRIPTION_BASE_URL } fr
 import { cacheCollectionResponse, readCachedCollection } from "@/lib/collection-cache";
 import { requestUniSatTransfer } from "@/components/UniSatWalletConnect";
 import { OrdiWallet } from "@/components/OrdiWallet";
+import { DonateButton } from "@/components/DonateButton";
 import { LocalVaultPagePanel } from "@/components/LocalVaultSiteDashboard";
 
 const BUILD_META = import.meta.env as ImportMetaEnv & {
@@ -580,6 +581,7 @@ export default function Home() {
             </span>
           </a>
           <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.14em] text-[#9ea7b3] sm:gap-6">
+            <DonateButton compact />
             <OrdiWallet site="punks" />
             <span className="hidden sm:inline">Fractal Bitcoin</span>
             <a
@@ -699,6 +701,7 @@ export default function Home() {
               </div>
             </div>
             <div>
+              <DonateButton />
               <img
                 src={STAMP_URL}
                 alt="Fractal Ordinals logo"
