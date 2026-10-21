@@ -17,6 +17,7 @@ import { UniSatWalletAuth } from "@/components/UniSatWalletAuth";
 import { UniSatOwnershipProof } from "@/components/UniSatOwnershipProof";
 import { UniSatMobileOpenDappLink } from "@/components/UniSatMobileOpenDappLink";
 import { ProtocolAssetsPanel } from "@/components/ProtocolAssetsPanel";
+import type { ProtocolNetwork } from "@/lib/protocol-balances";
 import { TransactionHistoryPanel } from "@/components/TransactionHistoryPanel";
 import { isLocalVaultSiteSession, isWalletExtensionContext, LOCAL_VAULT_SESSION_EVENT, readLocalVaultSiteSession, type LocalVaultSiteSession } from "@/lib/local-vault-bridge";
 import { getUniSatProvider } from "@/lib/unisat-provider";
