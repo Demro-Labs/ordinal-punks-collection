@@ -246,8 +246,10 @@ export async function finalizeLocalPsbt(signedPsbtHex: string, wallet: OrdiWalle
   const signatureVerifier = review.addressType === "taproot"
     ? (publicKey: Uint8Array, hash: Uint8Array, signature: Uint8Array) => ecc.verifySchnorr(Buffer.from(hash), Buffer.from(publicKey), Buffer.from(signature))
     : (publicKey: Uint8Array, hash: Uint8Array, signature: Uint8Array) => ecc.verify(Buffer.from(hash), Buffer.from(publicKey), Buffer.from(signature));
-  try { psbt.validateSignaturesOfAllInputs(signatureVerifier); psbt.finalizeAllInputs(); }
-  catch { throw new Error("La signature locale est absente ou invalide; rien n’a été diffusé."); }
+  try {
+    if (!psbt.validateSignaturesOfAllInputs(signatureVerifier)) throw new Error("Invalid signature");
+    psbt.finalizeAllInputs();
+  } catch { throw new Error("La signature locale est absente ou invalide; rien n’a été diffusé."); }
   const tx = psbt.extractTransaction(true);
   const rawTxHex = tx.toHex();
   const txid = tx.getId().toLowerCase();
