@@ -1,6 +1,6 @@
 import { LIVE_DATA_API_BASE } from "@/lib/live";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { confirmFractalSpendableUtxos, confirmSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, InsufficientSafeUtxosError, minimumSpendableSatsForScript, scanAddressUtxoInventory, trackMempoolTransaction, validateMempoolAddress } from "./mempool";
+import { formatLiveIndexerHttpError, confirmFractalSpendableUtxos, confirmSpendableUtxos, getMempoolConfig, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, InsufficientSafeUtxosError, minimumSpendableSatsForScript, scanAddressUtxoInventory, trackMempoolTransaction, validateMempoolAddress } from "./mempool";
 
 const ADDRESS = "bc1qtestaddress0000000000000000000000000";
 
@@ -478,5 +478,18 @@ describe("confirmSpendableUtxos live-indexer error messages", () => {
     await expect(confirmSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 10_000, [{
       txid: "a".repeat(64), vout: 0, satoshi: 12_000, scriptPk: "0014" + "11".repeat(20), sourceCursor: 0,
     }])).rejects.toThrow(/Les données UniSat ont changé ou sont incohérentes.*Aucune signature ni diffusion/i);
+  });
+});
+
+
+describe("UniSat/Worker HTTP diagnostics", () => {
+  it("distinguishes access denial, rate limiting, and upstream outages", () => {
+    expect(formatLiveIndexerHttpError(403)).toMatch(/HTTP 403.*journaux du Worker/i);
+    expect(formatLiveIndexerHttpError(429, "30")).toMatch(/HTTP 429.*30 seconde/i);
+    expect(formatLiveIndexerHttpError(503)).toMatch(/HTTP 503.*ne contournez pas/i);
+  });
+  it("ignores malformed retry hints and normalizes upstream detail", () => {
+    expect(formatLiveIndexerHttpError(403, "soon", "forbidden\\nsecret-token")).toContain("forbidden secret-token");
+    expect(formatLiveIndexerHttpError(429, "1e9")).toMatch(/réduisez la fréquence/i);
   });
 });
