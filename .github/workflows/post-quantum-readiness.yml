@@ -134,7 +134,7 @@ jobs:
 
       - name: Upload security inventory
         if: always()
-        uses: actions/upload-artifact@ea8c6c1f5f2e5e3b6c9a5e8d9c4f3a2b1c0d9e8f # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: post-quantum-readiness-${{ github.run_id }}
           path: security-report/
