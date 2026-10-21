@@ -792,7 +792,7 @@ export function Brc20TransferFlow({
           </div>
         )}
         {selectedInscriptionId && (
-          <p className="mt-2 break-all font-mono text-[9px] text-[#70c7a0]">Inscription sélectionnée : {selectedInscriptionId}. L’envoi utilisera uniquement cette inscription ; les frais du transfert seront approuvés séparément dans UniSat.</p>
+          <p className="mt-2 break-all font-mono text-[9px] text-[#70c7a0]">Inscription sélectionnée : {selectedInscriptionId}. Cliquez sur « Payer les frais et transférer » pour ouvrir la demande UniSat : vérifiez les frais réseau et approuvez le paiement dans le wallet. Seule cette inscription sera envoyée à l’adresse destinataire.</p>
         )}
       </section>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -843,7 +843,7 @@ export function Brc20TransferFlow({
         />
         <span>
           <ShieldCheck size={12} className="mr-1 inline text-[#f2bd63]" />
-          Je confirme le réseau, le destinataire et le montant exact {amountToTransfer} {ticker}. L’inscription de transfert sera créée pour ce montant, puis son envoi nécessitera une approbation distincte dans UniSat.
+          {selectedInscriptionId ? `Je confirme l’envoi de l’inscription déjà sélectionnée (${selectedInscriptionId}) vers cette adresse, sur le réseau ${chainLabel}. Je vérifierai les frais puis j’approuverai le paiement dans UniSat.` : `Je confirme le réseau, le destinataire et le montant exact ${amountToTransfer} ${ticker}. L’inscription de transfert sera créée pour ce montant, puis son envoi nécessitera une approbation distincte dans UniSat.`}
         </span>
       </label>
       {confirmed && recipient.trim() && (
@@ -862,7 +862,7 @@ export function Brc20TransferFlow({
         <button type="button" onClick={() => void sendSelectedBrc20Inscription()}
           disabled={Boolean(busyAction) || !confirmed || !recipient.trim() || validatedRecipient !== recipient.trim() || ownershipProofKey !== ownershipContextKey}
           className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
-          {busyAction === "sending" ? <><Loader2 size={13} className="animate-spin" /> Envoi en cours…</> : <><Send size={13} /> Transférer l’inscription sélectionnée avec UniSat</>}
+          {busyAction === "sending" ? <><Loader2 size={13} className="animate-spin" /> Envoi en cours…</> : <><Send size={13} /> Payer les frais et transférer l’inscription sélectionnée</>}
         </button>
       )}
       {progress && !progress.paymentStarted && !progress.paymentTxid && !progress.inscriptionId && (
