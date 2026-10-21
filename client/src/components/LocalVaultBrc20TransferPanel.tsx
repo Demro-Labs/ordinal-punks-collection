@@ -3,7 +3,7 @@ import { Loader2, RefreshCw, ShieldCheck, Wallet } from "lucide-react";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
 import { LocalVaultSafeBalanceDiscovery } from "@/components/LocalVaultSafeBalanceDiscovery";
 import { fetchProtocolBalances, type Brc20Balance } from "@/lib/protocol-balances";
-import { buildBrc20TransferInscription } from "@/lib/brc20-transfer-flow";
+import { buildBrc20TransferInscription, isConsistentBrc20PaymentState } from "@/lib/brc20-transfer-flow";
 import { getRecommendedFeeEstimate } from "@/lib/mempool";
 import { prepareLocalNativeTransfer } from "@/lib/local-native-transfer";
 import { broadcastLocalPsbt, finalizeLocalPsbt, reviewLocalPsbt, signLocalPsbt, type LocalPsbtReview } from "@/lib/local-psbt-signer";
@@ -69,7 +69,7 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
       const raw = localStorage.getItem(keyFor(site, network, address, ticker));
       if (!raw) return;
       const saved = JSON.parse(raw) as Order;
-      if (saved.version !== 1 || saved.site !== site || saved.network !== network || saved.address.toLowerCase() !== address.toLowerCase() || saved.addressType !== addressType || saved.ticker.toLowerCase() !== ticker.toLowerCase() || !saved.orderId || !saved.payAddress || !Number.isSafeInteger(saved.payAmount) || saved.payAmount <= 0) return;
+      if (saved.version !== 1 || saved.site !== site || saved.network !== network || typeof saved.address !== "string" || saved.address.toLowerCase() !== address.toLowerCase() || saved.addressType !== addressType || typeof saved.ticker !== "string" || saved.ticker.toLowerCase() !== ticker.toLowerCase() || !positive(saved.amount) || typeof saved.recipient !== "string" || !saved.recipient.trim() || typeof saved.orderId !== "string" || !saved.orderId || typeof saved.payAddress !== "string" || !saved.payAddress || !Number.isSafeInteger(saved.payAmount) || saved.payAmount <= 0 || !Number.isFinite(saved.feeRate) || saved.feeRate <= 0 || !isConsistentBrc20PaymentState(saved)) return;
       setOrder(saved); setAmount(saved.amount); setRecipient(saved.recipient);
       setMessage(saved.paymentStarted ? "Ordre restauré. Ne payez pas une seconde fois; vérifiez d’abord son état." : "Ordre non payé restauré.");
     } catch { /* Ignore malformed local progress. */ }
