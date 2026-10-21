@@ -82,6 +82,7 @@ async function verifyInputs(network: OrdiNetwork, walletAddress: string, inputs:
 
   await confirmSpendableUtxos(network, walletAddress, minimumSats, inputs.map(input => ({
     txid: input.txid, vout: input.vout, satoshi: input.valueSats, scriptPk: input.scriptHex,
+    sourceCursor: safeByOutpoint.get(outpointKey(input))!.sourceCursor,
   })));
 }
 function transactionInputValueAndScript(item: bitcoin.Psbt["data"]["inputs"][number], outpoint: { txid: string; vout: number }) {

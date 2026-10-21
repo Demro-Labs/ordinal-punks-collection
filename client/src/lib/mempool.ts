@@ -32,6 +32,9 @@ async function requestJson<T>(url: string, timeoutMs = 8_000, init?: RequestInit
         if (failure?.code === "UTXO_CONFIRM_NOT_IN_AVAILABLE_SET") {
           throw new Error("UTXO_CONFIRM_NOT_IN_AVAILABLE_SET: une ou plusieurs entrées ne figurent plus dans l’ensemble UTXO disponibles et sûrs du réseau. Actualisez les UTXO, reconstruisez le PSBT avec les sorties actuellement disponibles, puis recommencez l’examen. La vérification n’a pas été contournée et aucune transaction ne doit être diffusée.");
         }
+        if (failure?.code === "UTXO_CONFIRM_SCAN_LIMIT_REACHED" || failure?.code === "UTXO_CONFIRM_AVAILABLE_SCAN_INCOMPLETE") {
+          throw new Error("La revalidation du scan UTXO n’a pas pu atteindre une page confirmée par l’indexeur. Actualisez les UTXO et reconstruisez le PSBT; aucune signature ni diffusion n’a été effectuée.");
+        }
         const message = typeof failure?.error === "string" ? failure.error : `Live API HTTP ${response.status}`;
         const code = typeof failure?.code === "string" && /^[A-Z0-9_]{1,80}$/.test(failure.code) ? ` [${failure.code}]` : "";
         throw new Error(`${message}${code}`);
@@ -140,7 +143,7 @@ export async function getUtxoBalanceSummary(network: string, address: string): P
   return result as UtxoBalanceSummary;
 }
 
-export type SpendableUtxo = { address: string; txid: string; vout: number; satoshi: number; scriptPk: string; height: number; inscriptionsRunesAlkanesChecked: true; isLowFee: boolean; isOpInRBF: boolean; inscriptions: [] };
+export type SpendableUtxo = { address: string; txid: string; vout: number; satoshi: number; scriptPk: string; height: number; inscriptionsRunesAlkanesChecked: true; isLowFee: boolean; isOpInRBF: boolean; inscriptions: []; sourceCursor?: number };
 export class InsufficientSafeUtxosError extends Error {
   constructor(message: string) { super(message); this.name = "InsufficientSafeUtxosError"; }
 }
@@ -303,7 +306,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       item.inscriptionsRunesAlkanesChecked === true && typeof item.isLowFee === "boolean" && typeof item.isOpInRBF === "boolean" &&
       Array.isArray(item.inscriptions) && item.inscriptions.length === 0
     );
-    collected.push(...safe);
+    collected.push(...safe.map(item => ({ ...item, sourceCursor: cursor })));
     const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
     if (requiredOutpoints) {
       const byOutpoint = new Map(collected.map(item => [`${item.txid.toLowerCase()}:${item.vout}`, item]));
@@ -346,7 +349,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
 }
 
 /** Recheck the exact PSBT inputs with the Fractal Worker before UniSat is asked to sign or pay. */
-export async function confirmSpendableUtxos(network: string, address: string, minimumSats: number, utxos: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk">>): Promise<WorkerSafeUtxoAttestation> {
+export async function confirmSpendableUtxos(network: string, address: string, minimumSats: number, utxos: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk" | "sourceCursor">>): Promise<WorkerSafeUtxoAttestation> {
   const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
   if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0 || !Array.isArray(utxos) || utxos.length < 1 || utxos.length > 20) {
     throw new Error("The UTXO set to confirm with the Worker is invalid.");
@@ -361,7 +364,7 @@ export async function confirmSpendableUtxos(network: string, address: string, mi
         chain,
         address,
         minimumSats,
-        utxos: utxos.map(utxo => ({ txid: utxo.txid, vout: utxo.vout, satoshi: utxo.satoshi, scriptPk: utxo.scriptPk })),
+        utxos: utxos.map(utxo => ({ txid: utxo.txid, vout: utxo.vout, satoshi: utxo.satoshi, scriptPk: utxo.scriptPk, ...(Number.isSafeInteger(utxo.sourceCursor) ? { sourceCursor: utxo.sourceCursor } : {}) })),
       }),
     },
   );
@@ -376,7 +379,7 @@ export async function confirmSpendableUtxos(network: string, address: string, mi
   return result as WorkerSafeUtxoAttestation;
 }
 
-export async function confirmFractalSpendableUtxos(address: string, minimumSats: number, utxos: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk">>): Promise<WorkerSafeUtxoAttestation> {
+export async function confirmFractalSpendableUtxos(address: string, minimumSats: number, utxos: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk" | "sourceCursor">>): Promise<WorkerSafeUtxoAttestation> {
   return confirmSpendableUtxos("FRACTAL_BITCOIN_MAINNET", address, minimumSats, utxos);
 }
 

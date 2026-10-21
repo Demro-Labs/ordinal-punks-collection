@@ -47,7 +47,7 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
         {busy ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} {busy ? "Analyse…" : "Scanner les 4 adresses"}
       </button>
     </div>
-    <p className="mt-2 font-mono text-[9px] leading-4 text-[#718092]">BTC/FB · Legacy, Nested SegWit, Native SegWit, Taproot. La limite de 500 est un plafond de scan, pas un nombre garanti : UniSat ne renvoie ici que les UTXO disponibles. Inscriptions, Runes, Alkanes, poussières et sorties non vérifiées restent exclus des sats sûrs.</p>
+    <p className="mt-2 font-mono text-[9px] leading-4 text-[#718092]">BTC/FB · Legacy, Nested SegWit, Native SegWit, Taproot. La pagination suit le total annoncé par UniSat (curseur Worker maximal : 1 000 000 sorties disponibles). Inscriptions, Runes, Alkanes, poussières et sorties non vérifiées restent exclues des sats sûrs.</p>
     {notice && <p className="mt-2 font-mono text-[9px] leading-4 text-[#9ea7b3]" role="status">{notice}</p>}
     {rows && <div className="mt-3 space-y-2">
       {rows.map(row => {

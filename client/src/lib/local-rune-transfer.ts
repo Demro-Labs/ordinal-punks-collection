@@ -15,7 +15,7 @@ const INPUT_VBYTES: Record<AddressType, number> = { legacy: 150, "nested-segwit"
 export type LocalRuneTransferPlan = {
   network: OrdiNetwork; addressType: AddressType; sourceAddress: string; recipient: string;
   runeid: string; runeName: string; divisibility: number; amount: string; amountBaseUnits: string;
-  runeInputs: RuneUtxo[]; feeInputs: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk">>;
+  runeInputs: RuneUtxo[]; feeInputs: Array<Pick<SpendableUtxo, "txid" | "vout" | "satoshi" | "scriptPk" | "sourceCursor">>;
   psbtHex: string; runestoneHex: string; inputSats: number; outputSats: number; feeSats: number;
   feeRateSatVb: number; runeChangeBaseUnits: string; ownedOrdinals: Array<{ inscriptionId: string; location: string | null }>;
 };
@@ -147,7 +147,7 @@ export async function prepareLocalRuneTransfer(p: { network: OrdiNetwork; wallet
   psbt.addOutput({ script: runestone, value: BigInt(0) });
   psbt.addOutput({ address: recipient, value: BigInt(DUST) });
   psbt.addOutput({ address: account.address, value: BigInt(changeSats) });
-  return { network:p.network,addressType:p.addressType,sourceAddress:account.address,recipient,runeid:p.runeid,runeName:balance.spacedRune,divisibility:balance.divisibility,amount:p.amount,amountBaseUnits,inputSats:selected.reduce((n,x)=>n+x.satoshi,0)+feeInputs.reduce((n,x)=>n+x.satoshi,0),outputSats:DUST+changeSats,feeSats,feeRateSatVb:rate,runeChangeBaseUnits:runeChange.toString(),runeInputs:selected,feeInputs:feeInputs.map(({txid,vout,satoshi,scriptPk})=>({txid,vout,satoshi,scriptPk})),psbtHex:psbt.toHex(),runestoneHex:runestone.toString("hex"),ownedOrdinals:ordinalIndex.detail };
+  return { network:p.network,addressType:p.addressType,sourceAddress:account.address,recipient,runeid:p.runeid,runeName:balance.spacedRune,divisibility:balance.divisibility,amount:p.amount,amountBaseUnits,inputSats:selected.reduce((n,x)=>n+x.satoshi,0)+feeInputs.reduce((n,x)=>n+x.satoshi,0),outputSats:DUST+changeSats,feeSats,feeRateSatVb:rate,runeChangeBaseUnits:runeChange.toString(),runeInputs:selected,feeInputs:feeInputs.map(({txid,vout,satoshi,scriptPk,sourceCursor})=>({txid,vout,satoshi,scriptPk,sourceCursor})),psbtHex:psbt.toHex(),runestoneHex:runestone.toString("hex"),ownedOrdinals:ordinalIndex.detail };
 }
 async function assertCurrent(plan: LocalRuneTransferPlan) {
   const [utxos, ordinals, balance, safe] = await Promise.all([
@@ -162,12 +162,13 @@ async function assertCurrent(plan: LocalRuneTransferPlan) {
     const live = runeMap.get(outpoint(x.txid,x.vout));
     if (!live || live.satoshi !== x.satoshi || live.confirmations < 1 || live.runes.length !== 1 || live.runes[0].runeid !== plan.runeid || live.runes[0].amount !== x.runes[0].amount) throw new Error("Rune UTXO changed or acquired another asset.");
   }
-  for (const x of plan.feeInputs) {
+  const currentFeeInputs = plan.feeInputs.map(x => {
     const live = safe.find(y=>outpoint(y.txid,y.vout)===outpoint(x.txid,x.vout));
     if (!live || live.satoshi!==x.satoshi || live.scriptPk.toLowerCase()!==x.scriptPk.toLowerCase()) throw new Error("Fee UTXO is no longer safe.");
-  }
+    return { ...x, sourceCursor: live.sourceCursor };
+  });
   const feeInputSats = plan.feeInputs.reduce((total, input) => total + input.satoshi, 0);
-  await confirmSpendableUtxos(plan.network, plan.sourceAddress, feeInputSats, plan.feeInputs);
+  await confirmSpendableUtxos(plan.network, plan.sourceAddress, feeInputSats, currentFeeInputs);
   const indexed = utxos.filter(x=>!inscribed.has(outpoint(x.txid,x.vout))&&x.runes.length===1&&x.runes[0].runeid===plan.runeid).reduce((n,x)=>n+BigInt(x.runes[0].amount),BigInt(0));
   if (indexed!==BigInt(balance.amount)) throw new Error("Rune balance and UTXO index disagree.");
 }

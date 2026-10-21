@@ -265,10 +265,10 @@ describe("confirmFractalSpendableUtxos", () => {
       expect(String(input)).toBe("https://fractal-ordinal-live.servostar23.workers.dev/api/spendable-utxos/confirm");
       expect(init.method).toBe("POST");
       const body = JSON.parse(String(init.body));
-      expect(body).toMatchObject({ chain: "fractal", address: ADDRESS, minimumSats: 10_400, utxos: [{ txid: "a".repeat(64), vout: 0, satoshi: 10_500 }] });
+      expect(body).toMatchObject({ chain: "fractal", address: ADDRESS, minimumSats: 10_400, utxos: [{ txid: "a".repeat(64), vout: 0, satoshi: 10_500, sourceCursor: 500 }] });
       return Response.json({ chain: "fractal", address: ADDRESS, minimumSats: 10_400, safeSats: 10_500, sufficient: true, verifiedUtxoCount: 1, confirmedAt: new Date().toISOString() });
     });
-    const result = await confirmFractalSpendableUtxos(ADDRESS, 10_400, [{ txid: "a".repeat(64), vout: 0, satoshi: 10_500, scriptPk: "0014" + "11".repeat(20) }]);
+    const result = await confirmFractalSpendableUtxos(ADDRESS, 10_400, [{ txid: "a".repeat(64), vout: 0, satoshi: 10_500, scriptPk: "0014" + "11".repeat(20), sourceCursor: 500 }]);
     expect(result).toMatchObject({ sufficient: true, safeSats: 10_500, minimumSats: 10_400 });
   });
 
@@ -281,13 +281,16 @@ describe("confirmFractalSpendableUtxos", () => {
 
 describe("confirmSpendableUtxos network routing", () => {
   it("sends Bitcoin Local Vault confirmation to the Worker with the Bitcoin chain key", async () => {
+    let requestBody: Record<string, unknown> | null = null;
     installWindowAndFetch(async (input, init = {}) => {
       expect(String(input)).toBe(`${LIVE_DATA_API_BASE}/api/spendable-utxos/confirm`);
       const body = JSON.parse(String(init.body));
+      requestBody = body;
       expect(body).toMatchObject({ chain: "bitcoin", address: ADDRESS, minimumSats: 10_400 });
       return Response.json({ chain: "bitcoin", address: ADDRESS, minimumSats: 10_400, safeSats: 10_500, sufficient: true, verifiedUtxoCount: 1, confirmedAt: new Date().toISOString() });
     });
-    const result = await confirmSpendableUtxos("BITCOIN_MAINNET", ADDRESS, 10_400, [{ txid: "a".repeat(64), vout: 0, satoshi: 10_500, scriptPk: "0014" + "11".repeat(20) }]);
+    const result = await confirmSpendableUtxos("BITCOIN_MAINNET", ADDRESS, 10_400, [{ txid: "a".repeat(64), vout: 0, satoshi: 10_500, scriptPk: "0014" + "11".repeat(20), sourceCursor: 500 }]);
+    expect(requestBody).toMatchObject({ utxos: [{ sourceCursor: 500 }] });
     expect(result).toMatchObject({ chain: "bitcoin", sufficient: true, safeSats: 10_500 });
   });
 });
