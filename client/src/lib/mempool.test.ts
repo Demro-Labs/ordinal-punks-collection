@@ -441,3 +441,17 @@ describe("scanAddressUtxoInventory", () => {
       .rejects.toThrow(/page d’inventaire UTXO cohérente/i);
   });
 });
+
+
+describe("confirmSpendableUtxos live-indexer error messages", () => {
+  it("explains that an unstable UniSat inventory blocks local signing and broadcast", async () => {
+    installWindowAndFetch(async () => Response.json({
+      error: "UTXO_CONFIRM_AVAILABLE_UNSTABLE_RESPONSE",
+      code: "UTXO_CONFIRM_AVAILABLE_UNSTABLE_RESPONSE",
+    }, { status: 503 }));
+
+    await expect(confirmSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 10_000, [{
+      txid: "a".repeat(64), vout: 0, satoshi: 12_000, scriptPk: "0014" + "11".repeat(20), sourceCursor: 0,
+    }])).rejects.toThrow(/Les données UniSat ont changé ou sont incohérentes.*Aucune signature ni diffusion/i);
+  });
+});
