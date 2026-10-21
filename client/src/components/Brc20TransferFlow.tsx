@@ -843,7 +843,7 @@ export function Brc20TransferFlow({
         />
         <span>
           <ShieldCheck size={12} className="mr-1 inline text-[#f2bd63]" />
-          Je confirme le réseau, le destinataire et le montant exact {amountToTransfer} {ticker}. L’inscription de transfert sera créée pour ce montant, puis son envoi nécessitera une approbation distincte dans UniSat.
+          {selectedInscriptionId ? `Je confirme l’envoi de l’inscription déjà sélectionnée (${selectedInscriptionId}) vers cette adresse, sur le réseau ${chainLabel}. Je vérifierai les frais puis j’approuverai le paiement dans UniSat.` : `Je confirme le réseau, le destinataire et le montant exact ${amountToTransfer} ${ticker}. L’inscription de transfert sera créée pour ce montant, puis son envoi nécessitera une approbation distincte dans UniSat.`}
         </span>
       </label>
       {confirmed && recipient.trim() && (
