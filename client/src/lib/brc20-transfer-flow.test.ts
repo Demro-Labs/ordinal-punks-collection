@@ -56,7 +56,7 @@ describe("BRC-20 transfer flow", () => {
   });
 
   it("restores only valid progress belonging to the exact site, wallet and network", () => {
-    const raw = JSON.stringify({ ...progress, paymentTxid: "a".repeat(64), inscriptionId: `${"b".repeat(64)}i12` });
+    const raw = JSON.stringify({ ...progress, paymentStarted: true, paymentTxid: "a".repeat(64), inscriptionId: `${"b".repeat(64)}i12` });
     expect(parseBrc20TransferProgress(raw, identity)).toMatchObject({
       orderId: "order-123",
       paymentTxid: "a".repeat(64),
