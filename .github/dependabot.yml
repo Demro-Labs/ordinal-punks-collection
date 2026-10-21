@@ -8,6 +8,14 @@ updates:
       time: "04:00"
       timezone: Etc/UTC
     open-pull-requests-limit: 5
+    ignore:
+      # These major releases require source-code migrations; keep Dependabot on compatible lines.
+      - dependency-name: "recharts"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "react-resizable-panels"
+        update-types:
+          - "version-update:semver-major"
     groups:
       development-minor-and-patch:
         dependency-type: development
