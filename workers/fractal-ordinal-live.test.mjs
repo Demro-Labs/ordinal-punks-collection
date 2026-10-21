@@ -2207,7 +2207,7 @@ test('Worker restarts confirmation from cursor zero when UniSat changes the avai
 
 test('Worker retries a complete UTXO confirmation scan once when the available inventory changes mid-scan', async () => {
   const previousFetch = globalThis.fetch;
-  const address = 'bc1qtestaddress0000000000000000000000000';
+  const address = 'bc1qutxoretrytest000000000000000000000000000';
   const candidate = { address, txid: 'bb'.repeat(32), vout: 0, satoshi: 50000, scriptPk: '0014' + '66'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
   const cursors = [];
   let cursor25Calls = 0;
@@ -2236,7 +2236,7 @@ test('Worker retries a complete UTXO confirmation scan once when the available i
   };
   try {
     const body = JSON.stringify({ chain: 'bitcoin', address, minimumSats: 40000, utxos: [{ txid: candidate.txid, vout: 0, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk }] });
-    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.253', body }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.199', body }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
     const data = await response.json();
     assert.equal(response.status, 200, JSON.stringify(data));
     assert.equal(data.sufficient, true);
