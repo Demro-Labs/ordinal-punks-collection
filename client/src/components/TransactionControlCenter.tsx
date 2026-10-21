@@ -23,6 +23,10 @@ export function TransactionControlCenter({ session }: { session: LocalVaultSiteS
         <span className="inline-flex items-center gap-2 rounded-full border border-[#d7b77b]/30 bg-[#0b100f]/70 px-3 py-2 font-mono text-[9px] uppercase tracking-[.1em] text-[#e4c98f]"><span className="h-1.5 w-1.5 rounded-full bg-[#d7b77b]" /> Réseau sélectionné · {networkLabel}</span>
       </div>
 
+      <div className="mb-4 grid gap-3 md:grid-cols-2" aria-label="Parcours A et B des transferts Local Vault">
+        <article className="rounded-lg border border-[#70c7a0]/30 bg-[#0b100f]/75 p-3"><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#9fe0bd]">Parcours A · actif existant</p><p className="mt-1 text-xs leading-5 text-[#9ea7b3]">Choisir l’actif existant, vérifier le réseau, le destinataire et tous les UTXO, examiner la transaction, signer dans le Local Vault puis confirmer la diffusion.</p></article>
+        <article className="rounded-lg border border-[#d7b77b]/30 bg-[#0b100f]/75 p-3"><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#e4c98f]">Parcours B · préparation requise</p><p className="mt-1 text-xs leading-5 text-[#9ea7b3]">Pour BRC-20 classique, créer d’abord l’inscription TRANSFER puis envoyer cette inscription dans une transaction distincte. Les autres protocoles utilisent leur constructeur dédié; aucun transfert n’est lancé automatiquement.</p></article>
+      </div>
       <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-4">
         <article className="rounded-lg border border-[#27332f] bg-[#0b100f]/75 p-3">
           <p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#9fe0bd]">01 · Entrées</p>
