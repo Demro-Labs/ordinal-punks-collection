@@ -332,40 +332,91 @@ export function Brc20TransferFlow({
     } finally { setBusyAction(""); }
   };
 
-  const sendSelectedBrc20Inscription = async () => {
+  const checkSelectedTransferFeeUtxos = async () => {
     const provider = wallet();
     const selected = scannedInscriptions.find(item => item.inscriptionId === selectedInscriptionId);
     const target = recipient.trim();
-    if (!selected || !provider?.sendInscription) { setMessage("Sélectionnez une inscription BRC-20 et vérifiez que UniSat prend en charge sendInscription."); return; }
+    if (!provider || !selected) { setMessage("Sélectionnez une inscription BRC-20 avant de vérifier les frais."); return; }
     if (!target || !confirmed || validatedRecipient !== target || ownershipProofKey !== ownershipContextKey) {
-      setMessage("Confirmez le destinataire et le montant, vérifiez l’adresse et terminez la preuve de propriété UniSat avant le transfert.");
+      setMessage("Vérifiez l’adresse destinataire, confirmez le transfert et terminez la preuve de propriété avant le contrôle des frais.");
       return;
     }
-    setBusyAction("sending");
-    setMessage("Vérification du réseau et de l’adresse avant la demande de transfert UniSat…");
+    setBusyAction("preparing");
+    setTransferFeePreflight(null);
+    setMessage("Contrôle des UTXO de frais confirmés, sans inscription, Rune ni Alkane. Aucun transfert n’est encore envoyé.");
     try {
-      await validateMempoolAddress(network, target);
-      const currentAccounts = await provider.getAccounts?.();
-      if (!currentAccounts?.includes(address)) throw new Error("L’adresse active du wallet a changé. Reconnectez UniSat et recommencez.");
-      const chain = await provider.getChain?.();
+      const [accounts, chain, estimate] = await Promise.all([
+        provider.getAccounts?.() ?? Promise.resolve([]),
+        provider.getChain?.() ?? Promise.resolve(undefined),
+        getRecommendedFeeEstimate(network),
+      ]);
       const expectedChain = network === "BITCOIN_MAINNET" ? "BITCOIN_MAINNET" : "FRACTAL_BITCOIN_MAINNET";
-      if (chain?.enum && chain.enum !== expectedChain) throw new Error("Le réseau UniSat ne correspond pas au réseau sélectionné. Aucun transfert demandé.");
-      // A separate explicit user click requests the transfer in UniSat; this does not create or pay for a new inscription.
-      const result = await provider.sendInscription(target, selected.inscriptionId, { feeRate });
-      const txid = txidOf(result);
-      if (!/^[a-f0-9]{64}$/i.test(txid)) throw new Error("UniSat n’a pas renvoyé de TXID valide. Vérifiez UniSat et le mempool avant toute nouvelle tentative.");
-      setMessage(`Inscription BRC-20 ${selected.ticker} (${selected.amount}) envoyée. TXID : ${txid}`);
-      setSelectedInscriptionId("");
-      setConfirmed(false);
-      setValidatedRecipient("");
-      setOwnershipProofKey(null);
-      setScannedInscriptions(items => items.filter(item => item.inscriptionId !== selected.inscriptionId));
-      onDone();
+      if (!accounts.includes(address)) throw new Error("Le compte UniSat actif ne correspond plus à l’adresse source.");
+      if (chain?.enum && chain.enum !== expectedChain) throw new Error("Le réseau UniSat ne correspond pas au réseau sélectionné.");
+      await validateMempoolAddress(network, target);
+      const liveFeeRate = Math.max(1, Math.ceil(estimate.feeRate));
+      setFeeRate(liveFeeRate);
+      await ensureNativePaymentBalance(network, address, 546, liveFeeRate, "inscribe-payment", { mobile: isMobileUniSatDevice() });
+      if (selectedInscriptionId !== selected.inscriptionId || recipient.trim() !== target) {
+        throw new Error("L’inscription sélectionnée ou le destinataire a changé pendant le contrôle. Recommencez.");
+      }
+      setTransferFeePreflight({ inscriptionId: selected.inscriptionId, recipient: target, expiresAt: Date.now() + 60_000 });
+      setMessage("UTXO de frais vérifiés. Dans les 60 secondes, appuyez sur « Envoyer l’inscription » pour ouvrir immédiatement l’approbation UniSat.");
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "État du transfert incertain. Vérifiez UniSat et le mempool avant de réessayer.");
+      setTransferFeePreflight(null);
+      setMessage("Envoi bloqué avant UniSat; aucune transaction n’a été demandée. " + (cause instanceof Error ? cause.message : String(cause)) + " Ajoutez si nécessaire un UTXO confirmé sans actif protocolaire, puis relancez le contrôle.");
     } finally {
       setBusyAction("");
     }
+  };
+
+  const sendSelectedBrc20Inscription = () => {
+    const provider = wallet();
+    const selected = scannedInscriptions.find(item => item.inscriptionId === selectedInscriptionId);
+    const target = recipient.trim();
+    if (!selected || !provider?.sendInscription) {
+      setMessage("Sélectionnez une inscription BRC-20 et vérifiez que UniSat prend en charge sendInscription.");
+      return;
+    }
+    if (!target || !confirmed || validatedRecipient !== target || ownershipProofKey !== ownershipContextKey) {
+      setMessage("Confirmez le destinataire et terminez la preuve de propriété avant le transfert.");
+      return;
+    }
+    if (!transferFeePreflight || transferFeePreflight.inscriptionId !== selected.inscriptionId ||
+        transferFeePreflight.recipient !== target || Date.now() >= transferFeePreflight.expiresAt) {
+      setTransferFeePreflight(null);
+      setMessage("Le contrôle des UTXO de frais est absent ou expiré. Vérifiez les UTXO avant l’approbation UniSat; aucun transfert n’a été demandé.");
+      return;
+    }
+    setBusyAction("sending");
+    setTransferFeePreflight(null);
+    setMessage("Confirmez dans UniSat l’envoi de l’inscription sélectionnée vers le destinataire.");
+    let sendRequest: Promise<string | { txid?: string }>;
+    try {
+      // Invoke the wallet bridge synchronously in this explicit click handler so UniSat can open its approval UI.
+      sendRequest = provider.sendInscription(target, selected.inscriptionId, { feeRate });
+    } catch (cause) {
+      setBusyAction("");
+      setMessage(cause instanceof Error ? cause.message : "UniSat n’a pas pu ouvrir la demande d’envoi. Vérifiez le portefeuille avant de réessayer.");
+      return;
+    }
+    void (async () => {
+      try {
+        const txid = txidOf(await sendRequest);
+        if (!/^[a-f0-9]{64}$/i.test(txid)) throw new Error("UniSat n’a pas retourné de TXID valide. Vérifiez UniSat et le mempool avant toute nouvelle tentative.");
+        setMessage(`Inscription BRC-20 ${selected.ticker} (${selected.amount}) envoyée. TXID : ${txid}`);
+        setSelectedInscriptionId("");
+        setConfirmed(false);
+        setValidatedRecipient("");
+        setOwnershipProofKey(null);
+        setScannedInscriptions(items => items.filter(item => item.inscriptionId !== selected.inscriptionId));
+        onDone();
+      } catch (cause) {
+        setMessage((cause instanceof Error ? cause.message : "L’état du transfert est incertain.") + " Vérifiez UniSat et le mempool avant de réessayer pour éviter un doublon.");
+      } finally {
+        setBusyAction("");
+      }
+    })();
   };
 
   const pollOrder = async (id: string) => {
@@ -791,8 +842,8 @@ export function Brc20TransferFlow({
       : validatedRecipient !== recipient.trim()
         ? "Vérifier l’adresse destinataire"
         : "2 · Payer la création avec UniSat";
-  const transferFeePreflightValid = Boolean(progress?.inscriptionId && transferFeePreflight &&
-    transferFeePreflight.inscriptionId === progress.inscriptionId &&
+  const transferFeePreflightValid = Boolean((progress?.inscriptionId || selectedInscriptionId) && transferFeePreflight &&
+    transferFeePreflight.inscriptionId === (progress?.inscriptionId || selectedInscriptionId) &&
     transferFeePreflight.recipient === recipient.trim() && Date.now() < transferFeePreflight.expiresAt);
   const canSend = nextAction === "send-inscription" && !busyAction && Boolean(recipient.trim()) && confirmed &&
     validatedRecipient === recipient.trim() && ownershipProofKey === ownershipContextKey && transferFeePreflightValid;
@@ -863,7 +914,7 @@ export function Brc20TransferFlow({
           </>
         )}
         {selectedInscriptionId && (
-          <p className="mt-2 break-all font-mono text-[9px] text-[#70c7a0]">Inscription sélectionnée : {selectedInscriptionId}. Cliquez sur « Payer les frais et transférer » pour ouvrir la demande UniSat : vérifiez les frais réseau et approuvez le paiement dans le wallet. Seule cette inscription sera envoyée à l’adresse destinataire.</p>
+          <p className="mt-2 break-all font-mono text-[9px] text-[#70c7a0]">Inscription sélectionnée : {selectedInscriptionId}. Vérifiez d’abord les UTXO de frais sûrs, puis envoyez uniquement cette inscription au destinataire après l’approbation UniSat.</p>
         )}
       </section>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -930,11 +981,18 @@ export function Brc20TransferFlow({
       )}
 
       {selectedInscriptionId && !progress && (
-        <button type="button" onClick={() => void sendSelectedBrc20Inscription()}
-          disabled={Boolean(busyAction) || !confirmed || !recipient.trim() || validatedRecipient !== recipient.trim() || ownershipProofKey !== ownershipContextKey}
-          className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
-          {busyAction === "sending" ? <><Loader2 size={13} className="animate-spin" /> Envoi en cours…</> : <><Send size={13} /> Payer les frais et transférer l’inscription sélectionnée</>}
-        </button>
+        <>
+          <button type="button" onClick={() => void checkSelectedTransferFeeUtxos()}
+            disabled={Boolean(busyAction) || !confirmed || !recipient.trim() || validatedRecipient !== recipient.trim() || ownershipProofKey !== ownershipContextKey || transferFeePreflightValid}
+            className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#3b434d] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#d9d3c6] disabled:opacity-40">
+            {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Vérification des UTXO…</> : <><ShieldCheck size={13} /> {transferFeePreflightValid ? "UTXO de frais vérifiés · valides 60 s" : "1 · Vérifier les UTXO de frais"}</>}
+          </button>
+          <button type="button" onClick={sendSelectedBrc20Inscription}
+            disabled={Boolean(busyAction) || !confirmed || !recipient.trim() || validatedRecipient !== recipient.trim() || ownershipProofKey !== ownershipContextKey || !transferFeePreflightValid}
+            className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
+            {busyAction === "sending" ? <><Loader2 size={13} className="animate-spin" /> Envoi en cours…</> : <><Send size={13} /> 2 · Envoyer l’inscription au destinataire avec UniSat</>}
+          </button>
+        </>
       )}
       {progress && !progress.paymentStarted && !progress.paymentTxid && !progress.inscriptionId && (
         <div className="mt-3 border border-[#d99a54]/60 bg-[#0b0d10] p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]" aria-label="Reçu de paiement BRC-20">
