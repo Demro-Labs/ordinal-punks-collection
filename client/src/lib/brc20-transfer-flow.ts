@@ -51,6 +51,22 @@ const isPositiveDecimal = (value: unknown): value is string =>
   typeof value === "string" && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value) && /[1-9]/.test(value);
 const isTxid = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
 
+export function isConsistentBrc20PaymentState(state: {
+  paymentStarted: unknown;
+  paymentTxid: unknown;
+  inscriptionId: unknown;
+}): boolean {
+  if (typeof state.paymentStarted !== "boolean") return false;
+  const paymentTxid = state.paymentTxid ?? "";
+  const inscriptionId = state.inscriptionId ?? "";
+  if (
+    (paymentTxid !== "" && !isTxid(paymentTxid)) ||
+    (inscriptionId !== "" && (typeof inscriptionId !== "string" || !/^[a-f0-9]{64}i\\d+$/i.test(inscriptionId))) ||
+    ((paymentTxid !== "" || inscriptionId !== "") && !state.paymentStarted)
+  ) return false;
+  return true;
+}
+
 export function parseBrc20TransferProgress(raw: string | null, identity: Brc20TransferIdentity): Brc20TransferProgress | null {
   if (!raw) return null;
   try {
@@ -71,11 +87,8 @@ export function parseBrc20TransferProgress(raw: string | null, identity: Brc20Tr
     const inscriptionId = data.inscriptionId ?? "";
     const transferTxid = data.transferTxid ?? "";
     if (
-      (paymentTxid !== "" && !isTxid(paymentTxid)) ||
-      (inscriptionId !== "" && !/^[a-f0-9]{64}i\d+$/i.test(inscriptionId)) ||
+      !isConsistentBrc20PaymentState({ paymentStarted: data.paymentStarted, paymentTxid, inscriptionId }) ||
       (transferTxid !== "" && !isTxid(transferTxid)) ||
-      (paymentTxid !== "" && !data.paymentStarted) ||
-      (inscriptionId !== "" && !data.paymentStarted) ||
       (data.transferStarted && !inscriptionId) ||
       (transferTxid !== "" && !data.transferStarted)
     ) return null;
