@@ -3,6 +3,7 @@ import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
 import type { AddressType, OrdiAddress, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
 import { confirmSpendableUtxos, getMempoolConfig, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
+import { assertLocalVaultReviewIntegrity, assertLocalVaultReviewUnchanged } from "@/lib/local-vault-core";
 
 const globalWithBuffer = globalThis as typeof globalThis & { Buffer?: typeof Buffer };
 if (!globalWithBuffer.Buffer) globalWithBuffer.Buffer = Buffer;
@@ -63,11 +64,7 @@ function estimatedVsize(addressType: AddressType, inputCount: number, outputs: R
   }, 0));
 }
 function assertSameReview(left: LocalPsbtReview, right: LocalPsbtReview) {
-  if (left.psbtHex.toLowerCase() !== right.psbtHex.toLowerCase() || left.network !== right.network || left.addressType !== right.addressType || left.sourceAddress !== right.sourceAddress ||
-    left.inputSats !== right.inputSats || left.outputSats !== right.outputSats || left.feeSats !== right.feeSats ||
-    JSON.stringify(left.inputs) !== JSON.stringify(right.inputs) || JSON.stringify(left.outputs) !== JSON.stringify(right.outputs)) {
-    throw new Error("Le PSBT, les UTXO ou les détails examinés ont changé; aucune signature ni diffusion.");
-  }
+  assertLocalVaultReviewUnchanged(left, right);
 }
 async function verifyInputs(network: OrdiNetwork, walletAddress: string, inputs: ReviewedInput[], minimumSats: number) {
   const safe = await getSpendableUtxos(network, walletAddress, minimumSats, { requiredOutpoints: inputs.map(outpointKey) });
@@ -202,7 +199,9 @@ export async function reviewLocalPsbt(psbtHex: string, wallet: OrdiWalletRecord,
   const vsize = estimatedVsize(addressType, inputs.length, outputs);
   const feeRateSatVb = feeSats / vsize;
   if (!Number.isFinite(feeRateSatVb) || feeRateSatVb > MAX_FEE_RATE) throw new Error("Le taux de frais estimé dépasse la limite de sécurité du Local Vault.");
-  return { psbtHex, network, addressType, sourceAddress, inputCount: psbt.inputCount, outputCount: outputs.length, inputSats, outputSats, feeSats, feeRateSatVb, inputs, outputs };
+  const review: LocalPsbtReview = { psbtHex, network, addressType, sourceAddress, inputCount: psbt.inputCount, outputCount: outputs.length, inputSats, outputSats, feeSats, feeRateSatVb, inputs, outputs };
+  assertLocalVaultReviewIntegrity(review);
+  return review;
 }
 
 function signerForAccount(account: OrdiAddress, type: AddressType) {
