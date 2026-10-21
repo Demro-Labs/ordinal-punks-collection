@@ -6,6 +6,7 @@ import { LocalPsbtSignerPanel } from "@/components/LocalPsbtSignerPanel";
 import { LocalNativeTransferPanel } from "@/components/LocalNativeTransferPanel";
 import { LocalVaultAssetPanel } from "@/components/LocalVaultAssetPanel";
 import { LocalVaultPortfolioPanel } from "@/components/LocalVaultPortfolioPanel";
+import { LocalQrCode } from "@/components/LocalQrCode";
 import {
   ADDRESS_SPECS,
   createMnemonic,
@@ -35,10 +36,6 @@ function copy(value: string) {
 
 function short(value: string) {
   return `${value.slice(0, 12)}…${value.slice(-10)}`;
-}
-
-function qrUrl(value: string) {
-  return `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&data=${encodeURIComponent(value)}`;
 }
 
 const inputClass = "min-h-12 w-full border border-[#3b434d] bg-[#0b0f13] p-3 font-mono text-base text-[#f3efe5] placeholder:text-[#718092] sm:text-sm";
@@ -310,7 +307,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
                 </div>
                 {error && <p className="mt-4 break-words border border-[#a45e54]/50 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#e6a69b]" role="alert">{error}</p>}
                 <div className="mt-4 grid min-w-0 gap-3 sm:mt-5 sm:grid-cols-2 xl:grid-cols-4">{addresses.map(item => <article key={item.type} className="min-w-0 border border-[#2c323a] bg-[#12171d] p-4">
-                  <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#f2bd63]">{item.label}</p><p className="mt-2 break-all font-mono text-[10px] text-[#d9d3c6]">{short(item.address)}</p></div><button type="button" onClick={() => copy(item.address)} className="flex min-h-10 min-w-10 shrink-0 items-center justify-center text-[#9ea7b3] hover:text-[#f2bd63]" aria-label="Copy address"><Copy size={15} /></button><button type="button" onClick={() => setShowReceiveQr(current => ({ ...current, [item.type]: !current[item.type] }))} className="flex min-h-10 min-w-10 shrink-0 items-center justify-center text-[#9ea7b3] hover:text-[#f2bd63]" aria-label={`Show receive QR for ${item.label}`} aria-expanded={Boolean(showReceiveQr[item.type])}><QrCode size={15} /></button></div>{showReceiveQr[item.type] && <div className="mt-3 border border-[#2c323a] bg-white p-3"><img src={qrUrl(item.address)} alt={`${item.label} receive address QR code`} width="180" height="180" loading="eager" onError={event => { const image = event.currentTarget; if (image.dataset.qrFallback !== "used") { image.dataset.qrFallback = "used"; image.src = `https://chart.googleapis.com/chart?cht=qr&chs=180x180&chld=M|1&chl=${encodeURIComponent(item.address)}`; } }} className="mx-auto h-[180px] w-[180px]" /><p className="mt-2 break-all text-center font-mono text-[9px] text-[#0b0f13]">Receive on {network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"}</p></div>}
+                  <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#f2bd63]">{item.label}</p><p className="mt-2 break-all font-mono text-[10px] text-[#d9d3c6]">{short(item.address)}</p></div><button type="button" onClick={() => copy(item.address)} className="flex min-h-10 min-w-10 shrink-0 items-center justify-center text-[#9ea7b3] hover:text-[#f2bd63]" aria-label="Copy address"><Copy size={15} /></button><button type="button" onClick={() => setShowReceiveQr(current => ({ ...current, [item.type]: !current[item.type] }))} className="flex min-h-10 min-w-10 shrink-0 items-center justify-center text-[#9ea7b3] hover:text-[#f2bd63]" aria-label={`Show receive QR for ${item.label}`} aria-expanded={Boolean(showReceiveQr[item.type])}><QrCode size={15} /></button></div>{showReceiveQr[item.type] && <div className="mt-3 border border-[#2c323a] bg-white p-3"><LocalQrCode value={item.address} alt={`${item.label} receive address QR code`} size={180} /><p className="mt-2 break-all text-center font-mono text-[9px] text-[#0b0f13]">Receive on {network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"}</p></div>}
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <div className="border border-[#2c323a] bg-[#0b0f13] p-2">
                       <p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#9fe0bd]">Bitcoin · BTC</p>
