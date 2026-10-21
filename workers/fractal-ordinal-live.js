@@ -95,14 +95,7 @@ function isRateLimited(request) {
         scanned += 1;
         if (scanned >= 256) break;
       }
-      // Keep the table bounded without permanently rejecting every new client
-      // after a burst of distinct IPs. Expired entries are preferred; if all slots
-      // are still live, evict the oldest bucket (best-effort per-isolate throttle).
-      // Durable/global abuse protection belongs in Cloudflare rate limiting rules.
-      if (rateBuckets.size >= 10000) {
-        const oldestKey = rateBuckets.keys().next().value;
-        if (oldestKey !== undefined) rateBuckets.delete(oldestKey);
-      }
+      if (rateBuckets.size >= 10000) return true;
     }
     bucket = { count: 0, expiresAt: now + RATE_WINDOW_MS };
     rateBuckets.set(ip, bucket);
