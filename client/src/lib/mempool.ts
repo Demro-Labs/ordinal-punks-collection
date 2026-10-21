@@ -19,6 +19,18 @@ export const MEMPOOL_ENDPOINTS: Record<string, MempoolConfig> = {
 
 export function getMempoolConfig(network?: string) { return network ? MEMPOOL_ENDPOINTS[network] : undefined; }
 
+export function formatLiveIndexerHttpError(status: number, retryAfter: string | null = null, upstreamMessage?: string): string {
+  const detail = typeof upstreamMessage === "string" && upstreamMessage.length <= 180 ? upstreamMessage.replace(/\s+/g, " ").trim() : "";
+  const suffix = detail ? ` Détail du service: ${detail}` : "";
+  if (status === 401) return "Authentification refusée (HTTP 401). Vérifiez la configuration du proxy et la clé côté serveur; ne publiez jamais la clé." + suffix;
+  if (status === 403) return "Accès refusé (HTTP 403). Consultez les journaux du Worker pour distinguer un refus du Worker d’un refus UniSat; vérifiez la clé, les autorisations et l’endpoint du réseau." + suffix;
+  if (status === 429) return "Limite de requêtes atteinte (HTTP 429). " + (retryAfter && /^\d{1,5}$/.test(retryAfter) ? `Réessayez après ${retryAfter} seconde(s).` : "Respectez Retry-After et réduisez la fréquence des scans.") + suffix;
+  if (status >= 500) return `Service de données indisponible (HTTP ${status}) côté Worker ou UniSat. Réessayez plus tard; ne contournez pas la vérification des UTXO.` + suffix;
+  if (status === 404) return "Endpoint ou ressource introuvable (HTTP 404). Vérifiez le chemin API et le réseau sélectionné." + suffix;
+  if (status === 400) return "Requête rejetée (HTTP 400). Vérifiez les paramètres réseau, adresse et pagination." + suffix;
+  return `Échec HTTP ${status} du service de données UniSat/Worker.` + suffix;
+}
+
 async function requestJson<T>(url: string, timeoutMs = 8_000, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -47,7 +59,7 @@ async function requestJson<T>(url: string, timeoutMs = 8_000, init?: RequestInit
         ) {
           throw new Error("Les données UniSat ont changé ou sont incohérentes pendant la confirmation des UTXO. Actualisez le coffre, reconstruisez le PSBT et recommencez l’examen. Aucune signature ni diffusion n’a été effectuée.");
         }
-        const message = typeof failure?.error === "string" ? failure.error : `Live API HTTP ${response.status}`;
+        const message = formatLiveIndexerHttpError(response.status, response.headers.get("Retry-After"), typeof failure?.error === "string" ? failure.error : undefined);
         const code = typeof failure?.code === "string" && /^[A-Z0-9_]{1,80}$/.test(failure.code) ? ` [${failure.code}]` : "";
         throw new Error(`${message}${code}`);
       }
