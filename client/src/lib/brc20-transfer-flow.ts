@@ -73,7 +73,11 @@ export function parseBrc20TransferProgress(raw: string | null, identity: Brc20Tr
     if (
       (paymentTxid !== "" && !isTxid(paymentTxid)) ||
       (inscriptionId !== "" && !/^[a-f0-9]{64}i\d+$/i.test(inscriptionId)) ||
-      (transferTxid !== "" && !isTxid(transferTxid))
+      (transferTxid !== "" && !isTxid(transferTxid)) ||
+      (paymentTxid !== "" && !data.paymentStarted) ||
+      (inscriptionId !== "" && !data.paymentStarted) ||
+      (data.transferStarted && !inscriptionId) ||
+      (transferTxid !== "" && !data.transferStarted)
     ) return null;
     return {
       version: 1,
