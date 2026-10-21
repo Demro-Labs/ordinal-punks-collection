@@ -1,15 +1,14 @@
 import { Buffer } from "buffer";
-
-// Ensure bitcoinjs-lib and ECC adapters see the same browser Buffer implementation
-// even when this transfer builder is imported without the PSBT signer module.
-const globalWithBuffer = globalThis as typeof globalThis & { Buffer?: typeof Buffer };
-if (!globalWithBuffer.Buffer) globalWithBuffer.Buffer = Buffer;
-
 import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
 import type { AddressType, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
 import { getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress, type SpendableUtxo } from "@/lib/mempool";
 import { parseFbAmountToSats } from "@/lib/native-fb-send";
+
+// Ensure bitcoinjs-lib and ECC adapters see the same browser Buffer implementation
+// even when this transfer builder is imported without the PSBT signer module.
+const globalWithBuffer = globalThis as typeof globalThis & { Buffer?: typeof Buffer };
+if (!globalWithBuffer.Buffer) globalWithBuffer.Buffer = Buffer;
 
 const MAX_INPUTS = 20;
 const DUST_SATS = 546;
