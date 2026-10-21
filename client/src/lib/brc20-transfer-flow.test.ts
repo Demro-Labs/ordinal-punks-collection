@@ -4,6 +4,7 @@ import {
   getBrc20TransferNextAction,
   getBrc20TransferStorageKey,
   isConsistentBrc20PaymentState,
+  isValidBrc20InscriptionId,
   parseBrc20TransferProgress,
   type Brc20TransferIdentity,
   type Brc20TransferProgress,
@@ -65,6 +66,15 @@ describe("BRC-20 transfer flow", () => {
     });
     expect(parseBrc20TransferProgress(raw, { ...identity, network: "FRACTAL_BITCOIN_MAINNET" })).toBeNull();
     expect(parseBrc20TransferProgress(raw, { ...identity, address: "bc1qother" })).toBeNull();
+  });
+
+  it("accepts only canonical inscription identifiers before advancing to step two", () => {
+    expect(isValidBrc20InscriptionId(`${"a".repeat(64)}i0`)).toBe(true);
+    expect(isValidBrc20InscriptionId(`${"b".repeat(64)}i123`)).toBe(true);
+    expect(isValidBrc20InscriptionId("pending")).toBe(false);
+    expect(isValidBrc20InscriptionId(`${"c".repeat(63)}i0`)).toBe(false);
+    expect(isValidBrc20InscriptionId(`${"d".repeat(64)}i`)).toBe(false);
+    expect(isValidBrc20InscriptionId(null)).toBe(false);
   });
 
   it("validates Local Vault payment state before restoring a saved order", () => {
