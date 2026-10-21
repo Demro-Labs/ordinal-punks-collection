@@ -192,8 +192,14 @@ export async function broadcastLocalRuneTransfer(plan: LocalRuneTransferPlan,wal
   const tx=validateTx(signed.rawTxHex,plan);
   if(tx.getId().toLowerCase()!==signed.txid.toLowerCase()) throw new Error("TXID does not match reviewed transaction.");
   const config=getMempoolConfig(plan.network); if(!config) throw new Error("Network is not configured.");
-  const response=await fetch(`${config.api}/api/tx`,{method:"POST",headers:{"Content-Type":"text/plain"},body:signed.rawTxHex});
-  const returned=(await response.text()).replace(/^"|"$/g,"").toLowerCase();
-  if(!response.ok||returned!==signed.txid.toLowerCase()) throw new Error(`Broadcast uncertain; verify TXID ${signed.txid} before retrying.`);
+  let response: Response, responseText: string;
+  try {
+    response=await fetch(`${config.api}/api/tx`,{method:"POST",headers:{"Content-Type":"text/plain",Accept:"text/plain"},body:signed.rawTxHex,cache:"no-store"});
+    responseText=(await response.text()).replace(/^"|"$/g,"").trim();
+  } catch {
+    throw new Error(`Broadcast outcome is uncertain. Check TXID ${signed.txid} on ${config.explorer} before retrying; the transaction may already have reached the network.`);
+  }
+  const returned=/^[a-f0-9]{64}$/i.test(responseText)?responseText.toLowerCase():"";
+  if(!response.ok||returned!==signed.txid.toLowerCase()) throw new Error(`Broadcast outcome is uncertain. Check TXID ${signed.txid} on ${config.explorer} before retrying${responseText&&responseText.length<160?` (${responseText})`:""}.`);
   return signed.txid;
 }
