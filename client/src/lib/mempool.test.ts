@@ -143,21 +143,35 @@ describe("getSpendableUtxos", () => {
     expect(result.reduce((sum, item) => sum + item.satoshi, 0)).toBe(1_092);
   });
 
-  it("fails closed when collectAll reaches the 500-output cap before the index is exhausted", async () => {
-    let calls = 0;
+  it("continues collectAll beyond 500 outputs until the indexer total is exhausted", async () => {
+    const cursors: number[] = [];
     installWindowAndFetch(async input => {
       const url = new URL(String(input));
       const cursor = Number(url.searchParams.get("cursor"));
-      calls += 1;
+      cursors.push(cursor);
+      const scannedCount = Math.min(25, 501 - cursor);
       return Response.json({
-        chain: "fractal", address: ADDRESS, cursor, nextCursor: cursor + 25, total: 501, scannedCount: 25, utxo: [],
+        chain: "fractal", address: ADDRESS, cursor, nextCursor: cursor + scannedCount, total: 501, scannedCount,
+        utxo: cursor === 500 ? [makeSafeUtxo({ txid: "b".repeat(64) })] : [],
       });
     });
 
-    await expect(getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1, { collectAll: true }))
-      .rejects.toThrow(/scan is incomplete.*500 of 501/i);
-    expect(calls).toBe(20);
+    const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1, { collectAll: true });
+    expect(cursors).toHaveLength(21);
+    expect(cursors.at(-1)).toBe(500);
+    expect(result).toHaveLength(1);
+    expect(result[0].txid).toBe("b".repeat(64));
   });
+
+  it("fails closed when the indexer stops advancing before its reported total", async () => {
+    installWindowAndFetch(async () => Response.json({
+      chain: "fractal", address: ADDRESS, cursor: 0, nextCursor: 0, total: 26, scannedCount: 0, utxo: [],
+    }));
+
+    await expect(getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1, { collectAll: true }))
+      .rejects.toThrow(/scan is incomplete.*0 of 26/i);
+  });
+
   it("keeps paging until every exact PSBT outpoint is verified", async () => {
     const cursors: number[] = [];
     installWindowAndFetch(async input => {
