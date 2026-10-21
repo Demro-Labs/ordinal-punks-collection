@@ -81,6 +81,20 @@ describe("Local Vault BTC/FB PSBT signer", () => {
     expect(tx.rawTxHex).toMatch(/^[a-f0-9]+$/);
   });
 
+  it("rejects a tampered signature before finalizing or broadcasting", async () => {
+    const prepared = makePsbt();
+    vi.mocked(getSpendableUtxos).mockResolvedValue([prepared.utxo]);
+    const review = await reviewLocalPsbt(prepared.hex, wallet, network);
+    const signed = await signLocalPsbt(prepared.hex, wallet, review);
+    const tampered = bitcoin.Psbt.fromHex(signed);
+    const signature = tampered.data.inputs[0].partialSig?.[0];
+    expect(signature).toBeDefined();
+    const badSignature = Buffer.from(signature!.signature);
+    badSignature[0] ^= 1;
+    tampered.updateInput(0, { partialSig: [{ pubkey: Buffer.from(signature!.pubkey), signature: badSignature }] });
+    await expect(finalizeLocalPsbt(tampered.toHex(), wallet, review)).rejects.toThrow(/signature locale est absente ou invalide/i);
+  });
+
   it("fails closed when a PSBT invents an input absent from the live safe-UTXO index", async () => {
     vi.mocked(getSpendableUtxos).mockResolvedValue([]);
     await expect(reviewLocalPsbt(makePsbt().hex, wallet, network)).rejects.toThrow(/UTXO confirmé et sans actif/i);
