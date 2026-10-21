@@ -255,10 +255,21 @@ export async function broadcastLocalPsbt(network: OrdiNetwork, rawTxHex: string,
   const account = wallet.addresses[review.addressType];
   if (!account || account.address !== review.sourceAddress) throw new Error("Le compte source a changé depuis l’examen.");
   await verifyInputs(network, account.address, review.inputs, review.inputSats);
-  const query = new URLSearchParams({ chain: network });
-  const response = await fetch(`${LIVE_DATA_API_BASE}/api/mempool/tx?${query}`, { method: "POST", headers: { "Content-Type": "text/plain", Accept: "application/json" }, body: tx.toHex(), cache: "no-store" });
-  const result = await response.json().catch(() => null) as { txid?: string; error?: string } | null;
-  const returned = typeof result?.txid === "string" ? result.txid.toLowerCase() : "";
-  if (!response.ok || returned !== expectedTxid.toLowerCase()) throw new Error(`Résultat de diffusion incertain. Vérifiez le TXID ${expectedTxid} dans Mempool avant de réessayer${result?.error ? ` (${result.error})` : ""}.`);
+  const config = getMempoolConfig(network);
+  if (!config) throw new Error("Aucun endpoint Mempool n’est configuré pour ce réseau.");
+  // Broadcast only the finalized, locally signed transaction to the matching chain.
+  // Mempool returns the transaction id as plain text, not a JSON object.
+  let response: Response;
+  try {
+    response = await fetch(config.api + "/api/tx", { method: "POST", headers: { "Content-Type": "text/plain", Accept: "text/plain" }, body: tx.toHex(), cache: "no-store" });
+  } catch {
+    throw new Error("Résultat de diffusion incertain. Vérifiez le TXID " + expectedTxid + " sur " + config.explorer + " avant toute nouvelle tentative.");
+  }
+  const responseText = (await response.text()).trim().replace(/^"|"$/g, "");
+  const returned = /^[a-f0-9]{64}$/i.test(responseText) ? responseText.toLowerCase() : "";
+  if (!response.ok || returned !== expectedTxid.toLowerCase()) {
+    const detail = responseText && responseText.length < 240 ? " (" + responseText + ")" : "";
+    throw new Error("Résultat de diffusion incertain. Vérifiez le TXID " + expectedTxid + " dans Mempool avant de réessayer" + detail + ".");
+  }
   return returned;
 }
