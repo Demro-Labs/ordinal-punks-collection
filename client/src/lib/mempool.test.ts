@@ -489,7 +489,7 @@ describe("UniSat/Worker HTTP diagnostics", () => {
     expect(formatLiveIndexerHttpError(503)).toMatch(/HTTP 503.*ne contournez pas/i);
   });
   it("ignores malformed retry hints and normalizes upstream detail", () => {
-    expect(formatLiveIndexerHttpError(403, "soon", "forbidden\\nsecret-token")).toContain("forbidden secret-token");
+    expect(formatLiveIndexerHttpError(403, "soon", ["forbidden", "secret-token"].join("\n"))).toContain("forbidden secret-token");
     expect(formatLiveIndexerHttpError(429, "1e9")).toMatch(/réduisez la fréquence/i);
   });
 });
