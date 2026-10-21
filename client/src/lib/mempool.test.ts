@@ -386,7 +386,7 @@ describe("Mempool fee fallback and Legacy transaction routing", () => {
   it.each([
     { network: "BITCOIN_MAINNET", endpoint: "https://mempool.space" },
     { network: "FRACTAL_BITCOIN_MAINNET", endpoint: "https://mempool.fractalbitcoin.io" },
-  ])("fetches Legacy parent hex from the matching $network Mempool REST endpoint", async ({ network }) => {
+  ])("fetches Legacy parent hex from the matching $network Mempool REST endpoint", async ({ network, endpoint }) => {
     const txid = "c".repeat(64);
     const rawHex = "02000000";
     const urls: string[] = [];
