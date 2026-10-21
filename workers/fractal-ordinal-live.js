@@ -1016,8 +1016,15 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
   const availableByOutpoint = new Map();
   const allCandidatesHaveCursor = [...candidateByOutpoint.values()].every(candidate => candidate.sourceCursor !== null);
+  // A cursor is only a pagination hint, not part of an outpoint's identity.
+  // The available-UTXO list can shift between the initial scan and PSBT review.
+  // Check a bounded window around each hint so harmless page drift does not reject
+  // an otherwise identical, still-safe UTXO. Exact outpoint/value/script checks remain mandatory.
   const candidatePageCursors = allCandidatesHaveCursor
-    ? [...new Set([...candidateByOutpoint.values()].map(candidate => candidate.sourceCursor))].sort((left, right) => left - right)
+    ? [...new Set([...candidateByOutpoint.values()].flatMap(candidate =>
+        Array.from({ length: 11 }, (_, index) => candidate.sourceCursor + (index - 5) * UTXO_CONFIRM_PAGE_SIZE)
+          .filter(value => value >= 0 && value <= MAX_UTXO_CONFIRM_CURSOR)
+      ))].sort((left, right) => left - right)
     : null;
   let cursor = 0;
   let sourceTotal = null;
@@ -1051,7 +1058,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
           typeof item?.isLowFee !== 'boolean' || (item?.isOpInRBF !== undefined && typeof item.isOpInRBF !== 'boolean') ||
           runeMetadata.some(value => !Array.isArray(value) || value.length !== 0) || alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) continue;
       const candidate = candidateByOutpoint.get(key);
-      if (candidate && (candidate.sourceCursor === null || candidate.sourceCursor === cursor) && candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: typeof item.isOpInRBF === 'boolean' ? item.isOpInRBF : null });
+      if (candidate && candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: typeof item.isOpInRBF === 'boolean' ? item.isOpInRBF : null });
     }
     if (availableByOutpoint.size === candidateByOutpoint.size) break;
     if (candidatePageCursors) {
