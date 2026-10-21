@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Copy, Download, Eye, EyeOff, LockKeyhole, LogOut, RefreshCw, ShieldCheck, Wallet, X } from "lucide-react";
+import { Copy, Download, Eye, EyeOff, LockKeyhole, LogOut, RefreshCw, ShieldCheck, Wallet, X, QrCode } from "lucide-react";
 import { UniSatWalletConnect } from "@/components/UniSatWalletConnect";
 import { LocalPsbtSignerPanel } from "@/components/LocalPsbtSignerPanel";
 import { LocalNativeTransferPanel } from "@/components/LocalNativeTransferPanel";
@@ -59,6 +59,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [reveal, setReveal] = useState<Record<string, boolean>>({});
+  const [receiveQrAddress, setReceiveQrAddress] = useState<{ label: string; address: string } | null>(null);
 
   useEffect(() => {
     setVaultExists(Boolean(readOrdiVault()));
@@ -305,7 +306,7 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
                 </div>
                 {error && <p className="mt-4 break-words border border-[#a45e54]/50 bg-[#a45e54]/10 p-3 font-mono text-[10px] leading-5 text-[#e6a69b]" role="alert">{error}</p>}
                 <div className="mt-4 grid min-w-0 gap-3 sm:mt-5 sm:grid-cols-2 xl:grid-cols-4">{addresses.map(item => <article key={item.type} className="min-w-0 border border-[#2c323a] bg-[#12171d] p-4">
-                  <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#f2bd63]">{item.label}</p><p className="mt-2 break-all font-mono text-[10px] text-[#d9d3c6]">{short(item.address)}</p></div><button type="button" onClick={() => copy(item.address)} className="flex min-h-10 min-w-10 shrink-0 items-center justify-center text-[#9ea7b3] hover:text-[#f2bd63]" aria-label="Copy address"><Copy size={15} /></button></div>
+                  <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#f2bd63]">{item.label}</p><p className="mt-2 break-all font-mono text-[10px] text-[#d9d3c6]">{short(item.address)}</p></div><div className="flex shrink-0 items-center"><button type="button" onClick={() => setReceiveQrAddress({ label: item.label, address: item.address })} className="flex min-h-10 min-w-10 items-center justify-center text-[#9fe0bd] hover:text-[#f2bd63]" aria-label={`Show receive QR for ${item.label}`} title="Receive deposit · QR code"><QrCode size={15} /></button><button type="button" onClick={() => copy(item.address)} className="flex min-h-10 min-w-10 items-center justify-center text-[#9ea7b3] hover:text-[#f2bd63]" aria-label="Copy address"><Copy size={15} /></button></div></div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <div className="border border-[#2c323a] bg-[#0b0f13] p-2">
                       <p className="font-mono text-[9px] uppercase tracking-[.12em] text-[#9fe0bd]">Bitcoin · BTC</p>
@@ -329,6 +330,18 @@ export function OrdiWallet({ site = "pokedex" }: { site?: "punks" | "pokedex" } 
               </div>}
             </>}
           </div>
+          {receiveQrAddress && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-[#050709]/85 p-4 backdrop-blur-sm" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setReceiveQrAddress(null); }}>
+            <section role="dialog" aria-modal="true" aria-labelledby="receive-qr-title" className="relative w-full max-w-sm border border-[#3b434d] bg-[#11161c] p-5 shadow-[0_24px_80px_rgba(0,0,0,.65)]">
+              <button type="button" onClick={() => setReceiveQrAddress(null)} className="absolute right-2 top-2 flex h-10 w-10 items-center justify-center text-[#9ea7b3] hover:bg-[#202831]" aria-label="Close receive QR"><X size={18} /></button>
+              <p className="font-mono text-[10px] uppercase tracking-[.18em] text-[#9fe0bd]">Receive deposit</p>
+              <h3 id="receive-qr-title" className="mt-2 pr-8 font-display text-xl text-[#f3efe5]">{receiveQrAddress.label}</h3>
+              <p className="mt-1 font-mono text-[10px] text-[#718092]">{network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin mainnet"} · QR encodes the address only</p>
+              <div className="mt-4 flex justify-center bg-white p-3"><img src={"https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=" + encodeURIComponent(receiveQrAddress.address)} alt={"Receive address QR for " + receiveQrAddress.label} width="240" height="240" className="h-60 w-60 max-w-full" /></div>
+              <p className="mt-4 break-all font-mono text-xs leading-5 text-[#d9d3c6]">{receiveQrAddress.address}</p>
+              <div className="mt-3 grid grid-cols-2 gap-2"><button type="button" onClick={() => copy(receiveQrAddress.address)} className="min-h-11 border border-[#3b434d] px-3 font-mono text-[9px] uppercase tracking-[.1em] text-[#f3efe5] hover:border-[#d99a54]"><Copy size={13} className="mr-1 inline" />Copy address</button><button type="button" onClick={() => setReceiveQrAddress(null)} className="min-h-11 bg-[#d99a54] px-3 font-mono text-[9px] uppercase tracking-[.1em] text-[#0b0d10]">Done</button></div>
+              <p className="mt-3 text-[10px] leading-5 text-[#718092]">Verify the selected network in your receiving wallet before sharing or sending. QR contains only the public address; never share private keys.</p>
+            </section>
+          </div>}
         </section>
       </div>, document.body)}
   </>;
