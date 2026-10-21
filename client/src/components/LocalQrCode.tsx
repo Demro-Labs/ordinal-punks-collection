@@ -15,7 +15,8 @@ export function LocalQrCode({ value, alt, size = 180 }: LocalQrCodeProps) {
     if (!value.trim()) return null;
     try {
       const createQr = qrCodeFactory as unknown as QrCodeFactory;
-      const code = createQr(0, "M");
+      // Version 6-M supports both address strings and longer bitcoin: payment URIs.
+      const code = createQr(6, "M");
       code.addData(value);
       code.make();
       const svg = code.createSvgTag(4, 12);
