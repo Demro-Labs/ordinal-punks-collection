@@ -214,8 +214,9 @@ function signerForAccount(account: OrdiAddress, type: AddressType) {
   const baseSigner = { publicKey, sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(privateKey))) };
   if (type !== "taproot") return baseSigner;
   const parityAdjustedKey = publicKey[0] === 3 ? Buffer.from(ecc.privateNegate(privateKey)) : privateKey;
-  const tapTweak = bitcoin.crypto.taggedHash("TapTweak", bitcoin.toXOnly(publicKey));
-  const tweakedPrivateKey = ecc.privateAdd(parityAdjustedKey, tapTweak);
+  // Normalize bitcoinjs-lib v7 Uint8Array outputs at the secp256k1 adapter boundary.
+  const tapTweak = Buffer.from(bitcoin.crypto.taggedHash("TapTweak", Buffer.from(bitcoin.toXOnly(publicKey))));
+  const tweakedPrivateKey = ecc.privateAdd(Buffer.from(parityAdjustedKey), Buffer.from(tapTweak));
   if (!tweakedPrivateKey) throw new Error("Impossible de dériver la clé Taproot signataire.");
   const tweakedPublicKey = ecc.pointFromScalar(tweakedPrivateKey, true);
   if (!tweakedPublicKey) throw new Error("Impossible de dériver la clé publique Taproot signataire.");
