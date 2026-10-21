@@ -613,6 +613,25 @@ export function Brc20TransferFlow({
     setMessage("Ready for a new transfer inscription.");
   };
 
+  // Hiding a completed receipt only clears this app's local progress record.
+  // It never calls UniSat, signs a transaction, or changes on-chain data.
+  const hideCompletedReceipt = () => {
+    const current = progressRef.current;
+    if (!current?.transferTxid || getBrc20TransferNextAction(current) !== "complete") {
+      setMessage("Masquage refusé : le transfert doit être confirmé avant de retirer son reçu de l’interface.");
+      return;
+    }
+    clearProgress();
+    setValidatedRecipient("");
+    setAmountToTransfer("");
+    setRecipient("");
+    setConfirmed(false);
+    setOwnershipProofKey(null);
+    setPaymentPreflight(null);
+    setTransferFeePreflight(null);
+    setMessage("Reçu masqué de cette interface uniquement. Aucune inscription ni transaction sur la blockchain n’a été supprimée.");
+  };
+
   const canPrepare = nextAction === "prepare" && !busyAction && Boolean(recipient.trim()) && confirmed &&
     validDecimal(amountToTransfer) && amountWithinBalance && ownershipProofKey === ownershipContextKey;
   const prepareButtonLabel = !validDecimal(amountToTransfer)
@@ -785,10 +804,17 @@ export function Brc20TransferFlow({
         </p>
       )}
       {nextAction === "complete" && (
-        <button type="button" onClick={startAnotherTransfer} disabled={Boolean(busyAction)}
-          className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#3b434d] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#d9d3c6] disabled:opacity-40">
-          <CheckCircle2 size={13} /> Done · prepare another transfer
-        </button>
+        <>
+          <button type="button" onClick={startAnotherTransfer} disabled={Boolean(busyAction)}
+            className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#3b434d] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#d9d3c6] disabled:opacity-40">
+            <CheckCircle2 size={13} /> Done · prepare another transfer
+          </button>
+          <button type="button" onClick={hideCompletedReceipt} disabled={Boolean(busyAction)}
+            aria-label="Masquer le reçu BRC-20 terminé de cette interface uniquement"
+            className="mt-2 w-full border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase tracking-[0.08em] text-[#aeb6c2] hover:border-[#d99a54] hover:text-[#f2bd63] disabled:opacity-40">
+            Masquer ce reçu (interface uniquement)
+          </button>
+        </>
       )}
       {progress && nextAction === "pay" && (
         <button type="button" onClick={discardUnpaidOrder} disabled={Boolean(busyAction)}
