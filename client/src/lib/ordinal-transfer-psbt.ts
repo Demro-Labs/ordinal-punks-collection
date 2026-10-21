@@ -606,8 +606,8 @@ export function extractAndVerifySignedOrdinalTransaction(
     signaturesValid = signedPsbt.validateSignaturesOfAllInputs(
       (publicKey, messageHash, signature) =>
         publicKey.length === 32
-          ? ecc.verifySchnorr(messageHash, publicKey, signature)
-          : ecc.verify(messageHash, publicKey, signature)
+          ? ecc.verifySchnorr(Buffer.from(messageHash), Buffer.from(publicKey), Buffer.from(signature))
+          : ecc.verify(Buffer.from(messageHash), Buffer.from(publicKey), Buffer.from(signature))
     );
   } catch {
     signaturesValid = false;
