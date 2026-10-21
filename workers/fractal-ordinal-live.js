@@ -1016,32 +1016,19 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
   const availableByOutpoint = new Map();
   const allCandidatesHaveCursor = [...candidateByOutpoint.values()].every(candidate => candidate.sourceCursor !== null);
-  // A cursor is only a pagination hint, not part of an outpoint's identity.
-  // The available-UTXO list can shift between the initial scan and PSBT review.
-  // Check a bounded window around each hint so harmless page drift does not reject
-  // an otherwise identical, still-safe UTXO. Exact outpoint/value/script checks remain mandatory.
+  // sourceCursor is only a hint. First search a small window for the common case;
+  // if any input moved farther, restart from cursor 0 and exhaust the live inventory.
+  // Only a complete sequential pass may prove that an outpoint is absent.
   const candidatePageCursors = allCandidatesHaveCursor
     ? [...new Set([...candidateByOutpoint.values()].flatMap(candidate =>
         Array.from({ length: 11 }, (_, index) => candidate.sourceCursor + (index - 5) * UTXO_CONFIRM_PAGE_SIZE)
           .filter(value => value >= 0 && value <= MAX_UTXO_CONFIRM_CURSOR)
       ))].sort((left, right) => left - right)
     : null;
-  let cursor = 0;
   let sourceTotal = null;
-  let expectedTotal = null;
   let scanComplete = false;
-  const maxPages = candidatePageCursors?.length ?? MAX_UTXO_CONFIRM_LEGACY_SCAN_PAGES;
-  for (let page = 0; page < maxPages && availableByOutpoint.size < candidateByOutpoint.size; page += 1) {
-    if (candidatePageCursors) cursor = candidatePageCursors[page];
-    const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${UTXO_CONFIRM_PAGE_SIZE}&withLowFee=true`, env));
-    const raw = source?.utxo;
-    const sourceCursor = Number(source?.cursor);
-    const total = Number(source?.total);
-    if (!Array.isArray(raw) || raw.length > UTXO_CONFIRM_PAGE_SIZE || sourceCursor !== cursor || !Number.isSafeInteger(total) || total < cursor + raw.length || (expectedTotal !== null && total !== expectedTotal)) {
-      throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_INVALID_RESPONSE');
-    }
-    sourceTotal = total;
-    expectedTotal ??= total;
+
+  const inspectAvailablePage = (raw, cursor) => {
     for (const item of raw) {
       if (item?.address !== address) throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_ADDRESS_MISMATCH');
       const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
@@ -1058,26 +1045,68 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
           typeof item?.isLowFee !== 'boolean' || (item?.isOpInRBF !== undefined && typeof item.isOpInRBF !== 'boolean') ||
           runeMetadata.some(value => !Array.isArray(value) || value.length !== 0) || alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) continue;
       const candidate = candidateByOutpoint.get(key);
-      if (candidate && candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: typeof item.isOpInRBF === 'boolean' ? item.isOpInRBF : null });
-    }
-    if (availableByOutpoint.size === candidateByOutpoint.size) break;
-    if (candidatePageCursors) {
-      if (page === candidatePageCursors.length - 1) scanComplete = true;
-      continue;
-    }
-    const nextCursor = cursor + raw.length;
-    if (raw.length === 0) {
-      if (cursor < total) {
-        if (cursor >= MAX_UTXO_CONFIRM_CURSOR) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
-        throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_SCAN_INCOMPLETE', 409);
+      if (candidate && candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) {
+        availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: typeof item.isOpInRBF === 'boolean' ? item.isOpInRBF : null });
       }
-      scanComplete = true;
-      break;
     }
-    if (nextCursor === total) { scanComplete = true; break; }
-    if (nextCursor > MAX_UTXO_CONFIRM_CURSOR) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
-    cursor = nextCursor;
+  };
+
+  const fetchAvailablePage = async (cursor, expectedTotal) => {
+    const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${UTXO_CONFIRM_PAGE_SIZE}&withLowFee=true`, env));
+    const raw = source?.utxo;
+    const sourceCursor = Number(source?.cursor);
+    const total = Number(source?.total);
+    if (!Array.isArray(raw) || raw.length > UTXO_CONFIRM_PAGE_SIZE || sourceCursor !== cursor || !Number.isSafeInteger(total) || total < cursor + raw.length || (expectedTotal !== null && total !== expectedTotal)) {
+      throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_INVALID_RESPONSE');
+    }
+    return { raw, total };
+  };
+
+  if (candidatePageCursors) {
+    let hintedTotal = null;
+    for (const cursor of candidatePageCursors) {
+      const { raw, total } = await fetchAvailablePage(cursor, hintedTotal);
+      hintedTotal ??= total;
+      sourceTotal = total;
+      inspectAvailablePage(raw, cursor);
+      if (availableByOutpoint.size === candidateByOutpoint.size) break;
+    }
   }
+
+  // Missing candidates after a hinted search are not yet proven absent: scan
+  // the complete current list from the beginning because pagination can drift
+  // by more than five pages while the user reviews a PSBT.
+  if (!candidatePageCursors || availableByOutpoint.size !== candidateByOutpoint.size) {
+    availableByOutpoint.clear();
+    let cursor = 0;
+    let expectedTotal = null;
+    sourceTotal = null;
+    scanComplete = false;
+    const maxPages = Math.ceil((MAX_UTXO_CONFIRM_CURSOR + UTXO_CONFIRM_PAGE_SIZE) / UTXO_CONFIRM_PAGE_SIZE);
+    for (let page = 0; page < maxPages; page += 1) {
+      const { raw, total } = await fetchAvailablePage(cursor, expectedTotal);
+      sourceTotal = total;
+      expectedTotal ??= total;
+      inspectAvailablePage(raw, cursor);
+      if (availableByOutpoint.size === candidateByOutpoint.size) break;
+      const nextCursor = cursor + raw.length;
+      if (raw.length === 0) {
+        if (cursor < total) {
+          if (cursor >= MAX_UTXO_CONFIRM_CURSOR) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
+          throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_SCAN_INCOMPLETE', 409);
+        }
+        scanComplete = true;
+        break;
+      }
+      if (nextCursor === total) { scanComplete = true; break; }
+      if (nextCursor > MAX_UTXO_CONFIRM_CURSOR) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
+      cursor = nextCursor;
+    }
+  } else {
+    // Hinted pages can locate candidates but never prove the inventory was exhausted.
+    scanComplete = false;
+  }
+
   if (sourceTotal === null) throw new SpendableUtxoError('UTXO_CONFIRM_AVAILABLE_INVALID_RESPONSE');
   if (availableByOutpoint.size !== candidateByOutpoint.size) {
     if (!scanComplete) throw new SpendableUtxoError('UTXO_CONFIRM_SCAN_LIMIT_REACHED', 409);
