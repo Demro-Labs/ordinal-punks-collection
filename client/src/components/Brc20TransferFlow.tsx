@@ -589,7 +589,6 @@ export function Brc20TransferFlow({
             : "1 · Pré-commander le transfert";
   const canPay = nextAction === "pay" && !busyAction && confirmed && ownershipProofKey === ownershipContextKey &&
     validatedRecipient === recipient.trim();
-  const payPrerequisitesMet = confirmed && ownershipProofKey === ownershipContextKey && validatedRecipient === recipient.trim();
   const paymentPreflightValid = Boolean(progress && paymentPreflight?.orderId === progress.orderId && Date.now() < paymentPreflight.expiresAt);
   const payButtonLabel = !confirmed
     ? "Confirmer le montant et l’adresse"
