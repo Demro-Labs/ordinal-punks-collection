@@ -3016,6 +3016,10 @@ packages:
       react: '>=16.6.0'
       react-dom: '>=16.6.0'
 
+  react@19.2.1:
+    resolution: {integrity: sha512-DGrYcCWK7tvYMnWh79yrPHt+vdx9tY+1gPZa7nJQtO/p8bLTDaHp4dzwEhQB7pZ4Xe3ok4XKuEPrVuc+wlpkmw==}
+    engines: {node: '>=0.10.0'}
+
   react@19.3.1:
     resolution: {integrity: sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw==}
     engines: {node: '>=0.10.0'}
@@ -5983,6 +5987,8 @@ snapshots:
       prop-types: 15.8.1
       react: 19.2.1
       react-dom: 19.3.1(react@19.3.1)
+
+  react@19.2.1: {}
 
   react@19.3.1: {}
 
