@@ -238,52 +238,49 @@ export function Brc20TransferFlow({
   const scanBrc20Inscriptions = async () => {
     const provider = wallet();
     if (!provider?.getInscriptions) { setMessage("UniSat ne fournit pas getInscriptions. Mettez le portefeuille à jour."); return; }
+    const activeAccounts: string[] = provider.getAccounts ? await provider.getAccounts().catch((): string[] => []) : [];
+    if (!activeAccounts?.includes(address)) { setMessage("Connectez le wallet UniSat correspondant à l’adresse affichée avant de scanner."); return; }
     setBusyAction("scanning");
-    setMessage("Scan des inscriptions UniSat en cours…");
+    setMessage("Lecture des inscriptions transférables depuis l’indexeur UniSat sécurisé…");
     setScannedInscriptions([]);
     setSelectedInscriptionId("");
     try {
-      const all: Array<{ inscriptionId?: string; location?: string }> = [];
+      const all: ScannedBrc20Inscription[] = [];
       const pageSize = 100;
-      let total = 0;
-      for (let cursor = 0; cursor < 200_000; cursor += pageSize) {
-        const page = await provider.getInscriptions(cursor, pageSize);
-        if (!page || !Number.isSafeInteger(page.total) || !Array.isArray(page.list) || page.list.length > pageSize) {
-          throw new Error("Réponse UniSat invalide; le scan est arrêté sans effectuer de transfert.");
+      let total: number | null = null;
+      for (let start = 0; start < 10_000; ) {
+        const query = new URLSearchParams({ address, ticker, chain: network, start: String(start), limit: String(pageSize) });
+        const response = await fetch(`${API_BASE}/api/brc20/transferable?${query}`, { cache: "no-store", headers: { Accept: "application/json" } });
+        const payload = await response.json().catch(() => null) as {
+          network?: string; address?: string; ticker?: string; start?: number; total?: number;
+          detail?: Array<{ inscriptionId?: string; amount?: string }>; error?: string;
+        } | null;
+        if (!response.ok) throw new Error(payload?.error || `L’indexeur UniSat a répondu HTTP ${response.status}. Vérifiez le Worker Cloudflare.`);
+        if (!payload || payload.network !== network || payload.address !== address ||
+            payload.ticker?.toLowerCase() !== ticker.toLowerCase() || payload.start !== start ||
+            !Number.isSafeInteger(payload.total) || (payload.total ?? -1) < 0 ||
+            !Array.isArray(payload.detail) || payload.detail.length > pageSize) {
+          throw new Error("Réponse de l’indexeur BRC-20 invalide ou réseau/adresse différents. Aucun transfert n’a été effectué.");
         }
-        total = page.total;
-        all.push(...page.list);
-        if (all.length >= total || page.list.length === 0) break;
+        if (total === null) total = payload.total!;
+        if (payload.total !== total) throw new Error("L’inventaire UniSat a changé pendant le scan. Relancez le scan avant de transférer.");
+        for (const item of payload.detail) {
+          if (typeof item.inscriptionId !== "string" || !/^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId) ||
+              typeof item.amount !== "string" || !validDecimal(item.amount)) throw new Error("UniSat a renvoyé une inscription BRC-20 invalide. Le scan est arrêté par sécurité.");
+          all.push({ inscriptionId: item.inscriptionId, ticker, amount: item.amount });
+        }
+        if (all.length >= total) break;
+        if (payload.detail.length === 0) throw new Error("L’indexeur UniSat a renvoyé une page vide avant la fin de l’inventaire.");
+        start += payload.detail.length;
       }
-      if (all.length < total) throw new Error("Le scan n’a pas parcouru toutes les inscriptions du wallet. Aucun transfert n’a été effectué.");
-      const ids = all.filter(item => typeof item.inscriptionId === "string" && /^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId));
-      const base = network === "BITCOIN_MAINNET" ? "https://ordinals.com" : "https://fractal.ordinals.com";
-      const found: ScannedBrc20Inscription[] = [];
-      for (let start = 0; start < ids.length; start += 5) {
-        const batch = ids.slice(start, start + 5);
-        const parsed = await Promise.all(batch.map(async item => {
-          try {
-            const response = await fetch(`${base}/content/${encodeURIComponent(item.inscriptionId!)}`, { cache: "no-store" });
-            if (!response.ok) return null;
-            const payload = await response.text();
-            if (payload.length > 16_384) return null;
-            const json = JSON.parse(payload) as { p?: unknown; op?: unknown; tick?: unknown; amt?: unknown };
-            if (String(json.p).toLowerCase() !== "brc-20" || String(json.op).toLowerCase() !== "transfer" ||
-              String(json.tick).toLowerCase() !== ticker.toLowerCase() || typeof json.amt !== "string" && typeof json.amt !== "number") return null;
-            const tokenAmount = String(json.amt);
-            if (!validDecimal(tokenAmount)) return null;
-            return { inscriptionId: item.inscriptionId!, location: item.location, ticker: String(json.tick), amount: tokenAmount } as ScannedBrc20Inscription;
-          } catch { return null; }
-        }));
-        found.push(...parsed.filter((item): item is ScannedBrc20Inscription => Boolean(item)));
-      }
-      setScannedInscriptions(found);
-      setMessage(found.length ? `${found.length} inscription(s) BRC-20 de transfert ${ticker} trouvée(s). Sélectionnez-en une avant l’envoi.` : `Aucune inscription de transfert BRC-20 ${ticker} trouvée. Vérifiez le réseau UniSat et l’indexeur d’inscriptions.`);
+      if (total === null || all.length !== total) throw new Error("Le scan est incomplet (limite de 10 000 inscriptions ou pagination instable). Aucun transfert n’a été effectué.");
+      setScannedInscriptions(all);
+      setMessage(all.length
+        ? `${all.length} inscription(s) transférable(s) BRC-20 ${ticker} trouvée(s). Sélectionnez le montant exact à envoyer.`
+        : `UniSat ne signale aucune inscription transférable pour ${ticker} sur ${network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"}.`);
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "Échec du scan des inscriptions BRC-20.");
-    } finally {
-      setBusyAction("");
-    }
+      setMessage(cause instanceof Error ? cause.message : "Échec du scan BRC-20. Aucun transfert n’a été effectué.");
+    } finally { setBusyAction(""); }
   };
 
   const sendSelectedBrc20Inscription = async () => {
