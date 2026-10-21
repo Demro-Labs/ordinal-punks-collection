@@ -33,8 +33,9 @@ function taprootMessageSignature(account: OrdiAddress, message: string): string 
   psbt.addOutput({ script: Buffer.from([bitcoin.opcodes.OP_RETURN]), value: BigInt(0) });
 
   const parityAdjustedKey = publicKey[0] === 3 ? Buffer.from(ecc.privateNegate(privateKey)) : privateKey;
-  const tweak = bitcoin.crypto.taggedHash("TapTweak", internalKey);
-  const tweakedPrivateKey = ecc.privateAdd(parityAdjustedKey, tweak);
+  // Normalize bitcoinjs-lib v7 Uint8Array outputs at the secp256k1 adapter boundary.
+  const tweak = Buffer.from(bitcoin.crypto.taggedHash("TapTweak", Buffer.from(internalKey)));
+  const tweakedPrivateKey = ecc.privateAdd(Buffer.from(parityAdjustedKey), Buffer.from(tweak));
   if (!tweakedPrivateKey) throw new Error("Unable to derive the local Taproot message-signing key.");
   const tweakedPublicKey = ecc.pointFromScalar(tweakedPrivateKey, true);
   if (!tweakedPublicKey) throw new Error("Unable to derive the local Taproot message-signing public key.");
