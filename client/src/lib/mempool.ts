@@ -210,7 +210,7 @@ function compareSpendableUtxos(left: SpendableUtxo, right: SpendableUtxo) {
     left.vout - right.vout;
 }
 
-export async function getSpendableUtxos(network: string, address: string, minimumSats: number, options: { mobile?: boolean; requiredOutpoints?: string[]; collectAll?: boolean; allowInsufficientSafeBalance?: boolean } = {}): Promise<SpendableUtxo[]> {
+export async function getSpendableUtxos(network: string, address: string, minimumSats: number, options: { mobile?: boolean; requiredOutpoints?: string[]; collectAll?: boolean; allowInsufficientSafeBalance?: boolean; onProgress?: (progress: { scannedCount: number; totalCount: number; safeUtxoCount: number }) => void } = {}): Promise<SpendableUtxo[]> {
   const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
   if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0) {
     throw new Error("Invalid network, address, or amount for spendable UTXO verification.");
@@ -307,6 +307,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       Array.isArray(item.inscriptions) && item.inscriptions.length === 0
     );
     collected.push(...safe.map(item => ({ ...item, sourceCursor: cursor })));
+    options.onProgress?.({ scannedCount, totalCount: sourceTotal!, safeUtxoCount: collected.length });
     const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
     if (requiredOutpoints) {
       const byOutpoint = new Map(collected.map(item => [`${item.txid.toLowerCase()}:${item.vout}`, item]));

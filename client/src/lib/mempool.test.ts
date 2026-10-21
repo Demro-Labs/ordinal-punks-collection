@@ -63,6 +63,7 @@ describe("validateMempoolAddress", () => {
 describe("getSpendableUtxos", () => {
   it("scans the full 500-output window by default even when the first UTXO covers the minimum", async () => {
     const cursors: number[] = [];
+    const progress: Array<{ scannedCount: number; totalCount: number; safeUtxoCount: number }> = [];
     installWindowAndFetch((async input => {
       const url = new URL(String(input));
       const cursor = Number(url.searchParams.get("cursor"));
@@ -72,10 +73,12 @@ describe("getSpendableUtxos", () => {
         utxo: cursor === 0 ? [makeSafeUtxo({ satoshi: 600_000 })] : [],
       });
     }) as typeof fetch);
-    const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1_700);
+    const result = await getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1_700, { onProgress: scan => progress.push(scan) });
     expect(cursors).toHaveLength(20);
     expect(cursors[0]).toBe(0);
     expect(cursors.at(-1)).toBe(475);
+    expect(progress).toHaveLength(20);
+    expect(progress.at(-1)).toEqual({ scannedCount: 500, totalCount: 500, safeUtxoCount: 1 });
     expect(result).toHaveLength(1);
     expect(result[0].satoshi).toBe(600_000);
   });
