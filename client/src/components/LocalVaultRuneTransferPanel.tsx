@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Send, ShieldCheck } from "lucide-react";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
+import { PreSignatureSecurityPreview } from "@/components/PreSignatureSecurityPreview";
 import { fetchAllRuneBalancePages, formatRuneAmount, type RuneBalance } from "@/lib/runes";
 import { prepareLocalRuneTransfer, signLocalRuneTransfer, broadcastLocalRuneTransfer, type LocalRuneTransferPlan } from "@/lib/local-rune-transfer";
 import type { AddressType, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
@@ -80,7 +81,8 @@ export function LocalVaultRuneTransferPanel({ wallet, network, addressType, site
     {contextKey && <LocalVaultOwnershipProof key={contextKey} site={site} network={network} wallet={wallet} addressType={addressType} contextKey={contextKey} onVerified={setOwnershipProofKey}/>}
     <button type="button" onClick={() => void prepare()} disabled={busy || loading || !contextKey} className="mt-2 inline-flex min-h-11 items-center gap-2 border border-[#d99a54] px-3 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-40">{busy ? <Loader2 size={12} className="animate-spin"/> : <Send size={12}/>} Review Rune transfer locally</button>
     {plan && <div className="mt-3 border border-[#70c7a0]/40 p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]">
-      <p>Network: {network} · Rune: {plan.runeName} ({plan.runeid})</p><p>Amount: {formatRuneAmount(plan.amountBaseUnits, plan.divisibility)} · change: {formatRuneAmount(plan.runeChangeBaseUnits, plan.divisibility)}</p>
+      <p>Network: {network} · Rune: {plan.runeName} ({plan.runeid})</p>
+      <PreSignatureSecurityPreview network={network === "BITCOIN_MAINNET" ? "Bitcoin mainnet · BTC" : "Fractal Bitcoin mainnet · FB"} transactionType="Rune transfer · Local Vault" source={account.address} destination={plan.recipient} amount={`${formatRuneAmount(plan.amountBaseUnits, plan.divisibility)} ${plan.runeName}`} inputs={[`${plan.runeInputs.length} Rune input(s)`, `${plan.feeInputs.length} fee UTXO(s)`]} outputs={[`Rune destination: ${formatRuneAmount(plan.amountBaseUnits, plan.divisibility)} → ${plan.recipient}`, `Rune change: ${formatRuneAmount(plan.runeChangeBaseUnits, plan.divisibility)}`, "Runestone protocol output is included in the signed transaction"]} fees={`${plan.feeSats.toLocaleString()} sats · ${plan.feeRateSatVb} sat/vB`} warnings={["Vérifiez chaque entrée Rune et les UTXO de frais; les actifs ne doivent pas être mélangés.", "Un index incomplet ou une entrée indisponible doit bloquer la signature."]} /><p>Amount: {formatRuneAmount(plan.amountBaseUnits, plan.divisibility)} · change: {formatRuneAmount(plan.runeChangeBaseUnits, plan.divisibility)}</p>
       <p className="break-all">Recipient: {plan.recipient}</p><p>Inputs: {plan.runeInputs.length} Rune + {plan.feeInputs.length} fee UTXO · fee: {plan.feeSats.toLocaleString()} sats ({plan.feeRateSatVb} sat/vB)</p>
       <label className="mt-2 flex min-h-11 items-start gap-2"><input type="checkbox" checked={confirmedReview} onChange={e => setConfirmedReview(e.target.checked)} className="mt-1 h-4 w-4"/><span>I confirm the Rune amount, recipient, source account, outputs and network fees.</span></label>
       <button type="button" onClick={() => void sign()} disabled={!confirmedReview || busy || ownershipProofKey !== contextKey || Boolean(signed)} className="mt-2 min-h-11 bg-[#d99a54] px-3 font-mono text-[9px] uppercase text-[#0b0d10] disabled:opacity-40">Sign Runestone locally</button>
