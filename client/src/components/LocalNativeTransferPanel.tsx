@@ -38,7 +38,7 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
     void getRecommendedFeeEstimate(network).then(setFeeEstimate).catch(() => setFeeEstimate(null));
   }, [network, addressType]);
 
-  const reset = () => { setPlan(null); setReview(null); setSigned(""); setTx(null); setReceipt(null); setConfirmed(false); setConfirmedBroadcast(false); setBroadcastAttempted(false); setMessage(""); };
+  const reset = () => { setPlan(null); setReview(null); setSigned(""); setTx(null); setReceipt(null); setConfirmed(false); setConfirmedBroadcast(false); setBroadcastAttempted(false); setError(""); setMessage(""); };
 
   const prepare = async () => {
     if (!ownershipContextKey || ownershipProofKey !== ownershipContextKey) { setError("Complete the local BIP-322 ownership proof for this source account, recipient, amount, and network before preparing the transfer."); return; }
@@ -88,6 +88,22 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
     finally { setBusy(false); }
   };
 
+  const prepareNextTransfer = () => {
+    if (busy || !receipt || receipt.status !== "confirmed") return;
+    setRecipient("");
+    setAmount("");
+    setPlan(null);
+    setReview(null);
+    setSigned("");
+    setTx(null);
+    setConfirmed(false);
+    setConfirmedBroadcast(false);
+    setBroadcastAttempted(false);
+    setOwnershipProofKey(null);
+    setError("");
+    setMessage("Transfert confirmé. Le formulaire est réinitialisé pour préparer le suivant; le reçu précédent reste visible.");
+  };
+
   return <section className="mt-4 border border-[#d99a54]/50 bg-[#10151a] p-3 sm:mt-5 sm:p-4" aria-labelledby="local-native-transfer-title">
     <div className="flex items-center gap-2 text-[#f2bd63]"><Send size={15} /><h3 id="local-native-transfer-title" className="font-mono text-[10px] uppercase tracking-[.14em]">Send {asset} · Local Vault</h3></div>
     <p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Paiement natif {asset} depuis Legacy, Nested SegWit, Native SegWit ou Taproot : les UTXO confirmés sans Ordinal, Rune ou Alkane sont vérifiés en direct, puis la transaction est signée dans le coffre local. Les clés privées ne quittent jamais cet appareil.</p>
@@ -119,6 +135,7 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
     {signed && !tx && <div className="mt-3 border border-[#d99a54]/40 p-3"><p className="font-mono text-[10px] text-[#f2bd63]">Signature en mémoire uniquement; pas encore diffusée.</p><button type="button" onClick={() => void finalize()} disabled={busy} className="mt-2 inline-flex min-h-11 border border-[#d99a54] px-4 font-mono text-[9px] uppercase text-[#f2bd63]">Verify signature</button></div>}
     {tx && <div className="mt-3 border border-[#d99a54]/60 p-3 font-mono text-[10px] leading-5"><p className="break-all text-[#f2bd63]">TXID : {tx.txid}</p><p className="mt-1 text-[#9ea7b3]">La diffusion est irréversible. Vérifiez une dernière fois le TXID et le réseau.</p><label className="mt-2 flex min-h-11 items-start gap-2 py-2"><input type="checkbox" checked={confirmedBroadcast} onChange={event => setConfirmedBroadcast(event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><span>Je confirme ce TXID exact et autorise sa diffusion sur {network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin mainnet"}.</span></label><button type="button" onClick={() => void broadcast()} disabled={busy || !confirmedBroadcast || broadcastAttempted} className="mt-2 inline-flex min-h-11 bg-[#d99a54] px-4 uppercase text-[#0b0d10] disabled:opacity-40">{busy ? "Broadcasting…" : broadcastAttempted ? "Broadcast attempted — verify TXID" : `Broadcast ${asset}`}</button></div>}
     {receipt && <p className="mt-3 break-all border border-[#70c7a0]/40 p-3 font-mono text-[10px] text-[#9fe0bd]" role="status">{receipt.message} · <a className="underline" href={receipt.explorerUrl} target="_blank" rel="noreferrer">Voir dans Mempool</a></p>}
+    {receipt?.status === "confirmed" && <button type="button" onClick={prepareNextTransfer} disabled={busy} className="mt-2 inline-flex min-h-11 items-center justify-center border border-[#70c7a0]/50 px-4 font-mono text-[9px] uppercase text-[#9fe0bd] disabled:opacity-40">Préparer un autre transfert</button>}
     {error && <p className="mt-3 break-words border border-[#a45e54]/50 p-3 font-mono text-[10px] leading-5 text-[#e6a69b]" role="alert">{error}</p>}
     {message && <p className="mt-3 break-words border border-[#70c7a0]/40 p-3 font-mono text-[10px] leading-5 text-[#9fe0bd]" role="status">{message}</p>}
   </section>;
