@@ -594,7 +594,7 @@ export function Brc20TransferFlow({
             onChange={event => { setAmountToTransfer(event.target.value); setConfirmed(false); }}
             disabled={Boolean(busyAction) || Boolean(progress)}
             inputMode="decimal"
-            className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0d10] px-3 font-mono text-xs normal-case text-[#d9d3c6]"
+            placeholder="Saisir le montant exact" className="mt-1 min-h-11 w-full border border-[#3b434d] bg-[#0b0d10] px-3 font-mono text-xs normal-case text-[#d9d3c6]"
           />
           <span className="mt-1 block normal-case text-[#718092]">
             Solde disponible : {amount} · frais réseau estimés : {activeFeeRate} sat/vB
