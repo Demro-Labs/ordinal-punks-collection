@@ -204,7 +204,7 @@ export function LocalVaultPagePanel({ site }: { site: LocalVaultSite }) {
         </div>
       </div>
       <LocalVaultSiteDashboard session={session} />
-      <div className="mt-5 rounded-xl border border-[#27332f] bg-[#101613] p-3 sm:p-5"><ProtocolAssetsPanel address={session.address} network={session.network} site={site} /></div>
+      <div className="mt-5 rounded-xl border border-[#27332f] bg-[#101613] p-3 sm:p-5"><ProtocolAssetsPanel address={session.address} network={session.network} site={site} allowUniSatSigning={false} /></div>
     </div>
   </section>;
 }
