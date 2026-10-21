@@ -127,7 +127,7 @@ jobs:
         run: |
           set -euo pipefail
           title="AI wallet diagnostics failed: run ${GITHUB_RUN_ID}"
-          gh issue create --title "$title" --label "bug" --body-file diagnostics/report.md || {
+          gh issue create --title "$title" --body-file diagnostics/report.md || {
             echo "Issue creation failed (possibly missing the bug label or issue permission). The report artifact is still retained."
           }
 
