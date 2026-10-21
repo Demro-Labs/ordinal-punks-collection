@@ -161,3 +161,39 @@ table { border-color: rgba(149, 159, 176, 0.18); }
 thead { color: #d9c69e; }
 tbody tr { transition: background-color 150ms ease; }
 tbody tr:hover { background-color: rgba(215, 183, 123, 0.045); }
+
+
+/* Shared premium shell: identical graphite, champagne and steel treatment on both ledgers. */
+.premium-site-shell {
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+  background:
+    radial-gradient(ellipse at 8% 0%, rgba(215, 183, 123, 0.075), transparent 34%),
+    radial-gradient(ellipse at 96% 14%, rgba(89, 112, 145, 0.075), transparent 30%),
+    linear-gradient(180deg, #0d1015 0%, #090b0f 68%, #0b0d10 100%) !important;
+}
+.premium-site-shell::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 auto;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(215, 183, 123, 0.62), rgba(149, 159, 176, 0.3), transparent);
+}
+.premium-site-shell :is(article, [role="dialog"], [data-transaction-dialog], .unisat-wallet-panel) {
+  transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+.premium-site-shell :is(a[href], button:not(:disabled)):focus-visible {
+  outline: 2px solid #d7b77b;
+  outline-offset: 3px;
+}
+.premium-site-shell img {
+  backface-visibility: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .premium-site-shell :is(article, img, a, button) {
+    transition: none !important;
+  }
+}
