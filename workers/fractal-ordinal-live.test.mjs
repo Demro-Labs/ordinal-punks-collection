@@ -1362,7 +1362,7 @@ test('refuses duplicate outpoints in the display-only address UTXO page', async 
   const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
-    assert.match(url.pathname, /\\/all-utxo-data$/);
+    assert.match(url.pathname, /\/all-utxo-data$/);
     return Response.json({ code: 0, data: { cursor: 0, total: 2, utxo: [
       { txid: 'ee'.repeat(32), vout: 0, satoshi: 1200, height: 100, scriptPk: '0014' + '22'.repeat(20), inscriptions: [], runes: [], alkanes: [], isSpent: false },
       { txid: 'ee'.repeat(32), vout: 0, satoshi: 1200, height: 100, scriptPk: '0014' + '22'.repeat(20), inscriptions: [], runes: [], alkanes: [], isSpent: false },
