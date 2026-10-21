@@ -1,14 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Heart, RefreshCw, X } from "lucide-react";
+import { LocalQrCode } from "@/components/LocalQrCode";
 
 const DONATION_ADDRESS = "13bsQSSXzXMJoXbMhZ6fqBYVkkHx4y8cs1";
-const QR_IMAGE = "https://api.qrserver.com/v1/create-qr-code/";
 const PRESETS = [5, 10, 25] as const;
-
-function qrUrl(value: string) {
-  return `${QR_IMAGE}?size=220x220&margin=12&data=${encodeURIComponent(value)}`;
-}
 
 function formatBtc(value: number) {
   return value.toLocaleString("en-US", { minimumFractionDigits: 8, maximumFractionDigits: 8 });
@@ -92,7 +88,7 @@ export function DonateButton({ compact = false }: { compact?: boolean }) {
           </header>
           <div className="grid gap-5 p-5 sm:grid-cols-[220px_minmax(0,1fr)]">
             <div className="flex flex-col items-center gap-3">
-              <div className="border border-[#2c323a] bg-white p-2"><img src={qrUrl(paymentUri)} alt="Bitcoin donation QR code" width="204" height="204" className="block h-[204px] w-[204px]" /></div>
+              <div className="border border-[#2c323a] bg-white p-2"><LocalQrCode value={paymentUri} alt="Bitcoin donation QR code" size={204} /></div>
               <p className="text-center font-mono text-[9px] leading-4 text-[#718092]">Scan with a Bitcoin wallet. Check the address and amount in your wallet before confirming.</p>
             </div>
             <div className="min-w-0">
