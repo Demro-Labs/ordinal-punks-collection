@@ -38,6 +38,8 @@ function transactionSummary(tx: MempoolTx, address: string) {
 export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSession }) {
   const [balances, setBalances] = useState<Record<Network, Partial<Record<AddressType, Balance>>>>({ BITCOIN_MAINNET: {}, FRACTAL_BITCOIN_MAINNET: {} });
   const [transactions, setTransactions] = useState<MempoolTx[]>([]);
+  const [hasMoreTransactions, setHasMoreTransactions] = useState(false);
+  const [loadingMoreTransactions, setLoadingMoreTransactions] = useState(false);
   const [busy, setBusy] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [balanceError, setBalanceError] = useState("");
@@ -69,10 +71,13 @@ export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSe
       const response = await fetch(`${base}/api/address/${encodeURIComponent(activeAddress)}/txs`, { cache: "no-store" });
       if (!response.ok) throw new Error(`Activity endpoint returned HTTP ${response.status}`);
       const result = await response.json() as MempoolTx[];
-      setTransactions(Array.isArray(result) ? result.slice(0, 6) : []);
+      const page = Array.isArray(result) ? result.slice(0, 25) : [];
+      setTransactions(page);
+      setHasMoreTransactions(page.length === 25);
     } catch {
       setTransactions([]);
-      setActivityError("Recent activity is temporarily unavailable.");
+      setHasMoreTransactions(false);
+      setActivityError("Historique indisponible : les données publiques n’ont pas pu être vérifiées.");
     } finally {
       setUpdatedAt(new Date().toISOString());
       setBusy(false);
@@ -84,6 +89,34 @@ export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSe
     const timer = window.setInterval(() => void refresh(), 30_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  const loadMoreTransactions = useCallback(async () => {
+    if (loadingMoreTransactions || transactions.length === 0) return;
+    const lastTx = transactions[transactions.length - 1];
+    if (!lastTx?.txid) return;
+    setLoadingMoreTransactions(true);
+    setActivityError("");
+    try {
+      const base = endpoint(session.network);
+      const address = session.addresses[session.activeAddressType].address;
+      const response = await fetch(base + "/api/address/" + encodeURIComponent(address) + "/txs/chain/" + encodeURIComponent(lastTx.txid), { cache: "no-store" });
+      if (!response.ok) throw new Error("Activity endpoint returned HTTP " + response.status);
+      const result = await response.json() as MempoolTx[];
+      const page = Array.isArray(result) ? result : [];
+      const seen = new Set(transactions.map(tx => tx.txid));
+      const unique = page.filter(tx => tx?.txid && !seen.has(tx.txid));
+      setTransactions(current => [...current, ...unique]);
+      setHasMoreTransactions(page.length === 25);
+      if (page.length > 0 && unique.length === 0) {
+        setActivityError("La page reçue ne contient aucune nouvelle transaction. Actualisez l’historique avant de continuer.");
+        setHasMoreTransactions(false);
+      }
+    } catch {
+      setActivityError("Impossible de charger la page suivante. L’historique déjà chargé est conservé.");
+    } finally {
+      setLoadingMoreTransactions(false);
+    }
+  }, [loadingMoreTransactions, transactions, session]);
 
   const networkLabel = session.network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin";
   const activeBalance = balances[session.network][session.activeAddressType];
@@ -155,15 +188,20 @@ export function LocalVaultSiteDashboard({ session }: { session: LocalVaultSiteSe
           <div className="mt-4"><LocalVaultActiveUtxosPanel address={session.addresses[session.activeAddressType].address} network={session.network} /></div>
         </section>
         <section className="min-w-0 rounded-xl border border-[#27332f] bg-[#0d1310] p-4 sm:p-5" aria-label="Recent transactions">
-          <div className="flex flex-wrap items-start justify-between gap-2"><div><h4 className="font-display text-base font-semibold text-[#f3efe5]">Recent activity</h4><p className="mt-1 text-xs text-[#718092]">{ADDRESS_SPECS.find(spec => spec.type === session.activeAddressType)?.label} · last 6 transactions</p></div><span className="rounded-full border border-[#27332f] px-2 py-1 font-mono text-[9px] text-[#718092]">Live data</span></div>
-          {activityError ? <p className="mt-4 rounded-lg border border-[#e0b45f]/30 bg-[#e0b45f]/5 p-3 text-xs text-[#e0b45f]" role="status">{activityError}</p> : transactions.length === 0 ? <div className="mt-4 rounded-lg border border-dashed border-[#27332f] p-5 text-center"><p className="text-sm text-[#d9d3c6]">{busy ? "Loading live activity…" : "No recent transactions"}</p><p className="mt-1 text-xs text-[#718092]">{busy ? "Fetching public chain data." : "Activity will appear here when available."}</p></div> : <ul className="mt-4 divide-y divide-[#27332f]">{transactions.map(tx => {
+          <div className="flex flex-wrap items-start justify-between gap-2"><div><h4 className="font-display text-base font-semibold text-[#f3efe5]">Recent activity</h4><p className="mt-1 text-xs text-[#718092]">{ADDRESS_SPECS.find(spec => spec.type === session.activeAddressType)?.label} · up to 25 per page</p></div><span className="rounded-full border border-[#27332f] px-2 py-1 font-mono text-[9px] text-[#718092]">Live data</span></div>
+          {activityError && <p className="mt-4 rounded-lg border border-[#e0b45f]/30 bg-[#e0b45f]/5 p-3 text-xs text-[#e0b45f]" role="status">{activityError}</p>}
+          {transactions.length === 0 ? <div className="mt-4 rounded-lg border border-dashed border-[#27332f] p-5 text-center"><p className="text-sm text-[#d9d3c6]">{busy ? "Loading live activity…" : "No recent transactions"}</p><p className="mt-1 text-xs text-[#718092]">{busy ? "Fetching public chain data." : "Activity will appear here when available."}</p></div> : <ul className="mt-4 divide-y divide-[#27332f]">{transactions.map(tx => {
             const summary = transactionSummary(tx, session.addresses[session.activeAddressType].address);
             const explorerTx = `${endpoint(session.network)}/tx/${encodeURIComponent(tx.txid)}`;
             return <li key={tx.txid} className="flex items-center justify-between gap-3 py-3">
               <div className="flex min-w-0 items-start gap-3"><div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${summary.kind === "Received" ? "bg-[#70c7a0]/10 text-[#9fe0bd]" : summary.kind === "Sent" ? "bg-[#d99a54]/10 text-[#f2bd63]" : "bg-[#27332f] text-[#9ea7b3]"}`}>{summary.kind === "Received" ? <ArrowDownLeft size={15} /> : <ArrowUpRight size={15} />}</div><div className="min-w-0"><p className="text-sm font-medium text-[#d9d3c6]">{summary.kind} <span className="text-[#9ea7b3]">· {summary.net > 0 ? "+" : ""}{formatSats(summary.net)}</span></p><a href={explorerTx} target="_blank" rel="noreferrer" className="mt-1 inline-flex max-w-full items-center gap-1 break-all font-mono text-[10px] text-[#718092] hover:text-[#9fe0bd]">{short(tx.txid)} <ExternalLink size={10} /></a></div></div>
-              <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] ${tx.status?.confirmed ? "bg-[#70c7a0]/10 text-[#9fe0bd]" : "bg-[#e0b45f]/10 text-[#e0b45f]"}`}>{tx.status?.confirmed ? `Confirmed${tx.status.block_height ? ` · #${tx.status.block_height}` : ""}` : "Pending"}</span>
+              <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] ${tx.status?.confirmed ? "bg-[#70c7a0]/10 text-[#9fe0bd]" : tx.status?.confirmed === false ? "bg-[#e0b45f]/10 text-[#e0b45f]" : "bg-[#27332f] text-[#9ea7b3]"}`}>{tx.status?.confirmed ? `Confirmée${tx.status.block_height ? ` · bloc ${tx.status.block_height}` : ""}` : tx.status?.confirmed === false ? "En attente" : "Statut inconnu"}</span>
             </li>;
           })}</ul>}
+          {transactions.length > 0 && <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-[#27332f] pt-3">
+            <p className="text-[10px] text-[#718092]">{transactions.length} transaction(s) chargée(s) · le statut reflète les données publiques disponibles</p>
+            {hasMoreTransactions && <button type="button" onClick={() => void loadMoreTransactions()} disabled={loadingMoreTransactions || busy} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#35443d] bg-[#121b17] px-3 text-xs font-semibold text-[#d9d3c6] hover:border-[#70c7a0]/70 hover:text-[#9fe0bd] disabled:opacity-50"><RefreshCw size={12} className={loadingMoreTransactions ? "animate-spin" : ""} /> {loadingMoreTransactions ? "Chargement…" : "Charger les transactions précédentes"}</button>}
+          </div>}
         </section>
       </div>
       <p className="mt-4 flex items-start gap-2 border-t border-[#27332f] pt-4 text-xs leading-5 text-[#718092]"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[#70c7a0]" /> Balances and activity come from public Mempool endpoints. This view is informational: private keys stay in the encrypted local vault and every signing/broadcast action remains separate and explicit.</p>
