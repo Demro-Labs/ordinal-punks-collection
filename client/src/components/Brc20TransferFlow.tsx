@@ -388,6 +388,10 @@ export function Brc20TransferFlow({
       setMessage("Le contrôle des UTXO de frais est absent ou expiré. Vérifiez les UTXO avant l’approbation UniSat; aucun transfert n’a été demandé.");
       return;
     }
+    if (isMobileUniSatDevice()) {
+      void sendMobileSelectedBrc20Inscription(provider, selected, target);
+      return;
+    }
     setBusyAction("sending");
     setTransferFeePreflight(null);
     setMessage("Confirmez dans UniSat l’envoi de l’inscription sélectionnée vers le destinataire.");
@@ -417,6 +421,91 @@ export function Brc20TransferFlow({
         setBusyAction("");
       }
     })();
+  };
+
+  const sendMobileSelectedBrc20Inscription = async (
+    provider: Wallet,
+    selected: ScannedBrc20Inscription,
+    target: string,
+  ) => {
+    let broadcastMayHaveStarted = false;
+    setBusyAction("sending");
+    setTransferFeePreflight(null);
+    setMessage(`Préparation d’une PSBT vérifiée pour l’inscription BRC-20 ${selected.inscriptionId}…`);
+    try {
+      if (!provider.getChain || !provider.getAccounts || !provider.getPublicKey ||
+          !provider.getBitcoinUtxos || !provider.getInscriptions || !provider.signPsbt) {
+        throw new Error("UniSat Mobile doit fournir getChain, getAccounts, getPublicKey, getBitcoinUtxos, getInscriptions et signPsbt. Aucune transaction n’a été signée ni diffusée.");
+      }
+      const mempool = getMempoolConfig(network);
+      if (!mempool) throw new Error("Le Mempool du réseau sélectionné n’est pas configuré. Aucune transaction n’a été signée ni diffusée.");
+      await validateMempoolAddress(network, target);
+      const ownedInscriptions = await loadOwnedInscriptionsForMobileTransfer(provider, selected.inscriptionId);
+      const selectedInscription = ownedInscriptions.find(item =>
+        item.inscriptionId.toLowerCase() === selected.inscriptionId.toLowerCase()
+      );
+      if (!selectedInscription?.location) {
+        throw new Error("UniSat n’a pas fourni l’outpoint actuel de l’inscription sélectionnée. Actualisez le scan; aucune transaction n’a été signée ni diffusée.");
+      }
+      const feeEstimate = await getRecommendedFeeEstimate(network);
+      const psbtProvider: UniSatCustomTransferProvider = {
+        getBitcoinUtxos: provider.getBitcoinUtxos.bind(provider),
+        getPublicKey: provider.getPublicKey.bind(provider),
+        getAccounts: provider.getAccounts.bind(provider),
+        getChain: provider.getChain.bind(provider),
+        signPsbt: provider.signPsbt.bind(provider),
+      };
+      const result = await sendOrdinalInscriptionWithCustomPsbt({
+        provider: psbtProvider,
+        mempool: { api: mempool.api, label: mempool.label, chain: network === "BITCOIN_MAINNET" ? "bitcoin" : "fractal" },
+        expectedNetworkEnum: network,
+        currentAddress: address,
+        recipientAddress: target,
+        selectedInscription,
+        ownedInscriptions,
+        feeRateSatVb: feeEstimate.feeRate,
+        beforeSign: plan => requestMobilePsbtReview({
+          plan,
+          recipient: target,
+          inscriptionId: selected.inscriptionId,
+          networkLabel: mempool.label,
+          feeSourceLabel: describeFeeSources(feeEstimate.strategy, feeEstimate.sources),
+        }, provider),
+        beforeBroadcast: async publicKeyHex => {
+          const [latestChain, latestAccounts, latestPublicKey] = await Promise.all([
+            provider.getChain!(), provider.getAccounts!(), provider.getPublicKey!(),
+          ]);
+          if (latestChain.enum !== network || !latestAccounts.includes(address) ||
+              latestPublicKey.toLowerCase() !== publicKeyHex.toLowerCase()) {
+            throw new Error("Le compte UniSat, la clé ou le réseau a changé avant la diffusion. La transaction signée n’a pas été soumise.");
+          }
+          if (selectedInscriptionId !== selected.inscriptionId || recipient.trim() !== target ||
+              !confirmed || validatedRecipient !== target || ownershipProofKey !== ownershipContextKey) {
+            throw new Error("La sélection, le destinataire ou la preuve de propriété a changé avant la diffusion. La transaction signée n’a pas été soumise.");
+          }
+          broadcastMayHaveStarted = true;
+        },
+      });
+      if (!/^[a-f0-9]{64}$/i.test(result.txid)) {
+        throw new Error("La diffusion n’a pas retourné de TXID valide. Vérifiez UniSat et le Mempool avant toute nouvelle tentative.");
+      }
+      setMessage(`Inscription BRC-20 ${selected.ticker} (${selected.amount}) envoyée à ${target}. TXID : ${result.txid}`);
+      setSelectedInscriptionId("");
+      setConfirmed(false);
+      setValidatedRecipient("");
+      setOwnershipProofKey(null);
+      setScannedInscriptions(items => items.filter(item => item.inscriptionId !== selected.inscriptionId));
+      onDone();
+    } catch (cause) {
+      if (broadcastMayHaveStarted) {
+        setSelectedInscriptionId("");
+        setMessage((cause instanceof Error ? cause.message : String(cause)) + " L’issue de diffusion peut être incertaine : vérifiez UniSat et le Mempool avant de rescanner ou de réessayer pour éviter un doublon.");
+      } else {
+        setMessage((cause instanceof Error ? cause.message : String(cause)) + " Aucune transaction n’a été diffusée; corrigez le problème puis relancez le contrôle des frais.");
+      }
+    } finally {
+      setBusyAction("");
+    }
   };
 
   const pollOrder = async (id: string) => {
