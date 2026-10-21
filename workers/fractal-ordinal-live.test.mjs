@@ -1288,6 +1288,34 @@ test('Worker finds a still-safe PSBT input when the available-UTXO pagination cu
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('Worker retries a complete available-UTXO scan when the indexer omits an input during pagination', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  const candidate = { address, txid: 'e'.repeat(64), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  const transient = { ...candidate, txid: 'd'.repeat(64) };
+  let inventoryPass = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      const cursor = Number(url.searchParams.get('cursor'));
+      assert.equal(cursor, 0);
+      inventoryPass += 1;
+      return Response.json({ code: 0, data: { cursor, total: 1, utxo: [inventoryPass === 1 ? transient : candidate] } });
+    }
+    if (url.pathname === '/v1/indexer/utxo/' + candidate.txid + '/0') return Response.json({ code: 0, data: candidate });
+    throw new Error('Unexpected upstream URL: ' + url);
+  };
+  try {
+    const body = JSON.stringify({ chain: 'fractal', address, minimumSats: 40000, utxos: [{ txid: candidate.txid, vout: 0, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk }] });
+    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.236', body }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(data));
+    assert.equal(data.sufficient, true);
+    assert.equal(data.verifiedUtxoCount, 1);
+    assert.equal(inventoryPass, 2);
+  } finally { globalThis.fetch = previousFetch; }
+});
 test('Worker refuses an input whose value differs from the current UniSat outpoint', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
