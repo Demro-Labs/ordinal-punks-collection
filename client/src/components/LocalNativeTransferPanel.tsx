@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, Send, ShieldCheck } from "lucide-react";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
+import { PreSignatureSecurityPreview } from "@/components/PreSignatureSecurityPreview";
 import { LocalVaultSafeBalanceDiscovery } from "@/components/LocalVaultSafeBalanceDiscovery";
 import { broadcastLocalPsbt, finalizeLocalPsbt, signLocalPsbt, reviewLocalPsbt, type LocalPsbtReview } from "@/lib/local-psbt-signer";
 import { prepareLocalNativeTransfer, type LocalNativeTransferPlan } from "@/lib/local-native-transfer";
@@ -105,6 +106,7 @@ export function LocalNativeTransferPanel({ wallet, network, addressType, onAddre
     {feeEstimate && <p className="mt-2 font-mono text-[9px] text-[#718092]">Frais live : {Math.ceil(feeEstimate.feeRate)} sat/vB · {describeFeeSources(feeEstimate.strategy, feeEstimate.sources)}</p>}
     {review && plan && <div className="mt-3 border border-[#70c7a0]/40 bg-[#70c7a0]/5 p-3 font-mono text-[10px] leading-5 text-[#d9d3c6]">
       <p className="flex items-center gap-2 uppercase text-[#9fe0bd]"><CheckCircle2 size={13} /> Revue obligatoire</p>
+      <PreSignatureSecurityPreview network={network === "BITCOIN_MAINNET" ? "Bitcoin mainnet · BTC" : "Fractal Bitcoin mainnet · FB"} transactionType={`Transfert natif ${asset}`} source={plan.sourceAddress} destination={plan.recipient} amount={formatAsset(plan.amountSats, asset)} inputs={[`${review.inputCount} entrée(s) vérifiée(s)`, `Valeur totale des entrées : ${formatAsset(review.inputSats, asset)}`]} outputs={[`Destinataire : ${formatAsset(plan.amountSats, asset)} → ${plan.recipient}`, ...(plan.changeSats > 0 ? [`Change : ${formatAsset(plan.changeSats, asset)} → ${plan.sourceAddress}`] : [])]} fees={`${formatAsset(review.feeSats, asset)} · ${feeEstimate ? `${Math.ceil(feeEstimate.feeRate)} sat/vB` : "taux indisponible"}`} warnings={["Vérifiez les UTXO exacts et l’absence d’actifs Ordinals/Runes avant signature.", "Si le scan est incomplet ou si une entrée est périmée, ne signez pas."]} />
       <p className="mt-1 text-[#9ea7b3]">Reconstruire crée un nouveau PSBT depuis les UTXO sûrs actuellement confirmés et remplace cette revue. Aucune signature ni diffusion automatique.</p>
       <p className="mt-2 break-all">Depuis : {ADDRESS_SPECS.find(item => item.type === plan.addressType)?.label} · {plan.sourceAddress}</p>
       <p className="break-all">Envoyer : {formatAsset(plan.amountSats, asset)} → {plan.recipient}</p>
