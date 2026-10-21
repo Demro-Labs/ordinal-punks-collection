@@ -1067,7 +1067,7 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     const txid = url.pathname.startsWith('/v1/indexer/utxo/') ? pathParts[4] : pathParts[5];
     const record = records.find(item => item.txid === txid);
     if (url.pathname.startsWith('/v1/indexer/utxo/')) {
-      return Response.json({ code: 0, data: { ...record, isSpent: false } });
+      return Response.json({ code: 0, data: { ...record, isSpent: false, runes: record.runes ?? [], alkanes: record.alkanes ?? [] } });
     }
     if (url.pathname.startsWith('/v1/indexer/runes/utxo/')) {
       return Response.json({ code: 0, data: txid === records[1].txid ? [{ runeid: '1:1', amount: '1' }] : [] });
@@ -1117,7 +1117,7 @@ test('desktop and mobile use the available-UTXO API without calling the unsuppor
       upstreamMobileModes.push(url.searchParams.get('mobile'));
       return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
     }
-    if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false } });
+    if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) return Response.json({ code: 0, data: { ...record, isSpent: false, runes: [], alkanes: [] } });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
@@ -1136,6 +1136,37 @@ test('desktop and mobile use the available-UTXO API without calling the unsuppor
   } finally { globalThis.fetch = previousFetch; }
 });
 
+
+test('uses explicit asset-free metadata to avoid per-UTXO detail calls during discovery', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qassetfreemetadata000000000000000000000';
+  const records = Array.from({ length: 25 }, (_, index) => ({
+    address, txid: (index + 1).toString(16).padStart(64, '0'), vout: 0,
+    satoshi: 120000, scriptPk: '0014' + '77'.repeat(20), height: 100,
+    isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [], runes: [], alkanes: [],
+  }));
+  const calls = [];
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    calls.push(url.pathname);
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      return Response.json({ code: 0, data: { cursor: 0, total: records.length, utxo: records } });
+    }
+    throw new Error(`Unexpected detail request during discovery: ${url.pathname}`);
+  };
+  try {
+    const response = await worker.fetch(
+      makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.249' }),
+      { UNISAT_API_KEY: 'test-only' },
+    );
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.utxo.length, 25);
+    assert.equal(data.utxo.every(item => item.inscriptionsRunesAlkanesChecked === true), true);
+    assert.deepEqual(calls, ['/v1/indexer/address/' + address + '/available-utxo-data']);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('reports safe-UTXO rejection reasons without exposing addresses or outpoints', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qdiagnosticstestaddress000000000000000';
@@ -1148,7 +1179,7 @@ test('reports safe-UTXO rejection reasons without exposing addresses or outpoint
     if (url.pathname.endsWith('/available-utxo-data')) {
       return Response.json({ code: 0, data: { total: 3, utxo: [valid, unconfirmed, inscription] } });
     }
-    if (url.pathname === `/v1/indexer/utxo/${valid.txid}/0`) return Response.json({ code: 0, data: { ...valid, isSpent: false } });
+    if (url.pathname === `/v1/indexer/utxo/${valid.txid}/0`) return Response.json({ code: 0, data: { ...valid, isSpent: false, runes: [], alkanes: [] } });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
@@ -1635,21 +1666,6 @@ test('preserves the 1000-file Inscribe limit and rejects file 1001 before upstre
     assert.equal(orderCalls, 1);
   } finally { globalThis.fetch = previousFetch; }
 });
-
-test('caps the per-isolate client table under rotating IPs', async () => {
-  let blocked = false;
-  for (let i = 0; i < 10002; i += 1) {
-    const ip = `198.51.${Math.floor(i / 256)}.${i % 256}`;
-    const response = await worker.fetch(makeRequest('/api/market?collectionId=invalid', { ip }), {});
-    if (response.status === 429) {
-      blocked = true;
-      break;
-    }
-    assert.equal(response.status, 400);
-  }
-  assert.equal(blocked, true);
-});
-
 
 function createAuthStorageMock() {
   const state = { challenge: null, session: null, ipCounts: new Map() };
@@ -2176,7 +2192,7 @@ test('Worker restarts confirmation from cursor zero when UniSat changes the avai
 
 test('Worker retries a complete UTXO confirmation scan once when the available inventory changes mid-scan', async () => {
   const previousFetch = globalThis.fetch;
-  const address = 'bc1qtestaddress0000000000000000000000000';
+  const address = 'bc1qutxoretrytest000000000000000000000000000';
   const candidate = { address, txid: 'bb'.repeat(32), vout: 0, satoshi: 50000, scriptPk: '0014' + '66'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
   const cursors = [];
   let cursor25Calls = 0;
@@ -2205,7 +2221,7 @@ test('Worker retries a complete UTXO confirmation scan once when the available i
   };
   try {
     const body = JSON.stringify({ chain: 'bitcoin', address, minimumSats: 40000, utxos: [{ txid: candidate.txid, vout: 0, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk }] });
-    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.242', body }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
+    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.199', body }), { UNISAT_BITCOIN_API: 'bitcoin-test-only' });
     const data = await response.json();
     assert.equal(response.status, 200, JSON.stringify(data));
     assert.equal(data.sufficient, true);
@@ -2213,3 +2229,19 @@ test('Worker retries a complete UTXO confirmation scan once when the available i
     assert.deepEqual(cursors, [0, 25, 0, 25]);
   } finally { globalThis.fetch = previousFetch; }
 });
+
+test('caps the per-isolate client table under rotating IPs', async () => {
+  let blocked = false;
+  for (let i = 0; i < 10002; i += 1) {
+    const ip = `198.51.${Math.floor(i / 256)}.${i % 256}`;
+    const response = await worker.fetch(makeRequest('/api/market?collectionId=invalid', { ip }), {});
+    if (response.status === 429) {
+      blocked = true;
+      break;
+    }
+    assert.equal(response.status, 400);
+  }
+  assert.equal(blocked, true);
+});
+
+
