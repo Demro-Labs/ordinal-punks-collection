@@ -52,7 +52,7 @@ const isPositiveDecimal = (value: unknown): value is string =>
 const isTxid = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
 
 export function isValidBrc20InscriptionId(value: unknown): value is string {
-  return typeof value === "string" && /^[a-f0-9]{64}i\\d+$/i.test(value);
+  return typeof value === "string" && /^[a-f0-9]{64}i\d+$/i.test(value);
 }
 
 export function isConsistentBrc20PaymentState(state: {
@@ -65,7 +65,7 @@ export function isConsistentBrc20PaymentState(state: {
   const inscriptionId = state.inscriptionId ?? "";
   if (
     (paymentTxid !== "" && !isTxid(paymentTxid)) ||
-    (inscriptionId !== "" && (typeof inscriptionId !== "string" || !/^[a-f0-9]{64}i\d+$/i.test(inscriptionId))) ||
+    (inscriptionId !== "" && !isValidBrc20InscriptionId(inscriptionId)) ||
     ((paymentTxid !== "" || inscriptionId !== "") && !state.paymentStarted)
   ) return false;
   return true;
