@@ -1136,6 +1136,37 @@ test('desktop and mobile use the available-UTXO API without calling the unsuppor
   } finally { globalThis.fetch = previousFetch; }
 });
 
+
+test('uses explicit asset-free metadata to avoid per-UTXO detail calls during discovery', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qassetfreemetadata000000000000000000000';
+  const records = Array.from({ length: 25 }, (_, index) => ({
+    address, txid: (index + 1).toString(16).padStart(64, '0'), vout: 0,
+    satoshi: 120000, scriptPk: '0014' + '77'.repeat(20), height: 100,
+    isLowFee: false, isOpInRBF: false, inscriptions: [], runes: [], alkanes: [],
+  }));
+  const calls = [];
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    calls.push(url.pathname);
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      return Response.json({ code: 0, data: { cursor: 0, total: records.length, utxo: records } });
+    }
+    throw new Error(`Unexpected detail request during discovery: ${url.pathname}`);
+  };
+  try {
+    const response = await worker.fetch(
+      makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.249' }),
+      { UNISAT_API_KEY: 'test-only' },
+    );
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.utxo.length, 25);
+    assert.equal(data.utxo.every(item => item.inscriptionsRunesAlkanesChecked === true), true);
+    assert.deepEqual(calls, ['/v1/indexer/address/' + address + '/available-utxo-data']);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('reports safe-UTXO rejection reasons without exposing addresses or outpoints', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qdiagnosticstestaddress000000000000000';
