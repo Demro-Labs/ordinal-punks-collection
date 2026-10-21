@@ -115,7 +115,7 @@ export function Brc20TransferFlow({
   const [progress, setProgress] = useState<Brc20TransferProgress | null>(initialProgress);
   const progressRef = useRef<Brc20TransferProgress | null>(initialProgress);
   const [recipient, setRecipient] = useState(initialProgress?.recipient || "");
-  const [amountToTransfer, setAmountToTransfer] = useState(initialProgress?.amount || amount);
+  const [amountToTransfer, setAmountToTransfer] = useState(initialProgress?.amount || "");
   const [validatedRecipient, setValidatedRecipient] = useState(initialProgress?.recipient || "");
   const [confirmed, setConfirmed] = useState(false);
   const [ownershipProofKey, setOwnershipProofKey] = useState<string | null>(null);
@@ -560,6 +560,17 @@ export function Brc20TransferFlow({
 
   const canPrepare = nextAction === "prepare" && !busyAction && Boolean(recipient.trim()) && confirmed &&
     validDecimal(amountToTransfer) && amountWithinBalance && ownershipProofKey === ownershipContextKey;
+  const prepareButtonLabel = !validDecimal(amountToTransfer)
+    ? "Saisir le montant exact"
+    : !amountWithinBalance
+      ? "Montant supérieur au solde disponible"
+      : !recipient.trim()
+        ? "Saisir l’adresse destinataire"
+        : !confirmed
+          ? "Confirmer le montant et l’adresse"
+          : ownershipProofKey !== ownershipContextKey
+            ? "Valider la propriété dans UniSat"
+            : "1 · Pré-commander le transfert";
   const canPay = nextAction === "pay" && !busyAction && confirmed && ownershipProofKey === ownershipContextKey &&
     validatedRecipient === recipient.trim();
   const canSend = nextAction === "send-inscription" && !busyAction && Boolean(recipient.trim()) && confirmed &&
@@ -653,13 +664,13 @@ export function Brc20TransferFlow({
       {nextAction === "prepare" && (
         <button type="button" onClick={() => void prepareTransfer()} disabled={!canPrepare}
           className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
-          {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Preparing…</> : <><Send size={13} /> 1 · Pré-commander le transfert</>}
+          {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Préparation…</> : <><Send size={13} /> {prepareButtonLabel}</>}
         </button>
       )}
       {nextAction === "pay" && progress && (
         <button type="button" onClick={payForTransferInscription} disabled={!canPay}
           className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-[#d99a54] bg-[#d99a54] px-4 py-2 font-mono text-[10px] font-semibold uppercase text-[#0b0d10] disabled:opacity-40">
-          {busyAction === "paying" ? <><Loader2 size={13} className="animate-spin" /> Paying…</> : <><Send size={13} /> 2 · Payer avec UniSat</>}
+          {busyAction === "preparing" ? <><Loader2 size={13} className="animate-spin" /> Vérification des UTXO…</> : busyAction === "paying" ? <><Loader2 size={13} className="animate-spin" /> Attente de UniSat…</> : <><Send size={13} /> {paymentPreflight?.orderId === progress.orderId ? "2 · Confirmer le paiement avec UniSat" : "2 · Vérifier les UTXO puis payer"}</>}
         </button>
       )}
       {nextAction === "check-order" && progress && (
