@@ -1249,7 +1249,7 @@ test('Worker confirmation scans past 500 available outputs to find the exact PSB
     assert.equal(response.status, 200, JSON.stringify(data));
     assert.equal(data.sufficient, true);
     assert.equal(data.verifiedUtxoCount, 1);
-    assert.deepEqual(cursors, [500]);
+    assert.deepEqual(cursors, [375, 400, 425, 450, 475, 500]);
   } finally { globalThis.fetch = previousFetch; }
 });
 
