@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
-import { ADDRESS_SPECS, type AddressType, type OrdiNetwork, type OrdiWalletRecord } from "@/lib/ordi-wallet";
+import { ADDRESS_SPECS, fetchAddressBalance, type AddressType, type OrdiNetwork, type OrdiWalletRecord } from "@/lib/ordi-wallet";
 import { fetchAddressOrdinals } from "@/lib/ordinals";
 import { fetchAlkaneCollectionPage, fetchProtocolBalances, type ProtocolBalances } from "@/lib/protocol-balances";
 import { formatRuneAmount } from "@/lib/runes";
@@ -16,6 +16,7 @@ type MempoolTx = {
 type PortfolioRow = {
   type: AddressType;
   address: string;
+  balance: { confirmed: number; unconfirmed: number; total: number } | null;
   protocols: ProtocolBalances | null;
   inscriptions: number | null;
   alkaneCollections: { total: number; names: string[] } | null;
@@ -69,24 +70,27 @@ export function LocalVaultPortfolioPanel({ addresses, network }: { addresses: Ad
     try {
       const next = await Promise.all(ADDRESS_SPECS.map(async spec => {
         const address = addresses[spec.type].address;
-        const [protocolResult, ordinalResult, activityResult, collectionResult] = await Promise.allSettled([
+        const [balanceResult, protocolResult, ordinalResult, activityResult, collectionResult] = await Promise.allSettled([
+          fetchAddressBalance(network, address),
           fetchProtocolBalances(address, network, controller.signal),
           fetchAddressOrdinals(address, network, controller.signal),
           fetchActivity(address, network, controller.signal),
           network === "BITCOIN_MAINNET" ? fetchAlkaneCollectionPage(address, network, 0, controller.signal) : Promise.resolve(null),
         ]);
         const errors: string[] = [];
+        const balance = balanceResult.status === "fulfilled" ? balanceResult.value : null;
         const protocols = protocolResult.status === "fulfilled" ? protocolResult.value : null;
         const inscriptions = ordinalResult.status === "fulfilled" ? ordinalResult.value.total : null;
         const activity = activityResult.status === "fulfilled" ? activityResult.value : [];
         const alkaneCollections = collectionResult.status === "fulfilled" && collectionResult.value
           ? { total: collectionResult.value.total, names: collectionResult.value.detail.map(item => item.name).slice(0, 4) }
           : null;
+        if (balanceResult.status === "rejected" && !controller.signal.aborted) errors.push("BTC/FB balance unavailable");
         if (protocolResult.status === "rejected" && !controller.signal.aborted) errors.push("Protocol balances unavailable");
         if (ordinalResult.status === "rejected" && !controller.signal.aborted) errors.push("Ordinal index unavailable");
         if (activityResult.status === "rejected" && !controller.signal.aborted) errors.push("Recent activity unavailable");
         if (collectionResult.status === "rejected" && !controller.signal.aborted && network === "BITCOIN_MAINNET") errors.push("Alkane collection index unavailable");
-        return { type: spec.type, address, protocols, inscriptions, alkaneCollections, activity, errors } satisfies PortfolioRow;
+        return { type: spec.type, address, balance, protocols, inscriptions, alkaneCollections, activity, errors } satisfies PortfolioRow;
       }));
       if (!controller.signal.aborted) {
         setRows(next);
@@ -115,6 +119,23 @@ export function LocalVaultPortfolioPanel({ addresses, network }: { addresses: Ad
       <button type="button" onClick={() => void refresh()} disabled={busy} className="inline-flex min-h-11 shrink-0 items-center gap-2 border border-[#3b434d] px-3 font-mono text-[9px] uppercase text-[#d9d3c6] hover:border-[#70c7a0] disabled:opacity-50" aria-label="Refresh all Ordi Wallet account data"><RefreshCw size={12} className={busy ? "animate-spin" : ""} /> Refresh all</button>
     </div>
     <p className="mt-2 font-mono text-[9px] leading-4 text-[#9ea7b3]">Local signing is enabled only for the separately reviewed BTC/FB and single-Ordinal paths. BRC-20, BRC20-Prog, Runes and Alkanes are indexed here but are not signed by this portfolio panel.</p>
+    {(() => {
+      const allBalancesAvailable = rows.length === ADDRESS_SPECS.length && rows.every(row => row.balance !== null);
+      const totalSats = allBalancesAvailable ? rows.reduce((sum, row) => sum + (row.balance?.total ?? 0), 0) : null;
+      const confirmedSats = allBalancesAvailable ? rows.reduce((sum, row) => sum + (row.balance?.confirmed ?? 0), 0) : null;
+      const unconfirmedSats = allBalancesAvailable ? rows.reduce((sum, row) => sum + (row.balance?.unconfirmed ?? 0), 0) : null;
+      const protocolRows = rows.flatMap(row => row.protocols ? [row.protocols] : []);
+      const indexedInscriptionCount = rows.every(row => row.inscriptions !== null) && rows.length === ADDRESS_SPECS.length ? rows.reduce((sum, row) => sum + (row.inscriptions ?? 0), 0) : null;
+      const brc20Count = protocolRows.reduce((sum, item) => sum + item.brc20.length, 0);
+      const runeCount = protocolRows.reduce((sum, item) => sum + item.runes.length, 0);
+      const protocolsComplete = protocolRows.length === ADDRESS_SPECS.length && protocolRows.every(item => Object.keys(item.errors).length === 0);
+      return <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4" aria-label="Unified BTC FB Ordinals BRC-20 portfolio">
+        <article className="border border-[#70c7a0]/40 bg-[#101a16] p-3"><p className="font-mono text-[9px] uppercase tracking-[.1em] text-[#9fe0bd]">{network === "BITCOIN_MAINNET" ? "Bitcoin balance" : "Fractal Bitcoin balance"}</p><p className="mt-2 break-words font-mono text-lg text-[#f3efe5]">{totalSats === null ? "Index unavailable" : (totalSats / 100000000).toFixed(8) + " " + assetName(network)}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">{confirmedSats === null || unconfirmedSats === null ? "Aggregate withheld until all four accounts are available" : "Confirmed " + (confirmedSats / 100000000).toFixed(8) + " · Unconfirmed " + (unconfirmedSats / 100000000).toFixed(8) + " " + assetName(network)}</p></article>
+        <article className="border border-[#2c323a] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase tracking-[.1em] text-[#9fe0bd]">Ordinals / inscriptions</p><p className="mt-2 font-mono text-lg text-[#f3efe5]">{indexedInscriptionCount === null ? "Index unavailable" : indexedInscriptionCount.toLocaleString()}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">Across four local accounts; missing data is not counted as zero</p></article>
+        <article className="border border-[#2c323a] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase tracking-[.1em] text-[#9fe0bd]">BRC-20 tickers</p><p className="mt-2 font-mono text-lg text-[#f3efe5]">{protocolsComplete ? brc20Count.toLocaleString() : "Partial index"}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">Indexed ticker entries, not a fiat valuation</p></article>
+        <article className="border border-[#2c323a] bg-[#10151a] p-3"><p className="font-mono text-[9px] uppercase tracking-[.1em] text-[#9fe0bd]">Runes · protocol assets</p><p className="mt-2 font-mono text-lg text-[#f3efe5]">{protocolsComplete ? runeCount.toLocaleString() : "Partial index"}</p><p className="mt-1 font-mono text-[9px] text-[#718092]">Tracked separately; no invented market value</p></article>
+      </div>;
+    })()}
     {error && <p className="mt-3 border border-[#e0b45f]/40 p-2 font-mono text-[9px] text-[#e0b45f]" role="status">{error}</p>}
     <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-4">
       {ADDRESS_SPECS.map(spec => {
@@ -126,6 +147,8 @@ export function LocalVaultPortfolioPanel({ addresses, network }: { addresses: Ad
           <div className="flex items-center justify-between gap-2"><h4 className="font-mono text-[9px] uppercase tracking-[.1em] text-[#f2bd63]">{spec.label}</h4><span className="font-mono text-[8px] text-[#718092]">{row ? "LIVE" : "…"}</span></div>
           <a href={`${explorer}/address/${encodeURIComponent(address)}`} target="_blank" rel="noreferrer" className="mt-2 block break-all font-mono text-[8px] leading-4 text-[#718092] hover:text-[#f2bd63]">{short(address)} <ExternalLink size={9} className="inline" /></a>
           <div className="mt-3 space-y-2 font-mono text-[9px] leading-4">
+            <p className="text-[#d9d3c6]">{assetName(network)} balance: <span className="text-[#70c7a0]">{row?.balance ? (row.balance.total / 100000000).toFixed(8) + " " + assetName(network) : "Unavailable"}</span></p>
+            <p className="text-[#d9d3c6]">Confirmed / unconfirmed: <span className="text-[#9ea7b3]">{row?.balance ? (row.balance.confirmed / 100000000).toFixed(8) + " / " + (row.balance.unconfirmed / 100000000).toFixed(8) : "Unavailable"}</span></p>
             <p className="text-[#d9d3c6]">Ordinals / inscriptions: <span className="text-[#70c7a0]">{row?.inscriptions ?? "—"}</span></p>
             <p className="break-words text-[#d9d3c6]">BRC-20: <span className="text-[#9ea7b3]">{formatProtocolBalances(protocols, "brc20")}</span></p>
             <p className="break-words text-[#d9d3c6]">BRC20-Prog: <span className="text-[#9ea7b3]">{formatProtocolBalances(protocols, "brc20Prog")}</span></p>
