@@ -179,7 +179,12 @@ export async function broadcastLocalOrdinalTransfer(local: LocalOrdinalPlan, wal
   const rawTxHex = extractAndVerifySignedOrdinalTransaction(signed.signedPsbtHex, local.plan);
   if (rawTxHex.toLowerCase() !== signed.rawTxHex.toLowerCase() || bitcoin.Transaction.fromHex(rawTxHex).getId().toLowerCase() !== signed.txid.toLowerCase()) throw new Error("La transaction signée ne correspond plus à la revue; diffusion annulée.");
   const query = new URLSearchParams({ chain: local.network });
-  const response = await fetch(`${LIVE_DATA_API_BASE}/api/mempool/tx?${query}`, { method: "POST", headers: { "Content-Type": "text/plain", Accept: "application/json" }, body: rawTxHex, cache: "no-store" });
+  let response: Response;
+  try {
+    response = await fetch(`${LIVE_DATA_API_BASE}/api/mempool/tx?${query}`, { method: "POST", headers: { "Content-Type": "text/plain", Accept: "application/json" }, body: rawTxHex, cache: "no-store" });
+  } catch {
+    throw new Error(`Résultat de diffusion incertain. Vérifiez ${signed.txid} dans Mempool avant toute nouvelle tentative; la transaction peut déjà avoir atteint le réseau.`);
+  }
   const result = await response.json().catch(() => null) as { txid?: string; error?: string } | null;
   const returned = typeof result?.txid === "string" ? result.txid.toLowerCase() : "";
   if (!response.ok || returned !== signed.txid.toLowerCase()) throw new Error(`Résultat de diffusion incertain. Vérifiez ${signed.txid} dans Mempool avant toute nouvelle tentative${result?.error ? ` (${result.error})` : ""}.`);
