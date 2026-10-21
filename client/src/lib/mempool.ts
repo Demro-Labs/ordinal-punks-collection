@@ -177,6 +177,7 @@ export async function scanAddressUtxoInventory(network: string, address: string,
   let totalCount: number | null = null;
   let requestWindowStartedAt = Date.now();
   let requestsInWindow = 0;
+  const seenInventoryOutpoints = new Set<string>();
   for (let pageNumber = 0; pageNumber < MAX_ADDRESS_UTXO_PAGES; pageNumber += 1) {
     if (requestsInWindow >= MAX_ADDRESS_UTXO_REQUESTS_PER_MINUTE) {
       const waitMs = Math.max(0, requestWindowStartedAt + ADDRESS_UTXO_REQUEST_WINDOW_MS - Date.now());
@@ -213,12 +214,13 @@ export async function scanAddressUtxoInventory(network: string, address: string,
       const validSpent = item.isSpent === undefined || item.isSpent === null || typeof item.isSpent === "boolean";
       if (typeof item.txid !== "string" || !/^[a-f0-9]{64}$/i.test(item.txid) ||
           typeof item.vout !== "number" || !Number.isSafeInteger(item.vout) || item.vout < 0 || amount === null ||
-          pageOutpoints.has(outpoint) || !validHeight || !validScript || !validSpent ||
+          pageOutpoints.has(outpoint) || seenInventoryOutpoints.has(outpoint) || !validHeight || !validScript || !validSpent ||
           !nullableArray(item.inscriptions) || !nullableArray(item.runes) || !nullableArray(item.alkanes)) return false;
       pageOutpoints.add(outpoint);
       return true;
     });
     if (!rowsValid) throw new Error("Une sortie de l’inventaire UTXO est absente, dupliquée ou mal formée; le scan complet est refusé.");
+    pageOutpoints.forEach(outpoint => seenInventoryOutpoints.add(outpoint));
 
     const confirmedPageCount = pageScannedCount!;
     const confirmedNextCursor = nextCursor!;
@@ -316,6 +318,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     throw new Error("The required PSBT outpoints are invalid or duplicated.");
   }
   const collected: SpendableUtxo[] = [];
+  const seenSafeOutpoints = new Set<string>();
   let cursor = 0;
   let scannedCount = 0;
   let sourceTotal: number | null = null;
@@ -398,6 +401,13 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       item.inscriptionsRunesAlkanesChecked === true && typeof item.isLowFee === "boolean" && typeof item.isOpInRBF === "boolean" &&
       Array.isArray(item.inscriptions) && item.inscriptions.length === 0
     );
+    for (const item of safe) {
+      const key = `${item.txid.toLowerCase()}:${item.vout}`;
+      if (seenSafeOutpoints.has(key)) {
+        throw new Error(`Safe UTXO index repeated outpoint ${key} across pages. The inventory is inconsistent; no transaction was signed or broadcast.`);
+      }
+      seenSafeOutpoints.add(key);
+    }
     collected.push(...safe.map(item => ({ ...item, sourceCursor: cursor })));
     options.onProgress?.({ scannedCount, totalCount: sourceTotal!, safeUtxoCount: collected.length });
     const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
