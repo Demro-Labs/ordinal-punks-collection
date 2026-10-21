@@ -129,6 +129,14 @@ export function Brc20TransferFlow({
   const [message, setMessage] = useState("");
   const [scannedInscriptions, setScannedInscriptions] = useState<ScannedBrc20Inscription[]>([]);
   const [selectedInscriptionId, setSelectedInscriptionId] = useState("");
+  const hiddenInscriptionStorageKey = `brc20-hidden-inscriptions:${site}:${network}:${address.toLowerCase()}:${ticker.toLowerCase()}`;
+  const [hiddenInscriptionIds, setHiddenInscriptionIds] = useState<string[]>(() => {
+    try {
+      const stored = window.localStorage.getItem(hiddenInscriptionStorageKey);
+      const parsed: unknown = stored ? JSON.parse(stored) : [];
+      return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
+    } catch { return []; }
+  });
   const [feeRate, setFeeRate] = useState(initialProgress?.feeRate || 1);
   const [paymentPreflight, setPaymentPreflight] = useState<{ orderId: string; expiresAt: number } | null>(null);
   const [transferFeePreflight, setTransferFeePreflight] = useState<{ inscriptionId: string; recipient: string; expiresAt: number } | null>(null);
@@ -212,6 +220,36 @@ export function Brc20TransferFlow({
   };
 
   useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(hiddenInscriptionStorageKey);
+      const parsed: unknown = stored ? JSON.parse(stored) : [];
+      setHiddenInscriptionIds(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : []);
+    } catch { setHiddenInscriptionIds([]); }
+  }, [hiddenInscriptionStorageKey]);
+
+  const hideScannedInscription = (inscriptionId: string) => {
+    const nextHidden = Array.from(new Set([...hiddenInscriptionIds, inscriptionId]));
+    setHiddenInscriptionIds(nextHidden);
+    try { window.localStorage.setItem(hiddenInscriptionStorageKey, JSON.stringify(nextHidden)); } catch { /* Hiding remains active for this session if storage is blocked. */ }
+    setScannedInscriptions(current => current.filter(item => item.inscriptionId !== inscriptionId));
+    if (selectedInscriptionId === inscriptionId) {
+      setSelectedInscriptionId("");
+      setAmountToTransfer("");
+      setConfirmed(false);
+      setValidatedRecipient("");
+      setOwnershipProofKey(null);
+      setTransferFeePreflight(null);
+    }
+    setMessage("Reçu masqué de la liste de sélection BRC-20 dans cette interface uniquement. Aucun actif, solde ou élément sur la blockchain n’a été supprimé.");
+  };
+
+  const restoreHiddenInscriptions = () => {
+    setHiddenInscriptionIds([]);
+    try { window.localStorage.removeItem(hiddenInscriptionStorageKey); } catch { /* Restore remains active for this session if storage is blocked. */ }
+    setMessage("Liste des reçus masqués réinitialisée. Relancez le scan UniSat pour les afficher de nouveau.");
+  };
+
+  useEffect(() => {
     const restored = readProgress(identity);
     progressRef.current = restored;
     setProgress(restored);
@@ -274,9 +312,10 @@ export function Brc20TransferFlow({
         start += payload.detail.length;
       }
       if (total === null || all.length !== total) throw new Error("Le scan est incomplet (limite de 10 000 inscriptions ou pagination instable). Aucun transfert n’a été effectué.");
-      setScannedInscriptions(all);
-      setMessage(all.length
-        ? `${all.length} inscription(s) transférable(s) BRC-20 ${ticker} trouvée(s). Sélectionnez le montant exact à envoyer.`
+      const visible = all.filter(item => !hiddenInscriptionIds.includes(item.inscriptionId));
+      setScannedInscriptions(visible);
+      setMessage(visible.length
+        ? `${visible.length} inscription(s) affichée(s) sur ${all.length} inscription(s) transférable(s) BRC-20 ${ticker}. Sélectionnez le montant exact à envoyer.`
         : `UniSat ne signale aucune inscription transférable pour ${ticker} sur ${network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"}.`);
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "Échec du scan BRC-20. Aucun transfert n’a été effectué.");
@@ -776,15 +815,21 @@ export function Brc20TransferFlow({
             {busyAction === "scanning" ? <><Loader2 size={13} className="animate-spin" /> Scan…</> : "Scanner les inscriptions"}
           </button>
         </div>
+        {hiddenInscriptionIds.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border border-[#3b434d] p-2">
+            <p className="font-mono text-[9px] text-[#718092]">{hiddenInscriptionIds.length} reçu(s) masqué(s) pour ce wallet, réseau et ticker. Masquage local uniquement.</p>
+            <button type="button" onClick={restoreHiddenInscriptions} disabled={Boolean(busyAction)} className="min-h-9 border border-[#3b434d] px-3 py-2 font-mono text-[9px] uppercase text-[#d9d3c6] disabled:opacity-40">Réafficher les reçus masqués</button>
+          </div>
+        )}
         {scannedInscriptions.length > 0 && (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full border-collapse text-left font-mono text-[9px]">
-              <thead><tr className="border-b border-[#3b434d] text-[#718092]"><th className="p-2">Choisir</th><th className="p-2">Ticker</th><th className="p-2">Montant</th><th className="p-2">Inscription ID</th></tr></thead>
+              <thead><tr className="border-b border-[#3b434d] text-[#718092]"><th className="p-2">Choisir</th><th className="p-2">Ticker</th><th className="p-2">Montant</th><th className="p-2">Inscription ID</th><th className="p-2">Action</th></tr></thead>
               <tbody>
                 {scannedInscriptions.map(item => (
                   <tr key={item.inscriptionId} className={selectedInscriptionId === item.inscriptionId ? "border-b border-[#d99a54] bg-[#d99a54]/10" : "border-b border-[#3b434d]"}>
                     <td className="p-2"><input aria-label={`Sélectionner ${item.ticker} ${item.amount}`} type="radio" name={`brc20-inscription-${site}-${network}`} checked={selectedInscriptionId === item.inscriptionId} onChange={() => { setSelectedInscriptionId(item.inscriptionId); setAmountToTransfer(item.amount); setConfirmed(false); setValidatedRecipient(""); setOwnershipProofKey(null); }} /></td>
-                    <td className="p-2 text-[#f2bd63]">{item.ticker}</td><td className="p-2">{item.amount}</td><td className="max-w-[16rem] break-all p-2 text-[#9ea7b3]">{item.inscriptionId}</td>
+                    <td className="p-2 text-[#f2bd63]">{item.ticker}</td><td className="p-2">{item.amount}</td><td className="max-w-[16rem] break-all p-2 text-[#9ea7b3]">{item.inscriptionId}</td><td className="p-2"><button type="button" onClick={() => hideScannedInscription(item.inscriptionId)} disabled={Boolean(busyAction)} aria-label={`Masquer le reçu ${item.inscriptionId} de la liste`} className="border border-[#3b434d] px-2 py-1 text-[9px] uppercase text-[#aeb6c2] hover:border-[#d99a54] hover:text-[#f2bd63] disabled:opacity-40">Masquer</button></td>
                   </tr>
                 ))}
               </tbody>
