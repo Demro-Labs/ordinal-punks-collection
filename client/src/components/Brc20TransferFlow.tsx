@@ -636,7 +636,8 @@ export function Brc20TransferFlow({
       : validatedRecipient !== recipient.trim()
         ? "Vérifier l’adresse destinataire"
         : "2 · Payer la création avec UniSat";
-  const transferFeePreflightValid = Boolean(progress?.inscriptionId && transferFeePreflight?.inscriptionId === progress.inscriptionId &&
+  const transferFeePreflightValid = Boolean(progress?.inscriptionId && transferFeePreflight &&
+    transferFeePreflight.inscriptionId === progress.inscriptionId &&
     transferFeePreflight.recipient === recipient.trim() && Date.now() < transferFeePreflight.expiresAt);
   const canSend = nextAction === "send-inscription" && !busyAction && Boolean(recipient.trim()) && confirmed &&
     validatedRecipient === recipient.trim() && ownershipProofKey === ownershipContextKey && transferFeePreflightValid;
