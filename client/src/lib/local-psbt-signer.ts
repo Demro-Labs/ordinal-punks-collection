@@ -5,6 +5,9 @@ import type { AddressType, OrdiAddress, OrdiNetwork, OrdiWalletRecord } from "@/
 import { confirmSpendableUtxos, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
 import { LIVE_DATA_API_BASE } from "@/lib/live";
 
+const globalWithBuffer = globalThis as typeof globalThis & { Buffer?: typeof Buffer };
+if (!globalWithBuffer.Buffer) globalWithBuffer.Buffer = Buffer;
+
 bitcoin.initEccLib(ecc);
 const NETWORK = bitcoin.networks.bitcoin;
 const MAX_INPUTS = 20;
