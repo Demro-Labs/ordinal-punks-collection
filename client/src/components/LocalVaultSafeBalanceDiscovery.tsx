@@ -3,51 +3,137 @@ import { Check, Copy, Loader2, Search, Wallet } from "lucide-react";
 import { getSpendableUtxos, getUtxoBalanceSummary } from "@/lib/mempool";
 import { ADDRESS_SPECS, fetchAddressBalance, type AddressType, type OrdiNetwork, type OrdiWalletRecord } from "@/lib/ordi-wallet";
 
-type ScanRow = { type: AddressType; address: string; confirmedSats: number | null; pendingSats: number | null; totalSats: number | null; safeSats: number | null; safeUtxos: number | null; totalUtxos: number | null; availableUtxos: number | null; unavailableUtxos: number | null; availableSats: number | null; unavailableSats: number | null; summaryError?: string; balanceError?: string; safeError?: string };
+type ScanRow = {
+  type: AddressType;
+  address: string;
+  confirmedSats: number | null;
+  pendingSats: number | null;
+  totalSats: number | null;
+  safeSats: number | null;
+  safeUtxos: number | null;
+  totalUtxos: number | null;
+  availableUtxos: number | null;
+  unavailableUtxos: number | null;
+  availableSats: number | null;
+  unavailableSats: number | null;
+  summaryError?: string;
+  balanceError?: string;
+  safeError?: string;
+};
+
+function errorMessage(reason: unknown, fallback: string) {
+  return reason instanceof Error ? reason.message : fallback;
+}
 
 export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddressType, onSelectAddressType }: {
-  wallet: OrdiWalletRecord; network: OrdiNetwork; selectedAddressType: AddressType; onSelectAddressType?: (type: AddressType) => void;
+  wallet: OrdiWalletRecord;
+  network: OrdiNetwork;
+  selectedAddressType: AddressType;
+  onSelectAddressType?: (type: AddressType) => void;
 }) {
   const [rows, setRows] = useState<ScanRow[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState("");
   const [notice, setNotice] = useState("");
   const [copied, setCopied] = useState("");
+
   const scan = async () => {
-    setBusy(true); setNotice(""); setRows(null);
+    setBusy(true);
+    setProgress("");
+    setNotice("");
+    setRows(null);
+    const results: ScanRow[] = [];
     try {
-      const results: ScanRow[] = await Promise.all(ADDRESS_SPECS.map(async (spec): Promise<ScanRow> => {
-        const address = wallet.addresses[spec.type]?.address ?? "";
-        if (!address) return { type: spec.type, address, confirmedSats: null, pendingSats: null, totalSats: null, safeSats: null, safeUtxos: null, totalUtxos: null, availableUtxos: null, unavailableUtxos: null, availableSats: null, unavailableSats: null, balanceError: "Adresse absente du coffre.", safeError: "Adresse absente du coffre." } satisfies ScanRow;
-        const [balanceResult, safeResult, summaryResult] = await Promise.allSettled([fetchAddressBalance(network, address), getSpendableUtxos(network, address, 1, { collectAll: true }), getUtxoBalanceSummary(network, address)]);
-        const balance = balanceResult.status === "fulfilled" ? balanceResult.value : null;
-        const safe = safeResult.status === "fulfilled" ? safeResult.value : null;
-        const summary = summaryResult.status === "fulfilled" ? summaryResult.value : null;
-        return {
-          type: spec.type, address, confirmedSats: balance?.confirmed ?? null, pendingSats: balance?.unconfirmed ?? null, totalSats: balance?.total ?? null,
-          safeSats: safe ? safe.reduce((sum, item) => sum + item.satoshi, 0) : null, safeUtxos: safe?.length ?? null,
-          totalUtxos: summary?.totalUtxoCount ?? null, availableUtxos: summary?.availableUtxoCount ?? null, unavailableUtxos: summary?.unavailableUtxoCount ?? null, availableSats: summary?.availableBalance ?? null, unavailableSats: summary?.unavailableBalance ?? null,
-          ...(summaryResult.status === "rejected" ? { summaryError: summaryResult.reason instanceof Error ? summaryResult.reason.message : "Résumé UTXO indisponible." } : {}),
-          ...(balanceResult.status === "rejected" ? { balanceError: balanceResult.reason instanceof Error ? balanceResult.reason.message : "Solde total indisponible." } : {}),
-          ...(safeResult.status === "rejected" ? { safeError: safeResult.reason instanceof Error ? safeResult.reason.message : "Solde sûr indisponible." } : {}),
-        } satisfies ScanRow;
-      }));
-      setRows(results);
-      if (results.some(row => row.balanceError || row.safeError || row.summaryError)) setNotice("Scan partiel : les erreurs restent distinctes du solde zéro. Réessayez après résolution de l’indexeur.");
-      else setNotice("Scan terminé. Le solde confirmé, le mempool et les sats sûrs sont affichés séparément. Les sorties d’actifs restent protégées.");
-    } finally { setBusy(false); }
+      for (let index = 0; index < ADDRESS_SPECS.length; index += 1) {
+        const spec = ADDRESS_SPECS[index];
+        const label = `${index + 1}/${ADDRESS_SPECS.length} · ${spec.label}`;
+        setProgress(`${label} · soldes`);
+        const address = wallet.addresses?.[spec.type]?.address ?? "";
+        if (!address) {
+          results.push({
+            type: spec.type, address, confirmedSats: null, pendingSats: null, totalSats: null,
+            safeSats: null, safeUtxos: null, totalUtxos: null, availableUtxos: null,
+            unavailableUtxos: null, availableSats: null, unavailableSats: null,
+            balanceError: "Adresse absente du coffre.", safeError: "Adresse absente du coffre.",
+          });
+          setRows([...results]);
+          continue;
+        }
+
+        // Read aggregate balances first, then scan this address's safe UTXOs before
+        // starting the next address. This avoids multiplying the Worker/IP quota by four.
+        const [balanceResult, summaryResult] = await Promise.allSettled([
+          fetchAddressBalance(network, address),
+          getUtxoBalanceSummary(network, address),
+        ]);
+        let row: ScanRow = {
+          type: spec.type,
+          address,
+          confirmedSats: balanceResult.status === "fulfilled" ? balanceResult.value.confirmed : null,
+          pendingSats: balanceResult.status === "fulfilled" ? balanceResult.value.unconfirmed : null,
+          totalSats: balanceResult.status === "fulfilled" ? balanceResult.value.total : null,
+          safeSats: null,
+          safeUtxos: null,
+          totalUtxos: summaryResult.status === "fulfilled" ? summaryResult.value.totalUtxoCount : null,
+          availableUtxos: summaryResult.status === "fulfilled" ? summaryResult.value.availableUtxoCount : null,
+          unavailableUtxos: summaryResult.status === "fulfilled" ? summaryResult.value.unavailableUtxoCount : null,
+          availableSats: summaryResult.status === "fulfilled" ? summaryResult.value.availableBalance : null,
+          unavailableSats: summaryResult.status === "fulfilled" ? summaryResult.value.unavailableBalance : null,
+          ...(balanceResult.status === "rejected" ? { balanceError: errorMessage(balanceResult.reason, "Solde total indisponible.") } : {}),
+          ...(summaryResult.status === "rejected" ? { summaryError: errorMessage(summaryResult.reason, "Résumé UTXO indisponible.") } : {}),
+        };
+        results.push(row);
+        setRows([...results]);
+
+        setProgress(`${label} · UTXO sûrs`);
+        try {
+          const safe = await getSpendableUtxos(network, address, 1, {
+            collectAll: true,
+            allowInsufficientSafeBalance: true,
+          });
+          row = {
+            ...row,
+            safeSats: safe.reduce((sum, item) => sum + item.satoshi, 0),
+            safeUtxos: safe.length,
+          };
+        } catch (error) {
+          row = { ...row, safeError: errorMessage(error, "Scan UTXO sûr indisponible.") };
+        }
+        results[results.length - 1] = row;
+        setRows([...results]);
+      }
+      if (results.some(row => row.balanceError || row.safeError || row.summaryError)) {
+        setNotice("Scan terminé avec erreurs signalées par adresse. Une erreur d’indexeur n’est pas affichée comme un solde zéro.");
+      } else {
+        setNotice("Scan terminé pour les quatre adresses. Les soldes confirmés, mempool et sûrs sont séparés; les sorties d’actifs restent protégées.");
+      }
+    } catch (error) {
+      setNotice(`Scan interrompu : ${errorMessage(error, "erreur inattendue")}. Les lignes déjà terminées restent affichées.`);
+    } finally {
+      setBusy(false);
+      setProgress("");
+    }
   };
+
   const copyAddress = async (address: string) => {
-    try { await navigator.clipboard.writeText(address); setCopied(address); setNotice("Adresse copiée. Vérifiez le réseau avant tout dépôt."); }
-    catch { setNotice("Copie automatique indisponible. Sélectionnez et copiez l’adresse affichée."); }
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(address);
+      setNotice("Adresse copiée. Vérifiez le réseau avant tout dépôt.");
+    } catch {
+      setNotice("Copie automatique indisponible. Sélectionnez et copiez l’adresse affichée.");
+    }
   };
+
   return <div className="mt-3 border border-[#3b434d] bg-[#0b0f13] p-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[.12em] text-[#d9d3c6]"><Wallet size={13} /> Scanner les soldes du coffre</p>
       <button type="button" onClick={() => void scan()} disabled={busy} className="inline-flex min-h-10 items-center gap-2 border border-[#d99a54] px-3 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-50">
-        {busy ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} {busy ? "Analyse…" : "Scanner les 4 adresses"}
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} {busy ? `Analyse ${progress || "…"}` : "Scanner les 4 adresses"}
       </button>
     </div>
-    <p className="mt-2 font-mono text-[9px] leading-4 text-[#718092]">BTC/FB · Legacy, Nested SegWit, Native SegWit, Taproot. La pagination suit le total annoncé par UniSat (curseur Worker maximal : 1 000 000 sorties disponibles). Inscriptions, Runes, Alkanes, poussières et sorties non vérifiées restent exclues des sats sûrs.</p>
+    <p className="mt-2 font-mono text-[9px] leading-4 text-[#718092]">BTC/FB · Legacy, Nested SegWit, Native SegWit, Taproot. Scan séquentiel pour respecter le quota du Worker. La pagination suit le total annoncé par UniSat (curseur maximal : 1 000 000 sorties). Inscriptions, Runes, Alkanes, poussières et sorties non vérifiées restent exclues des sats sûrs.</p>
+    {busy && progress && <p className="mt-2 font-mono text-[9px] leading-4 text-[#f2bd63]" role="status" aria-live="polite">{progress}</p>}
     {notice && <p className="mt-2 font-mono text-[9px] leading-4 text-[#9ea7b3]" role="status">{notice}</p>}
     {rows && <div className="mt-3 space-y-2">
       {rows.map(row => {

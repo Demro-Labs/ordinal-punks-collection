@@ -210,7 +210,7 @@ function compareSpendableUtxos(left: SpendableUtxo, right: SpendableUtxo) {
     left.vout - right.vout;
 }
 
-export async function getSpendableUtxos(network: string, address: string, minimumSats: number, options: { mobile?: boolean; requiredOutpoints?: string[]; collectAll?: boolean } = {}): Promise<SpendableUtxo[]> {
+export async function getSpendableUtxos(network: string, address: string, minimumSats: number, options: { mobile?: boolean; requiredOutpoints?: string[]; collectAll?: boolean; allowInsufficientSafeBalance?: boolean } = {}): Promise<SpendableUtxo[]> {
   const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : network === "FRACTAL_BITCOIN_MAINNET" ? "fractal" : null;
   if (!chain || !address || !Number.isSafeInteger(minimumSats) || minimumSats <= 0) {
     throw new Error("Invalid network, address, or amount for spendable UTXO verification.");
@@ -330,7 +330,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   if (collectAll && sourceTotal !== null && scannedCount < sourceTotal) {
     throw new Error(`Safe UTXO scan is incomplete: verified ${scannedCount} of ${sourceTotal} address outputs (Worker cursor limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). No transaction was signed or broadcast.`);
   }
-  if (safeSats < minimumSats) {
+  if (!options.allowInsufficientSafeBalance && safeSats < minimumSats) {
     const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
     const zeroSafeBalanceHint = safeSats === 0 ? " No fee-safe UTXO was found. If this address only has its inscription output, fund the same network address with a separate confirmed BTC/FB output, then refresh; never spend the inscription output as fees." : "";
     const rejectionSummary = UTXO_REJECTION_KEYS
