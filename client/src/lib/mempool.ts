@@ -31,7 +31,7 @@ async function requestJson<T>(url: string, timeoutMs = 8_000, init?: RequestInit
         const failure = await response.json().catch(() => null) as { error?: unknown; code?: unknown } | null;
         if (failure?.code === "UTXO_CONFIRM_NOT_IN_AVAILABLE_SET") {
           const missing = Array.isArray((failure as { missingOutpoints?: unknown }).missingOutpoints)
-            ? ((failure as { missingOutpoints: unknown[] }).missingOutpoints).filter((value): value is string => typeof value === "string" && /^[a-f0-9]{64}:\\d+$/i.test(value))
+            ? ((failure as { missingOutpoints: unknown[] }).missingOutpoints).filter((value): value is string => typeof value === "string" && /^[a-f0-9]{64}:\d+$/i.test(value))
             : [];
           const outpoints = missing.length ? ` Entrées non retrouvées dans l’index UniSat : ${missing.join(", ")}.` : "";
           throw new Error(`UTXO_CONFIRM_NOT_IN_AVAILABLE_SET: après deux scans, une ou plusieurs entrées PSBT ne figurent toujours pas dans l’ensemble UTXO disponibles et sûrs.${outpoints} Actualisez les UTXO et reconstruisez le PSBT à partir des sorties sûres actuelles. Ne réutilisez pas ces entrées sans confirmation; aucune signature ni diffusion n’a été effectuée.`);
