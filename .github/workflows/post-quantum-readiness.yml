@@ -4,6 +4,15 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "41 6 * * 1"
+  pull_request:
+    paths:
+      - "client/**"
+      - "workers/**"
+      - "extension/**"
+      - "scripts/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/post-quantum-readiness.yml"
   push:
     branches: [main]
     paths:
