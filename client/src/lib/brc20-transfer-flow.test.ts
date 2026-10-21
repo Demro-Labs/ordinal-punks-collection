@@ -70,5 +70,10 @@ describe("BRC-20 transfer flow", () => {
     expect(parseBrc20TransferProgress("not-json", identity)).toBeNull();
     expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, payAmount: 0 }), identity)).toBeNull();
     expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, paymentTxid: "bad" }), identity)).toBeNull();
+    expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, paymentTxid: "a".repeat(64) }), identity)).toBeNull();
+    expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, inscriptionId: `${"b".repeat(64)}i0` }), identity)).toBeNull();
+    expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, transferStarted: true }), identity)).toBeNull();
+    expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, transferTxid: "c".repeat(64) }), identity)).toBeNull();
+    expect(parseBrc20TransferProgress(JSON.stringify({ ...progress, paymentStarted: true, inscriptionId: `${"b".repeat(64)}i0`, transferStarted: true, transferTxid: "c".repeat(64) }), identity)).not.toBeNull();
   });
 });
