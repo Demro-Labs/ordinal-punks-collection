@@ -1998,3 +1998,26 @@ test('returns validated total/available UTXO summaries for Bitcoin and Fractal w
   } finally { globalThis.fetch = previousFetch; }
 });
 
+
+
+test('rejects Alkanes wallet routes on Fractal before calling UniSat', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => {
+    upstreamCalls += 1;
+    throw new Error('Unsupported Alkanes request must not reach UniSat');
+  };
+  try {
+    for (const [index, suffix] of ['token-list', 'collection-list', 'utxo-list'].entries()) {
+      const extra = suffix === 'utxo-list' ? '&alkaneid=2%3A1' : '';
+      const response = await worker.fetch(makeRequest(`/api/alkanes/${suffix}?chain=FRACTAL_BITCOIN_MAINNET&address=${address}${extra}`, { ip: `198.51.100.${101 + index}` }), { UNISAT_API_KEY: 'fractal-test-only' });
+      const data = await response.json();
+      assert.equal(response.status, 400);
+      assert.equal(data.code, 'ALKANES_CHAIN_UNSUPPORTED');
+    }
+    assert.equal(upstreamCalls, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
