@@ -1,9 +1,30 @@
-html, body, #root { width: 420px; min-width: 360px; min-height: 620px; margin: 0; overflow-x: hidden; background: #0b0d10; }
-.extension-shell { box-sizing: border-box; width: 100%; min-height: 620px; padding: 14px; color: #f3efe5; }
-.extension-header { display: flex; align-items: center; gap: 11px; padding-bottom: 11px; border-bottom: 1px solid #2c323a; }
-.extension-header img { width: 34px; height: 34px; object-fit: contain; }
-.extension-header h1 { margin: 0; font: 600 17px/1.2 system-ui, sans-serif; }
-.extension-header p, .extension-intro, .extension-note { margin: 4px 0 0; color: #9ea7b3; font: 10px/1.55 ui-monospace, monospace; }
-.extension-intro { margin: 11px 0; }
-.extension-note { margin: 12px 2px 0; color: #718092; }
-.extension-shell > button { min-height: 42px; }
+html, body, #root {
+  width: 420px; min-width: 360px; min-height: 620px; margin: 0; overflow-x: hidden;
+  color-scheme: dark;
+  background: radial-gradient(ellipse at 15% 0%, rgba(184,139,77,.16), transparent 45%), linear-gradient(155deg,#10141b 0%,#090b0f 78%);
+}
+.extension-shell {
+  box-sizing: border-box; width: 100%; min-height: 620px; padding: 16px;
+  color: #f2eee5;
+  background: radial-gradient(ellipse at 90% 10%, rgba(92,111,139,.08), transparent 42%);
+}
+.extension-header {
+  display:flex; align-items:center; gap:12px; padding: 2px 0 14px;
+  border-bottom:1px solid rgba(215,183,123,.24);
+}
+.extension-header img {
+  width:40px; height:40px; object-fit:contain; padding:4px;
+  border:1px solid rgba(215,183,123,.28); border-radius:12px;
+  background:linear-gradient(145deg,rgba(215,183,123,.12),rgba(255,255,255,.025));
+  box-shadow:0 8px 24px rgba(0,0,0,.2);
+}
+.extension-header h1 { margin:0; color:#f4e8ce; font:600 18px/1.2 "Space Grotesk",system-ui,sans-serif; letter-spacing:.015em; }
+.extension-header p, .extension-intro, .extension-note { margin:4px 0 0; color:#a7afbb; font:10px/1.65 "IBM Plex Mono",ui-monospace,monospace; }
+.extension-intro { margin:13px 0; padding:10px 11px; border:1px solid rgba(149,159,176,.14); border-radius:10px; background:rgba(255,255,255,.025); }
+.extension-note { margin:13px 2px 0; color:#778394; }
+.extension-shell > button { min-height:42px; }
+.extension-shell button:not(:disabled) { border-radius:9px; transition:filter 160ms ease, transform 160ms ease, box-shadow 160ms ease; }
+.extension-shell button:not(:disabled):hover { filter:brightness(1.07); box-shadow:0 6px 20px rgba(0,0,0,.2); }
+.extension-shell input:not([type=checkbox]):not([type=file]), .extension-shell select, .extension-shell textarea {
+  border-radius:9px; border-color:rgba(149,159,176,.28); background:#0d1117; color:#f2eee5;
+}
