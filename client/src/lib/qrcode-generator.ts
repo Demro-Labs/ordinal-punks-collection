@@ -1848,14 +1848,5 @@ var qrcode = function() {
   return qrcode;
 }();
 
-(function (factory) {
-  if (typeof define === 'function' && define.amd) {
-      define([], factory);
-  } else if (typeof exports === 'object') {
-      module.exports = factory();
-  }
-}(function () {
-    return qrcode;
-}));
 
 export default qrcode;
