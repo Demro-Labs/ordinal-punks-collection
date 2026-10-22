@@ -15,7 +15,7 @@ type ActiveUtxo = {
   alkanes: unknown[] | null;
   isSpent: boolean | null;
 };
-type UtxoPage = { chain: string; address: string; cursor: number; nextCursor: number; total: number; scannedCount: number; utxo: ActiveUtxo[] };
+type UtxoPage = { chain: string; address: string; cursor: number; nextCursor: number; total: number; totalKnown?: boolean; hasMore?: boolean; scannedCount: number; utxo: ActiveUtxo[] };
 const PAGE_SIZE = 25;
 // Keep in sync with the Worker cursor validation for /api/address-utxos.
 const MAX_UTXO_CURSOR = 1_000_000;
@@ -66,17 +66,20 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
         const response = await fetch(`${LIVE_DATA_API_BASE}/api/address-utxos?${query}`, { cache: "no-store", headers: { Accept: "application/json" } });
         const body = await response.json().catch(() => null) as UtxoPage | { error?: string; code?: string } | null;
         if (!response.ok) throw new Error(body && "error" in body && body.error ? `${body.error}${body.code ? ` [${body.code}]` : ""}` : `UTXO endpoint HTTP ${response.status}`);
+        const totalKnown = body && "utxo" in body ? (typeof body.totalKnown === "boolean" ? body.totalKnown : !(body.scannedCount === PAGE_SIZE && body.total === body.nextCursor + 1)) : false;
+        const hasMore = body && "utxo" in body ? (typeof body.hasMore === "boolean" ? body.hasMore : (totalKnown ? body.nextCursor < body.total : body.scannedCount === PAGE_SIZE)) : false;
         if (!body || !("utxo" in body) || body.chain !== chain || body.address !== address || body.cursor !== cursor ||
             !Array.isArray(body.utxo) || !Number.isSafeInteger(body.scannedCount) || body.scannedCount < 0 ||
             body.scannedCount > PAGE_SIZE || body.nextCursor !== cursor + body.scannedCount ||
             !Number.isSafeInteger(body.total) || body.total < body.nextCursor || body.utxo.length > body.scannedCount ||
-            (expectedTotal !== null && body.total !== expectedTotal) ||
+            typeof totalKnown !== "boolean" || typeof hasMore !== "boolean" ||
+            (expectedTotal !== null && totalKnown && body.total !== expectedTotal) ||
             body.utxo.some(item => !item || !/^[a-f0-9]{64}$/i.test(item.txid) || !Number.isSafeInteger(item.vout) || item.vout < 0 ||
               !Number.isSafeInteger(item.satoshi) || item.satoshi < 0 ||
               (item.height !== null && item.height !== undefined && (!Number.isSafeInteger(item.height) || item.height < 0)))) {
           throw new Error("L’indexeur n’a pas confirmé une page UTXO cohérente. Les données partielles ne sont pas affichées.");
         }
-        expectedTotal ??= body.total;
+        if (totalKnown) expectedTotal = body.total;
         for (const item of body.utxo) {
           const outpoint = `${item.txid.toLowerCase()}:${item.vout}`;
           if (seenOutpoints.has(outpoint)) throw new Error("Scan UTXO incohérent : une même sortie apparaît plusieurs fois. Les données partielles ne sont pas affichées.");
@@ -85,9 +88,9 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
         collected.push(...body.utxo);
         total = body.total;
         cursor = body.nextCursor;
-        if (cursor >= total) break;
+        if (!hasMore) break;
         if (body.scannedCount === 0 || cursor > MAX_UTXO_CURSOR || total > MAX_UTXO_CURSOR) {
-          throw new Error(`Scan UTXO incomplet : ${cursor} sorties vérifiées sur ${total}. L’indexeur n’a pas avancé ou sa limite de curseur (1 000 000) est atteinte. Aucune liste partielle n’est affichée.`);
+          throw new Error(`Scan UTXO incomplet : ${cursor} sorties vérifiées; l’indexeur n’a pas avancé ou sa limite de curseur (1 000 000) est atteinte. Aucune liste partielle n’est affichée.`);
         }
       }
       setItems(collected);
