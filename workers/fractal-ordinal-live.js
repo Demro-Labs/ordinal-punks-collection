@@ -1037,8 +1037,10 @@ async function spendableUtxos(request, env, corsHeaders) {
   const nextCursor = cursor + raw.length;
   if (sourceTotal !== null && (!Number.isSafeInteger(sourceTotal) || sourceTotal < nextCursor)) throw new SpendableUtxoError('UTXO_LIST_INCONSISTENT_TOTAL');
   // If UniSat omits total, a full page means there may be another page. Only a short/empty page proves exhaustion.
-  const total = sourceTotal ?? nextCursor + (raw.length === requestedSize ? 1 : 0);
-  return Response.json({ chain, address, cursor, nextCursor, total, scannedCount: raw.length, utxo: checked, diagnostics: rejected, diagnosticsSats: rejectedSats }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  const totalKnown = sourceTotal !== null;
+  const hasMore = totalKnown ? nextCursor < sourceTotal : raw.length === requestedSize;
+  const total = sourceTotal ?? nextCursor + (hasMore ? 1 : 0);
+  return Response.json({ chain, address, cursor, nextCursor, total, totalKnown, hasMore, scannedCount: raw.length, utxo: checked, diagnostics: rejected, diagnosticsSats: rejectedSats }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
 
 async function confirmSpendableUtxos(request, env, corsHeaders) {
