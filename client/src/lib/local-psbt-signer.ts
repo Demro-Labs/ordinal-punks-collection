@@ -219,7 +219,10 @@ function signerForAccount(account: OrdiAddress, type: AddressType) {
   if (!tweakedPrivateKey) throw new Error("Impossible de dériver la clé Taproot signataire.");
   const tweakedPublicKey = ecc.pointFromScalar(tweakedPrivateKey, true);
   if (!tweakedPublicKey) throw new Error("Impossible de dériver la clé publique Taproot signataire.");
-  return { publicKey: Buffer.from(tweakedPublicKey), sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(tweakedPrivateKey))), signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(tweakedPrivateKey))) };
+  // bitcoinjs-lib matches signer.publicKey to tapInternalKey before signing.
+  // Keep the untweaked account public key for that match; only the Schnorr
+  // secret is tweaked for the P2TR output key.
+  return { publicKey, sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(privateKey))), signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(tweakedPrivateKey))) };
 }
 
 export async function signLocalPsbt(psbtHex: string, wallet: OrdiWalletRecord, review: LocalPsbtReview) {
