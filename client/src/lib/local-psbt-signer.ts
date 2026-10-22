@@ -221,6 +221,9 @@ function signerForAccount(account: OrdiAddress, type: AddressType) {
   return {
     publicKey: Buffer.from(ecc.xOnlyPointFromPoint(publicKey)),
     privateKey,
+    // Keep the required ECDSA signer method for bitcoinjs-lib's Signer type;
+    // Taproot key-path signing uses signSchnorr and the library's BIP-341 tweak.
+    sign: baseSigner.sign,
     signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(privateKey))),
   };
 }
