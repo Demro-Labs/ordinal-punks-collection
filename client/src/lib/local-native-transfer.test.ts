@@ -3,9 +3,10 @@ import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
 import { deriveOrdiWallet, type AddressType, type OrdiNetwork } from "./ordi-wallet";
 import { prepareLocalNativeTransfer } from "./local-native-transfer";
-import { getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
+import { confirmSpendableUtxos, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress } from "@/lib/mempool";
 
 vi.mock("@/lib/mempool", () => ({
+  confirmSpendableUtxos: vi.fn(),
   getMempoolRawTransaction: vi.fn(),
   getRecommendedFeeEstimate: vi.fn(),
   getSpendableUtxos: vi.fn(),
@@ -61,6 +62,7 @@ describe("prepareLocalNativeTransfer", () => {
       expect(plan).toMatchObject({ network, addressType: type, sourceAddress: wallet.addresses[type].address, amountSats: 50_000, feeRateSatVb: 2, changeSats: expect.any(Number) });
       expect(psbt.inputCount).toBe(1);
       expect(getSpendableUtxos).toHaveBeenLastCalledWith(network, wallet.addresses[type].address, 1, { collectAll: true });
+      expect(confirmSpendableUtxos).toHaveBeenLastCalledWith(network, wallet.addresses[type].address, 100_000, [expect.objectContaining({ txid: utxo.txid, vout: utxo.vout, satoshi: utxo.satoshi, scriptPk: utxo.scriptPk })]);
       if (type === "legacy") expect(psbt.data.inputs[0].nonWitnessUtxo).toBeDefined();
       if (type === "nested-segwit") expect(psbt.data.inputs[0].redeemScript).toBeDefined();
       if (type === "native-segwit") expect(psbt.data.inputs[0].witnessUtxo).toBeDefined();
