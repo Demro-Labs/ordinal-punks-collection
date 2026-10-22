@@ -5,7 +5,7 @@ export { AuthStorage } from './auth-bip322.js';
 const API_BASE = 'https://open-api-fractal.unisat.io';
 const BITCOIN_API_BASE = 'https://open-api.unisat.io';
 const ALLOWED_ORIGINS = new Set([
-  'https://demro-labs.github.io',
+  'https://ordi-labs.github.io',
   'https://punksgallery-mlwdpcwl.manus.space',
 ]);
 

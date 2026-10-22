@@ -71,8 +71,8 @@ export function LocalVaultOwnershipProof({
         const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
         const challengeId = Array.from(nonceBytes, byte => byte.toString(16).padStart(2, "0")).join("");
         const uri = site === "punks"
-          ? "https://demro-labs.github.io/ordinal-punks-collection/"
-          : "https://demro-labs.github.io/fractal-pokedex-ordinal-ledger/";
+          ? "https://ordi-labs.github.io/punks/"
+          : "https://ordi-labs.github.io/pokedex/";
         const message = [
           "Local Ordi Wallet requests a wallet ownership proof",
           `URI: ${uri}`,

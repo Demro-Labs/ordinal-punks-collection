@@ -6,7 +6,7 @@ const env = {
   TURNSTILE_SECRET: "test-turnstile-secret",
   SESSION_SECRET: "test-session-signing-secret-with-sufficient-entropy",
 };
-const origin = "https://demro-labs.github.io";
+const origin = "https://ordi-labs.github.io";
 
 function request(path, body, requestOrigin = origin) {
   return new Request(`https://turnstile-human-verification.workers.dev${path}`, {

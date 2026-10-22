@@ -206,7 +206,7 @@ function vitePluginStorageProxy(): Plugin {
 const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector(), vitePluginStorageProxy()];
 
 export default defineConfig({
-  base: process.env.GITHUB_ACTIONS ? "/ordinal-punks-collection/" : "/",
+  base: process.env.GITHUB_ACTIONS ? "/punks/" : "/",
   plugins,
   resolve: {
     alias: {

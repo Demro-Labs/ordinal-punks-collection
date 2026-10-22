@@ -4,8 +4,8 @@ A production-ready visual archive for the **10,000 Ordinal Punks inscribed on Fr
 
 ## Production site
 
-- **Live application:** https://demro-labs.github.io/ordinal-punks-collection/
-- **Repository:** https://github.com/Demro-Labs/ordinal-punks-collection
+- **Live application:** https://ordi-labs.github.io/punks/
+- **Repository:** https://github.com/ordi-labs/punks
 - **Shared live Worker:** https://fractal-ordinal-live.servostar23.workers.dev
 
 ## Product overview
