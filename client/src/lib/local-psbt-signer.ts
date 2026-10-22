@@ -212,19 +212,20 @@ function signerForAccount(account: OrdiAddress, type: AddressType) {
   // app's Buffer implementation before crossing the ECC adapter boundary.
   const baseSigner = { publicKey, sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(privateKey))) };
   if (type !== "taproot") return baseSigner;
-  // bitcoinjs-lib v7 recognizes tapInternalKey using the original account
-  // public key, then applies the BIP-341 tweak itself. Supply privateKey so its
-  // internal tweakSigner can derive the output key; do not pre-tweak it here.
-  // bitcoinjs-lib v7 matches Taproot PSBT tapInternalKey against the
-  // signer's x-only public key. Keep the original private key so the library
-  // can apply the BIP-341 tweak exactly once before Schnorr signing.
+  // Match the PSBT's tapInternalKey with the untweaked x-only account key.
+  // Apply BIP-341 tweak here and omit privateKey so bitcoinjs-lib does not
+  // apply the tweak a second time. Normalize an odd-Y internal point first.
+  const internalKey = Buffer.from(ecc.xOnlyPointFromPoint(publicKey));
+  const normalizedPrivateKey = publicKey[0] === 3
+    ? Buffer.from(ecc.privateNegate(Buffer.from(privateKey)))
+    : Buffer.from(privateKey);
+  const tapTweak = Buffer.from(bitcoin.crypto.taggedHash("TapTweak", internalKey));
+  const tweakedPrivateKey = ecc.privateAdd(normalizedPrivateKey, tapTweak);
+  if (!tweakedPrivateKey) throw new Error("Impossible de dériver la clé Taproot signataire.");
   return {
-    publicKey: Buffer.from(ecc.xOnlyPointFromPoint(publicKey)),
-    privateKey,
-    // Keep the required ECDSA signer method for bitcoinjs-lib's Signer type;
-    // Taproot key-path signing uses signSchnorr and the library's BIP-341 tweak.
+    publicKey: internalKey,
     sign: baseSigner.sign,
-    signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(privateKey))),
+    signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(tweakedPrivateKey))),
   };
 }
 
