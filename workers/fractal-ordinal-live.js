@@ -874,10 +874,9 @@ async function spendableUtxos(request, env, corsHeaders) {
   const requestedSize = parseBoundedInteger(url.searchParams.get('size'), 25, 25);
   if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new SpendableUtxoError('INVALID_QUERY', 400);
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
-  // UniSat documents available-utxo-data as the spendable set and filters protocol assets
-  // (inscriptions, Runes, Alkanes) and dust there. A user-authorized UniSat unlock can make
-  // an asset UTXO available; the Local Vault still rejects any explicit asset markers below.
-  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}&withLowFee=true`, env));
+  // Scan the complete address inventory, not only UniSat's pre-filtered available set.
+  // Every candidate must pass explicit on-chain/indexer metadata checks below; unknown metadata fails closed.
+  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
   if (!Array.isArray(source?.utxo)) throw new SpendableUtxoError('UTXO_LIST_INVALID_RESPONSE');
   const raw = source.utxo;
   if (raw.length > requestedSize) throw new SpendableUtxoError('UTXO_PAGE_OVERSIZED');
@@ -1116,7 +1115,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     'UTXO_CONFIRM_AVAILABLE_SNAPSHOT_CHANGED',
   ]);
   const fetchAvailablePage = async (cursor, expectedTotal) => {
-    const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${UTXO_CONFIRM_PAGE_SIZE}&withLowFee=true`, env));
+    const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=${cursor}&size=${UTXO_CONFIRM_PAGE_SIZE}`, env));
     const raw = source?.utxo;
     const sourceCursor = Number(source?.cursor);
     const total = Number(source?.total);
@@ -1224,9 +1223,28 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     if (!Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_CONFIRMED', 409);
     if (detail?.isSpent !== false) throw new SpendableUtxoError('UTXO_CONFIRM_SPENT_OR_UNKNOWN', 409);
     if (detail?.isOpInRBF !== undefined && typeof detail.isOpInRBF !== 'boolean') throw new SpendableUtxoError('UTXO_CONFIRM_INVALID_RBF_FLAG', 409);
-    if (!Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0 ||
-        (detail?.runes !== undefined && (!Array.isArray(detail.runes) || detail.runes.length !== 0)) ||
-        (detail?.alkanes !== undefined && (!Array.isArray(detail.alkanes) || detail.alkanes.length !== 0))) {
+    if (!Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0) {
+      throw new SpendableUtxoError('UTXO_CONFIRM_ASSET_OR_UNKNOWN', 409);
+    }
+    let runeMetadata = detail?.runes;
+    if (runeMetadata === undefined) {
+      runeMetadata = await spendableUtxoStage('UTXO_CONFIRM_RUNES', () =>
+        uniNetwork(base, `/v1/indexer/runes/utxo/${candidate.txid}/${candidate.vout}/balance`, env));
+    }
+    if (!Array.isArray(runeMetadata) || runeMetadata.length !== 0) {
+      throw new SpendableUtxoError('UTXO_CONFIRM_ASSET_OR_UNKNOWN', 409);
+    }
+    let alkaneMetadata = detail?.alkanes;
+    if (alkaneMetadata === undefined) {
+      try {
+        alkaneMetadata = await spendableUtxoStage('UTXO_CONFIRM_ALKANES', () =>
+          uniNetwork(base, `/v1/indexer/alkanes/utxo/${candidate.txid}/${candidate.vout}/balance`, env));
+      } catch (error) {
+        if (error instanceof Error && error.message === 'UniSat upstream returned 404') alkaneMetadata = [];
+        else throw error;
+      }
+    }
+    if (!Array.isArray(alkaneMetadata) || alkaneMetadata.length !== 0) {
       throw new SpendableUtxoError('UTXO_CONFIRM_ASSET_OR_UNKNOWN', 409);
     }
     safeSats += candidate.satoshi;
