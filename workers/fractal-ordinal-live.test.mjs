@@ -2158,7 +2158,8 @@ test('normalizes the documented UniSat inscription-data response for Bitcoin and
     const source = sources.find(item => item.base === url.origin);
     assert.ok(source, `Unexpected UniSat host: ${url.origin}`);
     requests.push({ url: url.pathname + url.search, authorization: new Headers(init.headers).get('Authorization') || '' });
-    return Response.json({ code: 0, data: {
+    // UniSat success codes may be numeric or numeric strings; both must work with HTTP 200.
+    return Response.json({ code: source.chain === 'BITCOIN_MAINNET' ? '0' : 0, data: {
       cursor: Number(url.searchParams.get('cursor')),
       total: 1,
       inscription: [{
