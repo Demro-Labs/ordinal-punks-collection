@@ -1137,6 +1137,52 @@ test('desktop and mobile use the available-UTXO API without calling the unsuppor
 });
 
 
+test('checks Runes and Alkanes endpoints when UniSat omits protocol metadata', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qprotocolfallbacktest000000000000000000';
+  const safe = {
+    address, txid: 'a'.repeat(64), vout: 0, satoshi: 120000,
+    scriptPk: '0014' + '77'.repeat(20), height: 100,
+    isLowFee: false, isOpInRBF: false, inscriptions: [],
+  };
+  const runeBearing = { ...safe, txid: 'b'.repeat(64) };
+  const calls = [];
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    calls.push(url.pathname);
+    if (url.pathname.endsWith('/available-utxo-data')) {
+      return Response.json({ code: 0, data: { cursor: 0, total: 2, utxo: [safe, runeBearing] } });
+    }
+    if (url.pathname === `/v1/indexer/utxo/${safe.txid}/0` || url.pathname === `/v1/indexer/utxo/${runeBearing.txid}/0`) {
+      const record = url.pathname.includes(safe.txid) ? safe : runeBearing;
+      return Response.json({ code: 0, data: { ...record, isSpent: false } });
+    }
+    if (url.pathname.startsWith('/v1/indexer/runes/utxo/')) {
+      return Response.json({ code: 0, data: url.pathname.includes(runeBearing.txid) ? [{ runeid: '1:1', amount: '1' }] : [] });
+    }
+    if (url.pathname === `/v1/indexer/alkanes/utxo/${safe.txid}/0/balance`) {
+      return Response.json({ code: 0, data: [] });
+    }
+    throw new Error(`Unexpected upstream URL: ${url.pathname}`);
+  };
+  try {
+    const response = await worker.fetch(
+      makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.250' }),
+      { UNISAT_API_KEY: 'test-only' },
+    );
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.utxo.length, 1);
+    assert.equal(data.utxo[0].txid, safe.txid);
+    assert.equal(data.diagnostics.hasRunes, 1);
+    assert.equal(data.diagnostics.hasAlkanes, 0);
+    assert.ok(calls.some(path => path.includes('/runes/utxo/')));
+    assert.ok(calls.some(path => path.includes('/alkanes/utxo/')));
+    assert.equal(JSON.stringify(data).includes(runeBearing.txid), false);
+    assert.equal(JSON.stringify(data).includes('test-only'), false);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('uses explicit asset-free metadata to avoid per-UTXO detail calls during discovery', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qassetfreemetadata000000000000000000000';

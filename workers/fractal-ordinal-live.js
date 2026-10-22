@@ -989,14 +989,40 @@ async function spendableUtxos(request, env, corsHeaders) {
         continue;
       }
     }
-    const runeMetadata = [item?.runes, detail?.runes].filter(value => value !== undefined);
-    if (runeMetadata.length === 0 || runeMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
+    let runeMetadata = [item?.runes, detail?.runes].filter(value => value !== undefined);
+    // UniSat's available-UTXO list does not always include protocol arrays. When neither
+    // the list nor the verified UTXO detail provides Runes metadata, query the per-outpoint
+    // endpoint instead of incorrectly classifying every such output as unsafe.
+    if (runeMetadata.length === 0) {
+      const runes = await spendableUtxoStage('RUNES_BALANCE', () =>
+        uniNetwork(base, `/v1/indexer/runes/utxo/${txid}/${vout}/balance`, env));
+      if (!Array.isArray(runes)) throw new SpendableUtxoError('RUNES_INVALID_RESPONSE');
+      runeMetadata = [runes];
+    }
+    if (runeMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
       rejected.hasRunes += 1;
       rejectedSats.hasRunes += satoshi;
       continue;
     }
-    const alkaneMetadata = [item?.alkanes, detail?.alkanes].filter(value => value !== undefined);
-    if (alkaneMetadata.length === 0 || alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
+    let alkaneMetadata = [item?.alkanes, detail?.alkanes].filter(value => value !== undefined);
+    // As with Runes, missing metadata is not proof of safety. Query the protocol endpoint
+    // when possible. UniSat's available-utxo-data already excludes protocol-asset outputs;
+    // a 404 means this network deployment does not expose the optional Alkanes detail route.
+    if (alkaneMetadata.length === 0) {
+      try {
+        const alkanes = await spendableUtxoStage('ALKANES_BALANCE', () =>
+          uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env));
+        if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
+        alkaneMetadata = [alkanes];
+      } catch (error) {
+        if (error instanceof Error && error.message === 'UniSat upstream returned 404') {
+          alkaneMetadata = [[]];
+        } else {
+          throw new SpendableUtxoError(`ALKANES_BALANCE_${safeUniSatFailureCode(error)}`);
+        }
+      }
+    }
+    if (alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
       rejected.hasAlkanes += 1;
       rejectedSats.hasAlkanes += satoshi;
       continue;
