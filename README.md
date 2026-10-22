@@ -151,8 +151,9 @@ Important Worker routes include:
 ### BRC protocol paths
 
 - **Classic BRC-20 (4–5 character tickers)** uses the classic UniSat indexer and the existing inscription-transfer flow.
-- **BRC20-Prog (6-character tickers)** is indexed separately through the matching UniSat network `brc20-prog` API; the selected Bitcoin or Fractal network is queried; transfers retain the BRC-20 transfer inscription format and require a fresh BIP-322 ownership proof before the inscription/payment approvals on desktop and mobile.
-- **BRC2.0 programmable module** is a separate deploy/call JSON composer (`p: brc20-prog`). It currently prepares and validates payloads only; it does not create or broadcast an inscription or the required activation transaction to `OP_RETURN "BRC20PROG"`. The optional `/api/brc20-prog/module/status` route only probes `eth_blockNumber`; a configured RPC response is not proof that the endpoint runs the intended module.
+- **BRC20-Prog / BRC2.0 (6-character tickers)** is Bitcoin-mainnet-only in this app; its balance/module routes and UniSat module flow are disabled on Fractal Bitcoin. Classic BRC-20 remains available on both Bitcoin and Fractal.
+- **Alkanes and Alkanes collections** are Bitcoin-mainnet-only and are neither queried nor shown on Fractal Bitcoin.
+- **BRC2.0 UniSat flow** prepares the module inscription and activation transaction on Bitcoin mainnet with separate user approvals. The optional `/api/brc20-prog/module/status` route only probes `eth_blockNumber`, which does not verify module identity. Ordi Wallet Local Vault signing remains blocked for BRC2.0 and Alkanes until dedicated local builders and independent protocol-output validation are implemented.
 
 The shared Worker also exposes `/api/brc20/balances`, `/api/brc20-prog/balances` (Bitcoin et Fractal, selon le réseau demandé), and `/api/brc20-prog/module/status`. Keep the optional `BRC20_PROG_RPC_URL`, `BRC20_PROG_FRACTAL_RPC_URL`, and, if needed, `BRC20_PROG_RPC_USER` / `BRC20_PROG_RPC_PASSWORD` as Cloudflare Worker secrets; never commit or expose them in browser code. See `workers/PRODUCTION-RUNBOOK.md` before configuring an endpoint.
 
