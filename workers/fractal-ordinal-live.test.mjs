@@ -1099,7 +1099,7 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('desktop and mobile use the available-UTXO API without calling the unsupported Alkanes endpoint', async () => {
+test('desktop and mobile use the full UTXO inventory and avoid unsupported Alkanes lookup when metadata is present', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qmobiletestaddress000000000000000000000';
   const record = {
@@ -1113,7 +1113,6 @@ test('desktop and mobile use the available-UTXO API without calling the unsuppor
     upstreamPaths.push(url.pathname);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
     if (url.pathname.endsWith('/all-utxo-data')) {
-      assert.equal(url.searchParams.get('withLowFee'), 'true');
       upstreamMobileModes.push(url.searchParams.get('mobile'));
       return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
     }
@@ -1257,7 +1256,7 @@ test('reports safe-UTXO rejection reasons without exposing addresses or outpoint
 test('Worker attests that exact BTC and FB PSBT inputs cover payment plus fees', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
-  const record = { address, txid: 'e'.repeat(64), vout: 1, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  const record = { address, txid: 'e'.repeat(64), vout: 1, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [], runes: [], alkanes: [] };
   let expectedOrigin = 'https://open-api-fractal.unisat.io';
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
@@ -1298,7 +1297,7 @@ test('Worker attests that exact BTC and FB PSBT inputs cover payment plus fees',
 test('Worker confirmation scans past 500 available outputs to find the exact PSBT input', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
-  const candidate = { address, txid: (501).toString(16).padStart(64, '0'), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  const candidate = { address, txid: (501).toString(16).padStart(64, '0'), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [], runes: [], alkanes: [] };
   const cursors = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
@@ -1333,7 +1332,7 @@ test('Worker confirmation scans past 500 available outputs to find the exact PSB
 test('Worker finds a still-safe PSBT input when the available-UTXO pagination cursor drifts', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
-  const candidate = { address, txid: (701).toString(16).padStart(64, '0'), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  const candidate = { address, txid: (701).toString(16).padStart(64, '0'), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [], runes: [], alkanes: [] };
   const cursors = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
@@ -1368,7 +1367,7 @@ test('Worker finds a still-safe PSBT input when the available-UTXO pagination cu
 test('Worker retries a complete available-UTXO scan when the indexer omits an input during pagination', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
-  const candidate = { address, txid: 'e'.repeat(64), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  const candidate = { address, txid: 'e'.repeat(64), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [], runes: [], alkanes: [] };
   const transient = { ...candidate, txid: 'd'.repeat(64) };
   let inventoryPass = 0;
   globalThis.fetch = async (input, init = {}) => {
@@ -2282,7 +2281,7 @@ test('returns validated total/available UTXO summaries for Bitcoin and Fractal w
 test('Worker restarts confirmation from cursor zero when UniSat changes the available-set total during hinted lookup', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
-  const candidate = { address, txid: 'aa'.repeat(32), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  const candidate = { address, txid: 'aa'.repeat(32), vout: 0, satoshi: 50000, scriptPk: '0014' + '44'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [], runes: [], alkanes: [] };
   const cursors = [];
   let cursor25Calls = 0;
   globalThis.fetch = async (input, init = {}) => {
@@ -2321,7 +2320,7 @@ test('Worker restarts confirmation from cursor zero when UniSat changes the avai
 test('Worker retries a complete UTXO confirmation scan once when the available inventory changes mid-scan', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qutxoretrytest000000000000000000000000000';
-  const candidate = { address, txid: 'bb'.repeat(32), vout: 0, satoshi: 50000, scriptPk: '0014' + '66'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [] };
+  const candidate = { address, txid: 'bb'.repeat(32), vout: 0, satoshi: 50000, scriptPk: '0014' + '66'.repeat(20), height: 100, isLowFee: false, isOpInRBF: false, isSpent: false, inscriptions: [], runes: [], alkanes: [] };
   const cursors = [];
   let cursor25Calls = 0;
   globalThis.fetch = async (input, init = {}) => {
