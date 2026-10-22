@@ -40,3 +40,15 @@ Avant toute publication, exécuter les contrôles locaux documentés dans `worke
 ## Protection des UTXO
 
 La configuration réseau ne modifie pas les règles de sécurité Local Vault. Les sorties contenant une inscription, un Rune ou un Alkane, ainsi que les sorties dont l’état ne peut pas être vérifié, restent exclues des UTXO de frais. Ne pas désactiver ces contrôles pour contourner un solde de frais insuffisant.
+
+## Paramètres de scan « My inscriptions »
+
+Le composant `client/src/components/UniSatWalletConnect.tsx` utilise les mêmes paramètres de scan que la branche Manus `manus/ordinal-punks-update-oct2026` :
+- taille d’une page UniSat : `INSCRIPTIONS_PAGE_SIZE = 50` inscriptions;
+- pagination à partir du curseur `0` pour un nouveau scan, ou du curseur mémorisé pour charger la suite;
+- lecture des pages jusqu’à ce que le curseur atteigne le total annoncé par UniSat ou qu’une page vide soit renvoyée;
+- validation du format de chaque inscription (`txid` hexadécimal de 64 caractères suivi de `i` et d’un index), puis dédoublonnage par identifiant;
+- vérification du réseau principal actif et du compte connecté avant de conserver les résultats;
+- annulation d’un scan précédent quand un nouveau scan démarre ou que le portefeuille est réinitialisé.
+
+La valeur de 50 est déjà identique dans les branches Manus et de correction actuelles; elle n’a donc pas été modifiée arbitrairement. Le scan reste paginé et peut charger plusieurs pages. La taille d’une page UniSat n’est pas une garantie que toutes les inscriptions ont été indexées par le fournisseur.
