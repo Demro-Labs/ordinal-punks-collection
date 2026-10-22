@@ -1272,6 +1272,41 @@ test('Worker attests that exact BTC and FB PSBT inputs cover payment plus fees',
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('Worker confirmation accepts omitted advisory isLowFee metadata after full safety verification', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qmissinglowfeetest00000000000000000000';
+  const candidate = {
+    address, txid: '9'.repeat(64), vout: 0, satoshi: 50000,
+    scriptPk: '0014' + '44'.repeat(20), height: 100, isSpent: false,
+    inscriptions: [], runes: [], alkanes: [],
+  };
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/all-utxo-data')) {
+      return Response.json({ code: 0, data: { cursor: 0, total: 1, utxo: [candidate] } });
+    }
+    if (url.pathname === `/v1/indexer/utxo/${candidate.txid}/0`) {
+      return Response.json({ code: 0, data: { ...candidate } });
+    }
+    throw new Error(`Unexpected upstream URL: ${url.pathname}`);
+  };
+  try {
+    const body = JSON.stringify({
+      chain: 'fractal', address, minimumSats: 40000,
+      utxos: [{ txid: candidate.txid, vout: candidate.vout, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk, sourceCursor: 0 }],
+    });
+    const response = await worker.fetch(
+      makeRequest('/api/spendable-utxos/confirm', { method: 'POST', ip: '192.0.2.248', body }),
+      { UNISAT_API_KEY: 'test-only' },
+    );
+    const data = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(data));
+    assert.equal(data.sufficient, true);
+    assert.equal(data.safeSats, candidate.satoshi);
+    assert.equal(data.verifiedUtxoCount, 1);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('Worker confirmation scans past 500 available outputs to find the exact PSBT input', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
