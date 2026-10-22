@@ -41,7 +41,7 @@ for _ in $(seq 1 30); do
 done
 [[ "${status}" == "404" ]] || fail "expected the Worker root to load and return 404, got HTTP ${status}"
 
-origin="https://demro-labs.github.io"
+origin="https://ordi-labs.github.io"
 for site in punks pokedex; do
   headers_file="${TMP_DIR}/${site}.headers"
   body_file="${TMP_DIR}/${site}.json"
@@ -75,7 +75,7 @@ for site in punks pokedex; do
   node -e 'const v=JSON.parse(require("fs").readFileSync(0,"utf8")); if (v.site !== process.argv[1] || v.network !== "BITCOIN_MAINNET" || !v.message.includes("Network: BITCOIN_MAINNET") || !v.message.includes("No payment, transfer, or spending approval is authorized.")) process.exit(1);' "${site}" <"${body_file}" || fail "Bitcoin sign-in challenge payload is invalid for ${site}"
 done
 
-for origin in "https://demro-labs.github.io" "https://punksgallery-mlwdpcwl.manus.space"; do
+for origin in "https://ordi-labs.github.io" "https://punksgallery-mlwdpcwl.manus.space"; do
   headers_file="${TMP_DIR}/preflight.headers"
   status="$(curl -sS -D "${headers_file}" -o /dev/null -w '%{http_code}' --max-time 5 -X OPTIONS \
     -H "Origin: ${origin}" \
