@@ -215,8 +215,11 @@ function signerForAccount(account: OrdiAddress, type: AddressType) {
   // bitcoinjs-lib v7 recognizes tapInternalKey using the original account
   // public key, then applies the BIP-341 tweak itself. Supply privateKey so its
   // internal tweakSigner can derive the output key; do not pre-tweak it here.
+  // bitcoinjs-lib v7 matches Taproot PSBT tapInternalKey against the
+  // signer's x-only public key. Keep the original private key so the library
+  // can apply the BIP-341 tweak exactly once before Schnorr signing.
   return {
-    ...baseSigner,
+    publicKey: Buffer.from(ecc.xOnlyPointFromPoint(publicKey)),
     privateKey,
     signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(privateKey))),
   };
