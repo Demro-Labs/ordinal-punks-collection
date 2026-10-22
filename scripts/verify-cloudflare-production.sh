@@ -38,9 +38,17 @@ echo "Generated a fresh valid smoke-test address for this verification run."
 # authenticated UniSat-backed routes below without ever reading secret values.
 echo "Skipping unreliable secret metadata listing; production credential checks use live Worker routes."
 
-bitcoin_fees="$(curl -fsS --retry 2 --max-time 20 "${BASE_URL}/api/fees/recommended?chain=BITCOIN_MAINNET" \
-  -H 'Origin: https://ordi-labs.github.io')"
-printf '%s' "${bitcoin_fees}" | jq -e '.network == "BITCOIN_MAINNET" and .sources.unisat.available == true and (.sources.unisat.feeRate | type == "number" and . >= 1)' >/dev/null
+bitcoin_fees_file="${TMP_DIR}/bitcoin-fees.json"
+bitcoin_fees_status="$(curl -sS --retry 2 --max-time 20 -o "${bitcoin_fees_file}" -w '%{http_code}' "${BASE_URL}/api/fees/recommended?chain=BITCOIN_MAINNET" \
+  -H 'Origin: https://punks-elp.pages.dev' || true)"
+if [[ "${bitcoin_fees_status}" != "200" ]]; then
+  echo "Bitcoin fee route returned HTTP ${bitcoin_fees_status}: $(jq -c '{error,code,message,network,sources}' "${bitcoin_fees_file}" 2>/dev/null || echo 'non-JSON response')" >&2
+  exit 1
+fi
+if ! jq -e '.network == "BITCOIN_MAINNET" and .sources.unisat.available == true and (.sources.unisat.feeRate | type == "number" and . >= 1)' "${bitcoin_fees_file}" >/dev/null; then
+  echo "Bitcoin fee route returned an unexpected payload: $(jq -c '{error,code,message,network,sources}' "${bitcoin_fees_file}" 2>/dev/null || echo 'non-JSON response')" >&2
+  exit 1
+fi
 echo "Bitcoin UniSat-authenticated fee source verified; the secret value was not returned."
 
 curl -fsS --max-time 20 -H "${AUTH_HEADER}" "${SCRIPT_API}/settings" \
