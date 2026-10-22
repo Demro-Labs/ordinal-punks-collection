@@ -29,12 +29,12 @@ describe("fetchProtocolBalances", () => {
       expect(result.network).toBe(network);
       expect(result.address).toBe(ADDRESS);
       expect(result.brc20).toEqual([SIX_CHAR_BALANCE]);
-      expect(fetchMock).toHaveBeenCalledTimes(network === "BITCOIN_MAINNET" ? 4 : 3);
-      expect(result.errors.Alkanes).toBe(network === "BITCOIN_MAINNET" ? undefined : "Alkanes indexing is currently supported only for Bitcoin mainnet.");
+      expect(fetchMock).toHaveBeenCalledTimes(network === "BITCOIN_MAINNET" ? 4 : 2);
+      expect(result.errors.Alkanes).toBeUndefined();
       const paths = fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname);
       expect(new Set(paths)).toEqual(new Set(network === "BITCOIN_MAINNET"
         ? ["/api/brc20/balances", "/api/brc20-prog/balances", "/api/runes/balance-list", "/api/alkanes/balances"]
-        : ["/api/brc20/balances", "/api/brc20-prog/balances", "/api/runes/balance-list"]));
+        : ["/api/brc20/balances", "/api/runes/balance-list"]));
     },
   );
 
