@@ -212,17 +212,14 @@ function signerForAccount(account: OrdiAddress, type: AddressType) {
   // app's Buffer implementation before crossing the ECC adapter boundary.
   const baseSigner = { publicKey, sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(privateKey))) };
   if (type !== "taproot") return baseSigner;
-  const parityAdjustedKey = publicKey[0] === 3 ? Buffer.from(ecc.privateNegate(privateKey)) : privateKey;
-  // Normalize bitcoinjs-lib v7 Uint8Array outputs at the secp256k1 adapter boundary.
-  const tapTweak = Buffer.from(bitcoin.crypto.taggedHash("TapTweak", Buffer.from(bitcoin.toXOnly(publicKey))));
-  const tweakedPrivateKey = ecc.privateAdd(Buffer.from(parityAdjustedKey), Buffer.from(tapTweak));
-  if (!tweakedPrivateKey) throw new Error("Impossible de dériver la clé Taproot signataire.");
-  const tweakedPublicKey = ecc.pointFromScalar(tweakedPrivateKey, true);
-  if (!tweakedPublicKey) throw new Error("Impossible de dériver la clé publique Taproot signataire.");
-  // bitcoinjs-lib matches signer.publicKey to tapInternalKey before signing.
-  // Keep the untweaked account public key for that match; only the Schnorr
-  // secret is tweaked for the P2TR output key.
-  return { publicKey, sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(privateKey))), signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(tweakedPrivateKey))) };
+  // bitcoinjs-lib v7 recognizes tapInternalKey using the original account
+  // public key, then applies the BIP-341 tweak itself. Supply privateKey so its
+  // internal tweakSigner can derive the output key; do not pre-tweak it here.
+  return {
+    ...baseSigner,
+    privateKey,
+    signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(privateKey))),
+  };
 }
 
 export async function signLocalPsbt(psbtHex: string, wallet: OrdiWalletRecord, review: LocalPsbtReview) {
