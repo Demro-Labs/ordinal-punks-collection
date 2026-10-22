@@ -7,6 +7,8 @@ const BITCOIN_API_BASE = 'https://open-api.unisat.io';
 const ALLOWED_ORIGINS = new Set([
   'https://ordi-labs.github.io',
   'https://punksgallery-mlwdpcwl.manus.space',
+  'https://punks-elp.pages.dev',
+  'https://pokemon-4nv.pages.dev',
 ]);
 
 // Browser extensions have a distinct, browser-assigned origin. Accept only canonical
