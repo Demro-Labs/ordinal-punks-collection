@@ -433,7 +433,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
     if (requiredOutpoints) {
       const byOutpoint = new Map(collected.map(item => [`${item.txid.toLowerCase()}:${item.vout}`, item]));
-      if (requiredOutpoints.every(outpoint => byOutpoint.has(outpoint))) return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
+      if (requiredOutpoints.every(outpoint => byOutpoint.has(outpoint)) && !collectAll) return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
     } else if (!collectAll && safeSats >= minimumSats) return [...collected].sort(compareSpendableUtxos);
     if (pageScannedCount === 0 && hasMore) {
       throw new Error(`Safe UTXO scan is incomplete: the indexer stopped at ${scannedCount} address outputs. No transaction was signed or broadcast.`);
