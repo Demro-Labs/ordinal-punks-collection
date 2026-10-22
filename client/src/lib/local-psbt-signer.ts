@@ -212,10 +212,9 @@ function signerForAccount(account: OrdiAddress, type: AddressType) {
   // app's Buffer implementation before crossing the ECC adapter boundary.
   const baseSigner = { publicKey, sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(privateKey))) };
   if (type !== "taproot") return baseSigner;
-  // Keep the compressed internal public key: bitcoinjs-lib converts it to x-only
-  // when matching tapInternalKey. Passing an already x-only 32-byte key here
-  // makes its toXOnly helper slice off a byte and causes key matching to fail.
-  // Apply BIP-341 tweak here and omit privateKey to avoid a second tweak.
+  // BIP-341 key-path signing: normalize the internal secret to the even-Y
+  // x-only point, then apply TapTweak exactly once. bitcoinjs-lib 7 checks the
+  // signer x-only public key against the P2TR output key, not tapInternalKey.
   const internalKey = Buffer.from(ecc.xOnlyPointFromPoint(publicKey));
   const normalizedPrivateKey = publicKey[0] === 3
     ? Buffer.from(ecc.privateNegate(Buffer.from(privateKey)))
@@ -223,9 +222,11 @@ function signerForAccount(account: OrdiAddress, type: AddressType) {
   const tapTweak = Buffer.from(bitcoin.crypto.taggedHash("TapTweak", internalKey));
   const tweakedPrivateKey = ecc.privateAdd(normalizedPrivateKey, tapTweak);
   if (!tweakedPrivateKey) throw new Error("Impossible de dériver la clé Taproot signataire.");
+  const tweakedPublicKey = ecc.pointFromScalar(Buffer.from(tweakedPrivateKey), true);
+  if (!tweakedPublicKey) throw new Error("Impossible de dériver la clé publique Taproot signataire.");
   return {
-    publicKey,
-    sign: baseSigner.sign,
+    publicKey: Buffer.from(tweakedPublicKey),
+    sign: (hash: Uint8Array) => Buffer.from(ecc.sign(Buffer.from(hash), Buffer.from(tweakedPrivateKey))),
     signSchnorr: (hash: Uint8Array) => Buffer.from(ecc.signSchnorr(Buffer.from(hash), Buffer.from(tweakedPrivateKey))),
   };
 }
