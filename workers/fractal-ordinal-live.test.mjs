@@ -968,7 +968,8 @@ test('creates Bitcoin V5 orders with the Bitcoin UniSat key and Bitcoin Mempool 
     assert.equal(data.quoteAmount, 23000);
     assert.equal(data.feeSources.mempool.feeRate, 5);
     assert.equal(data.feeSources.unisat.feeRate, 7);
-    assert.equal(createUrl, 'https://open-api.unisat.io/v5/inscribe/order/create');    assert.deepEqual(upstreamAuth, ['Bearer bitcoin-test-only', 'Bearer bitcoin-test-only', 'Bearer bitcoin-test-only']);
+    assert.equal(createUrl, 'https://open-api.unisat.io/v5/inscribe/order/create');
+    assert.deepEqual(upstreamAuth, ['Bearer bitcoin-test-only', 'Bearer bitcoin-test-only', 'Bearer bitcoin-test-only']);
     assert.equal(JSON.stringify(data).includes('bitcoin-test-only'), false);
     assert.equal(JSON.stringify(data).includes('fractal-test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
@@ -1959,7 +1960,8 @@ test('ownership challenges support Bitcoin and Fractal without creating an authe
     assert.match(result.message, /does not authorize, sign, or broadcast a payment or transfer/i);
     assert.match(result.message, /A separate transaction review and signature is required/i);
     assert.equal(state.challenge.network, network);
-    assert.equal(state.session, null);  }
+    assert.equal(state.session, null);
+  }
 });
 
 test('ownership proof is cryptographically bound to the transaction context hash', async () => {
