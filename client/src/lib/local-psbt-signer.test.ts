@@ -69,7 +69,17 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 describe("Local Vault BTC/FB PSBT signer", () => {
-  it.each(["legacy", "nested-segwit", "native-segwit", "taproot"] as AddressType[])("rechecks exact asset-free outpoints and signs/finalizes %s", async type => {
+  it.each([
+    ["BITCOIN_MAINNET", "legacy"],
+    ["BITCOIN_MAINNET", "nested-segwit"],
+    ["BITCOIN_MAINNET", "native-segwit"],
+    ["BITCOIN_MAINNET", "taproot"],
+    ["FRACTAL_BITCOIN_MAINNET", "legacy"],
+    ["FRACTAL_BITCOIN_MAINNET", "nested-segwit"],
+    ["FRACTAL_BITCOIN_MAINNET", "native-segwit"],
+    ["FRACTAL_BITCOIN_MAINNET", "taproot"]
+  ] as const)("rechecks exact asset-free outpoints and signs/finalizes %s %s", async (chain, type) => {
+    const network = chain;
     const prepared = makePsbt(type);
     vi.mocked(getSpendableUtxos).mockResolvedValue([prepared.utxo]);
     const review = await reviewLocalPsbt(prepared.hex, wallet, network);
