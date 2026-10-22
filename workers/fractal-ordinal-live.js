@@ -1514,7 +1514,8 @@ async function inscribeOrder(request, env, corsHeaders) {
   if ((requestedFeeRate !== 0 && (!Number.isSafeInteger(requestedFeeRate) || requestedFeeRate < 1 || requestedFeeRate > 10000)) || outputValue !== 546) throw new InscribeRequestError('Fee rate ou valeur de sortie invalide.');
   if ((protocol.type !== 'runes-mint' && protocol.type !== 'alkanes-mint' && !filesInput.length) || filesInput.length > MAX_INSCRIBE_FILES) throw new InscribeRequestError(`La commande doit contenir de 1 à ${MAX_INSCRIBE_FILES} fichiers.`);
   if (protocol.type === 'runes-etch' && filesInput.length > 1) throw new InscribeRequestError('L’etch Rune accepte un seul fichier de données par commande.');
-  let files = filesInput.map(validateInscribeFile);  if (protocol.type === 'runes-etch') files = files.map(file => ({ ...file, runes_etch: { etching: protocol.etching } }));
+  let files = filesInput.map(validateInscribeFile);
+  if (protocol.type === 'runes-etch') files = files.map(file => ({ ...file, runes_etch: { etching: protocol.etching } }));
   const estimatedPayloadBytes = files.reduce((total, file) => total + file.dataURL.length + file.filename.length + 512, 4096);
   if (estimatedPayloadBytes > MAX_INSCRIBE_BODY_BYTES) throw new InscribeRequestError('Le lot encodé dépasse 95 Mo. Réduisez la taille des fichiers ou créez plusieurs lots.', 413);
   const feeEstimate = await recommendedFeeEstimate(chain, env);
@@ -2017,7 +2018,8 @@ export default {
         return Response.json({ error: 'Réseau, adresse ou pagination Runes invalide.' }, { status: 400, headers: noStore });
       }
       try {
-        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/runes/balance-list?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });        const sourceStart = Number(source?.start);
+        const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/runes/balance-list?start=${start}&limit=${limit}`, env, { signal: AbortSignal.timeout(8000) });
+        const sourceStart = Number(source?.start);
         const total = Number(source?.total);
         if (!Number.isSafeInteger(sourceStart) || sourceStart !== start || !Number.isSafeInteger(total) || total < 0 || !Array.isArray(source?.detail) || source.detail.length > limit) {
           throw new Error('Invalid UniSat Rune balance list response');
