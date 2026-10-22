@@ -1490,6 +1490,50 @@ test('refuses duplicate outpoints in the display-only address UTXO page', async 
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('continues fee-safe UTXO pagination when UniSat omits total', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    assert.match(url.pathname, /\/available-utxo-data$/);
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    const cursor = Number(url.searchParams.get('cursor'));
+    const count = cursor === 0 ? 25 : 2;
+    const utxo = Array.from({ length: count }, (_, index) => ({
+      address,
+      txid: (cursor + index + 1).toString(16).padStart(64, '0'),
+      vout: 0,
+      satoshi: 1200,
+      height: 100,
+      scriptPk: '0014' + '22'.repeat(20),
+      inscriptions: [],
+      runes: [],
+      alkanes: [],
+      isSpent: false,
+      isLowFee: false,
+      isOpInRBF: false,
+    }));
+    return Response.json({ code: 0, data: { cursor, utxo } });
+  };
+  try {
+    const first = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.197' }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(first.status, 200);
+    const firstData = await first.json();
+    assert.equal(firstData.totalKnown, false);
+    assert.equal(firstData.hasMore, true);
+    assert.equal(firstData.scannedCount, 25);
+    assert.equal(firstData.utxo.length, 25);
+    const second = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=25&size=25`, { ip: '192.0.2.197' }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(second.status, 200);
+    const secondData = await second.json();
+    assert.equal(secondData.totalKnown, false);
+    assert.equal(secondData.hasMore, false);
+    assert.equal(secondData.nextCursor, 27);
+    assert.equal(secondData.scannedCount, 2);
+    assert.equal(secondData.utxo.length, 2);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('fails closed when the available-UTXO response is missing or malformed', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
