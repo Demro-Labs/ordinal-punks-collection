@@ -1117,16 +1117,17 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
       if (!candidateByOutpoint.has(key)) continue;
       const satoshi = normalizeSatoshiValue(item);
       const scriptPk = typeof item?.scriptPk === 'string' ? item.scriptPk.toLowerCase() : '';
-      const height = Number(item?.height);
-      const runeMetadata = item?.runes === undefined ? [] : [item.runes];
-      const alkaneMetadata = item?.alkanes === undefined ? [] : [item.alkanes];
-      if (!/^[a-f0-9]{64}$/.test(txid) || !Number.isSafeInteger(vout) || vout < 0 || satoshi === null || !/^(?:[a-f0-9]{2})+$/.test(scriptPk) ||
-          !Number.isSafeInteger(height) || height <= 0 || !Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0 ||
-          typeof item?.isLowFee !== 'boolean' || (item?.isOpInRBF !== undefined && typeof item.isOpInRBF !== 'boolean') ||
-          runeMetadata.some(value => !Array.isArray(value) || value.length !== 0) || alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) continue;
+      // This pass establishes inventory membership and exact output identity only.
+      // UniSat's all-utxo-data page may omit ancillary metadata that was available
+      // during the safe scan; the per-outpoint detail request below is authoritative
+      // for confirmation, spent status, inscriptions, Runes, and Alkanes.
       const candidate = candidateByOutpoint.get(key);
-      if (candidate && candidate.satoshi === satoshi && candidate.scriptPk === scriptPk) {
-        availableByOutpoint.set(key, { ...candidate, height, isLowFee: item.isLowFee, isOpInRBF: typeof item.isOpInRBF === 'boolean' ? item.isOpInRBF : null });
+      if (candidate && satoshi === candidate.satoshi && scriptPk === candidate.scriptPk) {
+        availableByOutpoint.set(key, {
+          ...candidate,
+          isLowFee: typeof item?.isLowFee === 'boolean' ? item.isLowFee : null,
+          isOpInRBF: typeof item?.isOpInRBF === 'boolean' ? item.isOpInRBF : null,
+        });
       }
     }
   };
