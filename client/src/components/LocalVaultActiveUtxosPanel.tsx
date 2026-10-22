@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import type { OrdiNetwork } from "@/lib/ordi-wallet";
 import { LIVE_DATA_API_BASE } from "@/lib/live";
+import { minimumSpendableSatsForScript } from "@/lib/mempool";
 
 type ActiveUtxo = {
   txid: string;
@@ -47,6 +48,7 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
     try {
       const chain = network === "BITCOIN_MAINNET" ? "bitcoin" : "fractal";
       const collected: ActiveUtxo[] = [];
+      const seenOutpoints = new Set<string>();
       let cursor = 0;
       let total = 0;
       let expectedTotal: number | null = null;
@@ -68,10 +70,18 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
             !Array.isArray(body.utxo) || !Number.isSafeInteger(body.scannedCount) || body.scannedCount < 0 ||
             body.scannedCount > PAGE_SIZE || body.nextCursor !== cursor + body.scannedCount ||
             !Number.isSafeInteger(body.total) || body.total < body.nextCursor || body.utxo.length > body.scannedCount ||
-            (expectedTotal !== null && body.total !== expectedTotal)) {
+            (expectedTotal !== null && body.total !== expectedTotal) ||
+            body.utxo.some(item => !item || !/^[a-f0-9]{64}$/i.test(item.txid) || !Number.isSafeInteger(item.vout) || item.vout < 0 ||
+              !Number.isSafeInteger(item.satoshi) || item.satoshi < 0 ||
+              (item.height !== null && item.height !== undefined && (!Number.isSafeInteger(item.height) || item.height < 0)))) {
           throw new Error("L’indexeur n’a pas confirmé une page UTXO cohérente. Les données partielles ne sont pas affichées.");
         }
         expectedTotal ??= body.total;
+        for (const item of body.utxo) {
+          const outpoint = `${item.txid.toLowerCase()}:${item.vout}`;
+          if (seenOutpoints.has(outpoint)) throw new Error("Scan UTXO incohérent : une même sortie apparaît plusieurs fois. Les données partielles ne sont pas affichées.");
+          seenOutpoints.add(outpoint);
+        }
         collected.push(...body.utxo);
         total = body.total;
         cursor = body.nextCursor;
@@ -95,7 +105,7 @@ export function LocalVaultActiveUtxosPanel({ address, network }: { address: stri
   const visible = useMemo(() => items.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE), [items, pageIndex]);
   const explorer = network === "BITCOIN_MAINNET" ? "https://mempool.space" : "https://mempool.fractalbitcoin.io";
   const label = network === "BITCOIN_MAINNET" ? "BTC" : "FB";
-  const safeTotal = items.filter(item => item.isSpent === false && (item.height ?? 0) > 0 && item.satoshi >= 600 && Array.isArray(item.inscriptions) && item.inscriptions.length === 0 && Array.isArray(item.runes) && item.runes.length === 0 && Array.isArray(item.alkanes) && item.alkanes.length === 0 && Boolean(item.scriptPk)).reduce((sum, item) => sum + item.satoshi, 0);
+  const safeTotal = items.filter(item => item.isSpent === false && (item.height ?? 0) > 0 && item.satoshi >= minimumSpendableSatsForScript(item.scriptPk ?? "") && Array.isArray(item.inscriptions) && item.inscriptions.length === 0 && Array.isArray(item.runes) && item.runes.length === 0 && Array.isArray(item.alkanes) && item.alkanes.length === 0 && Boolean(item.scriptPk)).reduce((sum, item) => sum + item.satoshi, 0);
   return <section className="mt-3 border border-[#70c7a0]/40 bg-[#0e1513] p-3 sm:p-4" aria-labelledby="active-utxos-title">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h4 id="active-utxos-title" className="font-mono text-[10px] uppercase tracking-[.13em] text-[#9fe0bd]">Active UTXOs · {label}</h4><p className="mt-1 font-mono text-[9px] leading-4 text-[#718092]">Scan complet jusqu’au total annoncé par l’indexeur · affichage par pages de 25 · adresse active seulement</p></div>
