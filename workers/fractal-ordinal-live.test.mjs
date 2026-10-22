@@ -97,7 +97,7 @@ import { Signer } from '@exodus/bip322-js';
 import worker from './fractal-ordinal-live.js';
 
 const base = 'https://fractal-ordinal-live.servostar23.workers.dev';
-const allowedOrigin = 'https://demro-labs.github.io';
+const allowedOrigin = 'https://ordi-labs.github.io';
 
 function makeRequest(path, { method = 'GET', origin = allowedOrigin, ip = '192.0.2.10', headers: extraHeaders = {}, body } = {}) {
   const headers = new Headers(extraHeaders);
