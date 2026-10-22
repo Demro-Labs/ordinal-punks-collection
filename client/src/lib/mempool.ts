@@ -339,6 +339,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   let scannedCount = 0;
   let sourceTotal: number | null = null;
   let expectedTotal: number | null = null;
+  let scanComplete = false;
   const rejectionTotals: UtxoRejectionDiagnostics = {
     identityMismatch: 0, invalidValue: 0, invalidScript: 0, unconfirmedOrInvalidHeight: 0, invalidFlags: 0,
     hasInscriptionOrUnknown: 0, detailMismatch: 0, spentOrUnknown: 0, hasRunes: 0, hasAlkanes: 0,
@@ -437,7 +438,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     if (pageScannedCount === 0 && hasMore) {
       throw new Error(`Safe UTXO scan is incomplete: the indexer stopped at ${scannedCount} address outputs. No transaction was signed or broadcast.`);
     }
-    if (!hasMore) break;
+    if (!hasMore) { scanComplete = true; break; }
     cursor = nextCursor!;
   }
   const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
@@ -449,8 +450,9 @@ export async function getSpendableUtxos(network: string, address: string, minimu
   }
   // Never silently return a partial set if the Worker cursor limit is reached.
   // An incomplete scan could omit fee UTXOs and misstate the address's safe balance.
-  if (collectAll && sourceTotal !== null && scannedCount < sourceTotal) {
-    throw new Error(`Safe UTXO scan is incomplete: verified ${scannedCount} of ${sourceTotal} address outputs (Worker cursor limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). No transaction was signed or broadcast.`);
+  if (collectAll && !scanComplete) {
+    const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
+    throw new Error(`Safe UTXO scan is incomplete: verified ${scannedLabel} address outputs (Worker cursor limit ${MAX_SPENDABLE_UTXO_PAGES * SPENDABLE_UTXO_PAGE_SIZE}). No transaction was signed or broadcast.`);
   }
   if (!options.allowInsufficientSafeBalance && safeSats < minimumSats) {
     const scannedLabel = sourceTotal === null ? String(scannedCount) : `${scannedCount}/${sourceTotal}`;
