@@ -94,14 +94,14 @@ export async function fetchProtocolBalances(address: string, network: ProtocolNe
       return [];
     }
   };
-  if (network !== "BITCOIN_MAINNET") {
-    errors.Alkanes = "Alkanes indexing is currently supported only for Bitcoin mainnet.";
-  }
   const alkanesRequest = network === "BITCOIN_MAINNET"
     ? optional("Alkanes", `/api/alkanes/balances?${query}`, normalizeAlkane)
     : Promise.resolve([]);
+  const brc20ProgRequest = network === "BITCOIN_MAINNET"
+    ? optional("BRC20-Prog", `/api/brc20-prog/balances?${query}`, normalizeBrc20)
+    : Promise.resolve([]);
   const [brc20Prog, runes, alkanes] = await Promise.all([
-    optional("BRC20-Prog", `/api/brc20-prog/balances?${query}`, normalizeBrc20),
+    brc20ProgRequest,
     optional("Runes", `/api/runes/balance-list?${new URLSearchParams({ ...Object.fromEntries(query), start: "0", limit: "20" })}`, normalizeRune),
     alkanesRequest,
   ]);

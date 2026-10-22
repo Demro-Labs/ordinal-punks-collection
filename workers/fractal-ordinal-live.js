@@ -497,7 +497,6 @@ async function uniNetwork(base, path, env, init = {}) {
     response = currentResponse;
     break;
   }
-
   if (!response || !payload || String(payload.code) !== '0') {
     throw new Error('UniSat API quota exceeded');
   }
@@ -883,6 +882,7 @@ async function spendableUtxos(request, env, corsHeaders) {
   const requestedSize = parseBoundedInteger(url.searchParams.get('size'), 25, 25);
   if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new SpendableUtxoError('INVALID_QUERY', 400);
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
+  const supportsAlkanes = chain === 'bitcoin';
   // Scan the complete address inventory, not only UniSat's pre-filtered available set.
   // Every candidate must pass explicit on-chain/indexer metadata checks below; unknown metadata fails closed.
   const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
@@ -963,7 +963,7 @@ async function spendableUtxos(request, env, corsHeaders) {
     // If either protocol marker is missing, keep the conservative detail lookup below.
     const hasExplicitAssetFreeMarkers =
       Array.isArray(item?.runes) && item.runes.length === 0 &&
-      Array.isArray(item?.alkanes) && item.alkanes.length === 0 &&
+      (!supportsAlkanes || (Array.isArray(item?.alkanes) && item.alkanes.length === 0)) &&
       Array.isArray(item?.inscriptions) && item.inscriptions.length === 0 &&
       Number.isSafeInteger(Number(item?.height)) && Number(item.height) > 0 &&
       item?.isSpent === false;
@@ -1014,25 +1014,36 @@ async function spendableUtxos(request, env, corsHeaders) {
       rejectedSats.hasRunes += satoshi;
       continue;
     }
-    let alkaneMetadata = [item?.alkanes, detail?.alkanes].filter(value => value !== undefined);
-    // As with Runes, missing metadata is not proof of safety. Query the protocol endpoint
-    // when possible. UniSat's available-utxo-data already excludes protocol-asset outputs;
-    // a 404 means this network deployment does not expose the optional Alkanes detail route.
-    if (alkaneMetadata.length === 0) {
-      try {
-        const alkanes = await spendableUtxoStage('ALKANES_BALANCE', () =>
-          uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env));
-        if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
-        alkaneMetadata = [alkanes];
-      } catch (error) {
-        if (error instanceof Error && error.message === 'UniSat upstream returned 404') {
-          alkaneMetadata = [[]];
-        } else {
-          throw new SpendableUtxoError(`ALKANES_BALANCE_${safeUniSatFailureCode(error)}`);
+    if (supportsAlkanes) {
+      let alkaneMetadata = [item?.alkanes, detail?.alkanes].filter(value => value !== undefined);
+      // As with Runes, missing metadata is not proof of safety. Query the protocol endpoint
+      // when possible. UniSat's available-utxo-data already excludes protocol-asset outputs;
+      // a 404 means this network deployment does not expose the optional Alkanes detail route.
+      if (alkaneMetadata.length === 0) {
+        try {
+          const alkanes = await spendableUtxoStage('ALKANES_BALANCE', () =>
+            uniNetwork(base, `/v1/indexer/alkanes/utxo/${txid}/${vout}/balance`, env));
+          if (!Array.isArray(alkanes)) throw new SpendableUtxoError('ALKANES_INVALID_RESPONSE');
+          alkaneMetadata = [alkanes];
+        } catch (error) {
+          if (error instanceof Error && error.message === 'UniSat upstream returned 404') {
+            alkaneMetadata = [[]];
+          } else {
+            throw new SpendableUtxoError(`ALKANES_BALANCE_${safeUniSatFailureCode(error)}`);
+          }
         }
       }
-    }
-    if (alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
+      if (alkaneMetadata.some(value => !Array.isArray(value) || value.length !== 0)) {
+        rejected.hasAlkanes += 1;
+        rejectedSats.hasAlkanes += satoshi;
+        continue;
+      }
+  
+    } else if (
+      (item?.alkanes !== undefined && (!Array.isArray(item.alkanes) || item.alkanes.length !== 0)) ||
+      (detail?.alkanes !== undefined && (!Array.isArray(detail.alkanes) || detail.alkanes.length !== 0))
+    ) {
+      // Fractal does not support Alkanes; unexpected or malformed asset markers still fail closed.
       rejected.hasAlkanes += 1;
       rejectedSats.hasAlkanes += satoshi;
       continue;
@@ -1079,6 +1090,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     candidateByOutpoint.set(key, { txid, vout, satoshi, scriptPk, sourceCursor });
   }
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
+  const supportsAlkanes = chain === 'bitcoin';
   const availableByOutpoint = new Map();
   const allCandidatesHaveCursor = [...candidateByOutpoint.values()].every(candidate => candidate.sourceCursor !== null);
   // sourceCursor is only a hint. First search a small window for the common case;
@@ -1243,17 +1255,22 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     if (!Array.isArray(runeMetadata) || runeMetadata.length !== 0) {
       throw new SpendableUtxoError('UTXO_CONFIRM_ASSET_OR_UNKNOWN', 409);
     }
-    let alkaneMetadata = detail?.alkanes;
-    if (alkaneMetadata === undefined) {
-      try {
-        alkaneMetadata = await spendableUtxoStage('UTXO_CONFIRM_ALKANES', () =>
-          uniNetwork(base, `/v1/indexer/alkanes/utxo/${candidate.txid}/${candidate.vout}/balance`, env));
-      } catch (error) {
-        if (error instanceof Error && error.message === 'UniSat upstream returned 404') alkaneMetadata = [];
-        else throw error;
+    if (supportsAlkanes) {
+      let alkaneMetadata = detail?.alkanes;
+      if (alkaneMetadata === undefined) {
+        try {
+          alkaneMetadata = await spendableUtxoStage('UTXO_CONFIRM_ALKANES', () =>
+            uniNetwork(base, `/v1/indexer/alkanes/utxo/${candidate.txid}/${candidate.vout}/balance`, env));
+        } catch (error) {
+          if (error instanceof Error && error.message === 'UniSat upstream returned 404') alkaneMetadata = [];
+          else throw error;
+        }
       }
-    }
-    if (!Array.isArray(alkaneMetadata) || alkaneMetadata.length !== 0) {
+      if (!Array.isArray(alkaneMetadata) || alkaneMetadata.length !== 0) {
+        throw new SpendableUtxoError('UTXO_CONFIRM_ASSET_OR_UNKNOWN', 409);
+      }
+  
+    } else if (detail?.alkanes !== undefined && (!Array.isArray(detail.alkanes) || detail.alkanes.length !== 0)) {
       throw new SpendableUtxoError('UTXO_CONFIRM_ASSET_OR_UNKNOWN', 409);
     }
     safeSats += candidate.satoshi;
@@ -1788,8 +1805,8 @@ export default {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       const address = url.searchParams.get('address') || '';
       const chain = url.searchParams.get('chain') || 'BITCOIN_MAINNET';
-      if (!validWalletAddress(address) || !['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Adresse ou réseau BRC20-Prog invalide.' }, { status: 400, headers: noStore });
-      const base = chain === 'BITCOIN_MAINNET' ? BITCOIN_API_BASE : API_BASE;
+      if (!validWalletAddress(address) || chain !== 'BITCOIN_MAINNET') return Response.json({ error: 'BRC2.0 est disponible uniquement sur Bitcoin mainnet.' }, { status: 400, headers: noStore });
+      const base = BITCOIN_API_BASE;
       try {
         const source = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/brc20-prog/summary?start=0&limit=100`, env, { signal: AbortSignal.timeout(8000) });
         const raw = Array.isArray(source?.detail) ? source.detail : [];
@@ -1804,7 +1821,7 @@ export default {
       const noStore = { ...headers, 'Cache-Control': 'no-store' };
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...noStore, 'Retry-After': '60' } });
       const chain = url.searchParams.get('chain') || 'BITCOIN_MAINNET';
-      if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Réseau BRC2.0 invalide.' }, { status: 400, headers: noStore });
+      if (chain !== 'BITCOIN_MAINNET') return Response.json({ error: 'BRC2.0 est disponible uniquement sur Bitcoin mainnet.' }, { status: 400, headers: noStore });
       try {
         const rpcUrl = brc20ProgRpcUrl(env, chain);
         const rpcHeaders = brc20ProgRpcHeaders(env, chain);
@@ -1831,7 +1848,7 @@ export default {
         if (new TextEncoder().encode(rawBody).length > MAX_BRC20_PROG_BALANCE_BODY_BYTES) return Response.json({ error: 'Requête de solde BRC2.0 trop volumineuse.' }, { status: 413, headers: noStore });
         const body = JSON.parse(rawBody);
         const chain = body?.chain || 'BITCOIN_MAINNET';
-        if (!['BITCOIN_MAINNET', 'FRACTAL_BITCOIN_MAINNET'].includes(chain)) return Response.json({ error: 'Réseau BRC2.0 invalide.' }, { status: 400, headers: noStore });
+        if (chain !== 'BITCOIN_MAINNET') return Response.json({ error: 'BRC2.0 est disponible uniquement sur Bitcoin mainnet.' }, { status: 400, headers: noStore });
         const ticker = body?.ticker;
         const evmAddress = body?.evmAddress;
         if (typeof ticker !== 'string' || !/^[a-z0-9-]{6}$/i.test(ticker) || typeof evmAddress !== 'string' || !/^0x[a-f0-9]{40}$/i.test(evmAddress)) {
@@ -1931,6 +1948,10 @@ export default {
         console.warn(`${isBrc20 ? 'BRC20' : 'Alkanes'} balance lookup failed`, { chain });
         return Response.json({ error: `Les soldes ${isBrc20 ? 'BRC-20' : 'Alkanes'} sont temporairement indisponibles.` }, { status: 503, headers: noStore });
       }
+    }
+    if (request.method === 'GET' && url.pathname.startsWith('/api/alkanes/')) {
+      const requestedChain = url.searchParams.get('chain') || 'FRACTAL_BITCOIN_MAINNET';
+      if (requestedChain !== 'BITCOIN_MAINNET') return Response.json({ error: 'Alkanes est disponible uniquement sur Bitcoin mainnet.' }, { status: 400, headers: { ...headers, 'Cache-Control': 'no-store' } });
     }
     if (request.method === 'GET' && ['/api/brc20/balance-list', '/api/alkanes/token-list', '/api/alkanes/collection-list', '/api/alkanes/utxo-list', '/api/runes/utxo-list'].includes(url.pathname)) {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });

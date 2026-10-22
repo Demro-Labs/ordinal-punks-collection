@@ -329,6 +329,8 @@ export function Brc20ProgModulePanel({ network, address, site = "pokedex" }: { n
     });
   };
 
+  if (network !== BITCOIN) return null;
+
   return (
     <section className="border border-[#3b434d] bg-[#10151a] p-3" aria-labelledby="brc20-prog-module-title">
       <div className="flex items-start gap-2"><FileCode2 size={15} className="mt-0.5 shrink-0 text-[#f2bd63]" /><div>
