@@ -329,6 +329,13 @@ export function Brc20ProgModulePanel({ network, address, site = "pokedex" }: { n
     });
   };
 
+  if (network !== BITCOIN) {
+    return <section className="border border-[#3b434d] bg-[#10151a] p-3" aria-label="BRC2.0 network availability">
+      <p className="font-mono text-[10px] uppercase text-[#f2bd63]">BRC2.0 · Bitcoin mainnet only</p>
+      <p className="mt-2 font-mono text-[10px] leading-5 text-[#9ea7b3]">Le module BRC2.0 est désactivé sur Fractal Bitcoin. Sélectionnez Bitcoin mainnet dans UniSat pour utiliser ce parcours.</p>
+    </section>;
+  }
+
   return (
     <section className="border border-[#3b434d] bg-[#10151a] p-3" aria-labelledby="brc20-prog-module-title">
       <div className="flex items-start gap-2"><FileCode2 size={15} className="mt-0.5 shrink-0 text-[#f2bd63]" /><div>
