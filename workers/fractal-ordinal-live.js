@@ -844,8 +844,10 @@ async function addressUtxos(request, env, corsHeaders) {
     if (!Number.isSafeInteger(sourceCursor) || sourceCursor !== cursor ||
         (sourceTotal !== null && (!Number.isSafeInteger(sourceTotal) || sourceTotal < cursor + raw.length))) throw new Error('Inconsistent UniSat UTXO pagination');
     const nextCursor = cursor + raw.length;
-    const total = sourceTotal ?? nextCursor + (raw.length === size ? 1 : 0);
-    return Response.json({ chain, address, cursor, nextCursor, total, scannedCount: raw.length, utxo, refreshedAt: new Date().toISOString() }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+    const totalKnown = sourceTotal !== null;
+    const hasMore = totalKnown ? nextCursor < sourceTotal : raw.length === size;
+    const total = sourceTotal ?? nextCursor + (hasMore ? 1 : 0);
+    return Response.json({ chain, address, cursor, nextCursor, total, totalKnown, hasMore, scannedCount: raw.length, utxo, refreshedAt: new Date().toISOString() }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
   } catch (error) {
     const code = safeUniSatFailureCode(error);
     console.warn('Active UTXO lookup failed', { chain, code });
