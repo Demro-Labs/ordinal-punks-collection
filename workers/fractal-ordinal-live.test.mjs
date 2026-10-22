@@ -1060,7 +1060,7 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     const url = new URL(String(input));
     calls.push(url.pathname);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       return Response.json({ code: 0, data: { total: records.length, utxo: records } });
     }
     const pathParts = url.pathname.split('/');
@@ -1093,7 +1093,7 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     assert.equal(data.diagnosticsSats.hasRunes, records[1].satoshi);
     assert.equal(data.diagnosticsSats.hasAlkanes, records[2].satoshi);
     assert.equal(data.diagnosticsSats.unconfirmedOrInvalidHeight, records[3].satoshi);
-    assert.ok(calls.some(path => path.endsWith('/available-utxo-data')));
+    assert.ok(calls.some(path => path.endsWith('/all-utxo-data')));
     assert.equal(calls.some(path => path.includes('/runes/utxo/') || path.includes('/alkanes/utxo/')), false);
     assert.equal(JSON.stringify(data).includes('test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
@@ -1112,7 +1112,7 @@ test('desktop and mobile use the available-UTXO API without calling the unsuppor
     const url = new URL(String(input));
     upstreamPaths.push(url.pathname);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       assert.equal(url.searchParams.get('withLowFee'), 'true');
       upstreamMobileModes.push(url.searchParams.get('mobile'));
       return Response.json({ code: 0, data: { total: 1, utxo: [record] } });
@@ -1150,7 +1150,7 @@ test('checks Runes and Alkanes endpoints when UniSat omits protocol metadata', a
   globalThis.fetch = async input => {
     const url = new URL(String(input));
     calls.push(url.pathname);
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       return Response.json({ code: 0, data: { cursor: 0, total: 2, utxo: [safe, runeBearing] } });
     }
     if (url.pathname === `/v1/indexer/utxo/${safe.txid}/0` || url.pathname === `/v1/indexer/utxo/${runeBearing.txid}/0`) {
@@ -1195,7 +1195,7 @@ test('uses explicit asset-free metadata to avoid per-UTXO detail calls during di
   globalThis.fetch = async input => {
     const url = new URL(String(input));
     calls.push(url.pathname);
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       return Response.json({ code: 0, data: { cursor: 0, total: records.length, utxo: records } });
     }
     throw new Error(`Unexpected detail request during discovery: ${url.pathname}`);
@@ -1209,7 +1209,7 @@ test('uses explicit asset-free metadata to avoid per-UTXO detail calls during di
     assert.equal(response.status, 200);
     assert.equal(data.utxo.length, 25);
     assert.equal(data.utxo.every(item => item.inscriptionsRunesAlkanesChecked === true), true);
-    assert.deepEqual(calls, ['/v1/indexer/address/' + address + '/available-utxo-data']);
+    assert.deepEqual(calls, ['/v1/indexer/address/' + address + '/all-utxo-data']);
   } finally { globalThis.fetch = previousFetch; }
 });
 
@@ -1222,7 +1222,7 @@ test('reports safe-UTXO rejection reasons without exposing addresses or outpoint
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       return Response.json({ code: 0, data: { total: 3, utxo: [valid, unconfirmed, inscription] } });
     }
     if (url.pathname === `/v1/indexer/utxo/${valid.txid}/0`) return Response.json({ code: 0, data: { ...valid, isSpent: false, runes: [], alkanes: [] } });
@@ -1263,7 +1263,7 @@ test('Worker attests that exact BTC and FB PSBT inputs cover payment plus fees',
     const url = new URL(String(input));
     assert.equal(url.origin, expectedOrigin);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) { const available = { ...record }; delete available.isOpInRBF; return Response.json({ code: 0, data: { cursor: Number(url.searchParams.get('cursor')), total: 1, utxo: [available] } }); }
+    if (url.pathname.endsWith('/all-utxo-data')) { const available = { ...record }; delete available.isOpInRBF; return Response.json({ code: 0, data: { cursor: Number(url.searchParams.get('cursor')), total: 1, utxo: [available] } }); }
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/${record.vout}`) { const detail = { ...record }; delete detail.isOpInRBF; return Response.json({ code: 0, data: detail }); }
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
@@ -1303,7 +1303,7 @@ test('Worker confirmation scans past 500 available outputs to find the exact PSB
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       const cursor = Number(url.searchParams.get('cursor'));
       cursors.push(cursor);
       const count = Math.min(25, 501 - cursor);
@@ -1338,7 +1338,7 @@ test('Worker finds a still-safe PSBT input when the available-UTXO pagination cu
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       const cursor = Number(url.searchParams.get('cursor'));
       cursors.push(cursor);
       const count = Math.min(25, 701 - cursor);
@@ -1374,7 +1374,7 @@ test('Worker retries a complete available-UTXO scan when the indexer omits an in
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       const cursor = Number(url.searchParams.get('cursor'));
       assert.equal(cursor, 0);
       inventoryPass += 1;
@@ -1401,7 +1401,7 @@ test('Worker refuses an input whose value differs from the current UniSat outpoi
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { cursor: 0, total: 1, utxo: [record] } });
+    if (url.pathname.endsWith('/all-utxo-data')) return Response.json({ code: 0, data: { cursor: 0, total: 1, utxo: [record] } });
     if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) { detailLookups += 1; return Response.json({ code: 0, data: record }); }
     throw new Error(`The Worker must reject the changed outpoint before detail lookups: ${url}`);
   };
@@ -1421,7 +1421,7 @@ test('refuses duplicate outpoints in a complete spendable-UTXO confirmation page
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       return Response.json({ code: 0, data: { cursor: 0, total: 2, utxo: [candidate, { ...candidate, satoshi: 50000 }] } });
     }
     throw new Error(`Unexpected upstream URL: ${url}`);
@@ -1495,7 +1495,7 @@ test('continues fee-safe UTXO pagination when UniSat omits total', async () => {
   const address = 'bc1qtestaddress0000000000000000000000000';
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
-    assert.match(url.pathname, /\/available-utxo-data$/);
+    assert.match(url.pathname, /\/all-utxo-data$/);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
     const cursor = Number(url.searchParams.get('cursor'));
     const count = cursor === 0 ? 25 : 2;
@@ -1540,7 +1540,7 @@ test('fails closed when the available-UTXO response is missing or malformed', as
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) return Response.json({ code: 0, data: { cursor: 0, total: 1, utxo: null } });
+    if (url.pathname.endsWith('/all-utxo-data')) return Response.json({ code: 0, data: { cursor: 0, total: 1, utxo: null } });
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
@@ -1705,7 +1705,7 @@ test('rejects an oversized UniSat page instead of skipping uninspected outpoints
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       const utxo = Array.from({ length: 26 }, (_, index) => ({
         address,
         txid: index.toString(16).padStart(64, '0'),
@@ -2288,7 +2288,7 @@ test('Worker restarts confirmation from cursor zero when UniSat changes the avai
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       const cursor = Number(url.searchParams.get('cursor'));
       cursors.push(cursor);
       if (cursor === 25) cursor25Calls += 1;
@@ -2327,7 +2327,7 @@ test('Worker retries a complete UTXO confirmation scan once when the available i
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer bitcoin-test-only');
-    if (url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       assert.equal(url.origin, 'https://open-api.unisat.io');
       const cursor = Number(url.searchParams.get('cursor'));
       cursors.push(cursor);
