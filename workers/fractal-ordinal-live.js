@@ -997,7 +997,8 @@ async function spendableUtxos(request, env, corsHeaders) {
         rejected.hasInscriptionOrUnknown += 1;
         rejectedSats.hasInscriptionOrUnknown += satoshi;
         continue;
-      }    }
+      }
+    }
     let runeMetadata = [item?.runes, detail?.runes].filter(value => value !== undefined);
     // UniSat's available-UTXO list does not always include protocol arrays. When neither
     // the list nor the verified UTXO detail provides Runes metadata, query the per-outpoint
