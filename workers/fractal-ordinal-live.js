@@ -116,9 +116,11 @@ function brc20ProgRpcEnvName(chain) {
 }
 function brc20ProgRpcUrl(env, chain) {
   const preferred = brc20ProgRpcEnvName(chain);
+  // ETHEREUM_API is accepted as an RPC endpoint alias only when configured with
+  // the full HTTPS JSON-RPC URL, not as a bare provider API token.
   const value = preferred === 'BRC20_PROG_RPC_URL'
     ? env.BRC20_PROG_RPC_URL
-    : env.BRC20_PROG_FRACTAL_RPC_URL || env.ETH_API || env.BRC20_PROG_RPC_URL;
+    : env.BRC20_PROG_FRACTAL_RPC_URL || env.ETHEREUM_API || env.ETH_API || env.BRC20_PROG_RPC_URL;
   if (!value) throw new Error('BRC2.0 RPC is not configured for this network');
   const rpcUrl = new URL(value);
   if (rpcUrl.protocol !== 'https:' || rpcUrl.username || rpcUrl.password) throw new Error('Invalid BRC2.0 RPC URL');
@@ -319,11 +321,12 @@ async function broadcastBrc20ProgActivation(request, corsHeaders) {
 }
 
 async function uni(path, env, init = {}) {
-  if (!env.UNISAT_API_KEY) throw new Error('UniSat server binding is missing');
+  const fractalApiKey = env.FRACTAL_BITCOIN_API || env.UNISAT_API_KEY;
+  if (!fractalApiKey) throw new Error('UniSat server binding is missing');
   // Inscription/order routes use this helper rather than uniNetwork. Keep quota
   // fallback consistent, but retry only UniSat's documented quota code (-2005)
   // and only with a separately configured Fractal key. Never retry arbitrary 403s.
-  const keys = [env.UNISAT_API_KEY, env.UNISAT_API_KEY_FALLBACK]
+  const keys = [fractalApiKey, env.UNISAT_API_KEY_FALLBACK]
     .filter((key, index, values) => typeof key === 'string' && key.length > 0 && values.indexOf(key) === index);
   for (let index = 0; index < keys.length; index += 1) {
     const response = await fetch(API_BASE + path, {
@@ -384,7 +387,11 @@ async function uniNetwork(base, path, env, init = {}) {
   headers.set('Accept', 'application/json');
   headers.set('Content-Type', 'application/json');
 
-  const primaryKey = isFractalApi ? env.UNISAT_API_KEY : isBitcoinApi ? env.UNISAT_BITCOIN_API : null;
+  const primaryKey = isFractalApi
+    ? (env.FRACTAL_BITCOIN_API || env.UNISAT_API_KEY)
+    : isBitcoinApi
+      ? (env.BITCOIN_API || env.UNISAT_BITCOIN_API)
+      : null;
   const fallbackKey = isFractalApi ? env.UNISAT_API_KEY_FALLBACK : isBitcoinApi ? env.UNISAT_BITCOIN_API_FALLBACK : null;
   const apiKeys = isFractalApi || isBitcoinApi
     ? [primaryKey, fallbackKey].filter((key, index, values) => typeof key === 'string' && key.length > 0 && values.indexOf(key) === index)
