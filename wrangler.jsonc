@@ -5,9 +5,6 @@
   // L’API Cloudflare actuelle renvoie une date vide; son défaut effectif est 2021-11-02.
   // La figer évite de basculer silencieusement vers la date courante lors du premier deploy Wrangler.
   "compatibility_date": "2021-11-02",
-  "secrets": {
-    "required": ["UNISAT_API_KEY", "UNISAT_BITCOIN_API", "ETH_API"],
-  },
   "workers_dev": true,
   "upload_source_maps": false,
   "placement": {
