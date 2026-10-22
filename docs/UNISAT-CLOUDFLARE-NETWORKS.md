@@ -8,17 +8,17 @@ Les deux sites utilisent **un seul Worker Cloudflare partagé** : `fractal-ordin
 
 | Réseau UniSat | Valeur réseau | API UniSat | Secret principal |
 | --- | --- | --- | --- |
-| Fractal Bitcoin mainnet | `FRACTAL_BITCOIN_MAINNET` | `https://open-api-fractal.unisat.io` | `UNISAT_API_KEY` |
-| Bitcoin mainnet | `BITCOIN_MAINNET` | `https://open-api.unisat.io` | `UNISAT_BITCOIN_API` |
+| Fractal Bitcoin mainnet | `FRACTAL_BITCOIN_MAINNET` | `https://open-api-fractal.unisat.io` | `FRACTAL_BITCOIN_API` (alias historique `UNISAT_API_KEY`) |
+| Bitcoin mainnet | `BITCOIN_MAINNET` | `https://open-api.unisat.io` | `BITCOIN_API` (alias historique `UNISAT_BITCOIN_API`) |
 
 Le Worker choisit l’API et la clé à partir du réseau demandé. Ne pas réutiliser la clé Bitcoin pour Fractal ou inversement. Un fallback n’est essayé que si un secret de secours distinct pour le même réseau est configuré et que l’erreur amont correspond aux cas de quota traités par le code. Un HTTP 403 générique ne doit pas être interprété automatiquement comme un quota.
 
 ## Secrets et variables Cloudflare
 
 Secrets principaux requis par la configuration Wrangler :
-- `UNISAT_API_KEY` — clé UniSat Fractal Bitcoin.
-- `UNISAT_BITCOIN_API` — clé UniSat Bitcoin mainnet.
-- `ETH_API` — binding historique utilisé comme secours RPC compatible là où le code le prévoit.
+- `FRACTAL_BITCOIN_API` — clé UniSat Fractal Bitcoin (prioritaire; `UNISAT_API_KEY` reste accepté comme alias).
+- `BITCOIN_API` — clé UniSat Bitcoin mainnet (prioritaire; `UNISAT_BITCOIN_API` reste accepté comme alias).
+- `ETHEREUM_API` — alias accepté pour un endpoint RPC EVM uniquement si sa valeur est une URL JSON-RPC complète en HTTPS; une clé API brute seule ne suffit pas. `ETH_API` reste accepté comme alias historique.
 
 Secrets facultatifs, uniquement si des clés de secours distinctes ont été émises :
 - `UNISAT_API_KEY_FALLBACK` — secours Fractal Bitcoin.
