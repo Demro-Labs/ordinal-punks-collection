@@ -415,7 +415,7 @@ async function uniNetwork(base, path, env, init = {}) {
       const cached = await edgeCache.match(cacheKey);
       if (cached) {
         const cachedPayload = await cached.json();
-        if (cachedPayload?.code === 0 && Object.prototype.hasOwnProperty.call(cachedPayload, 'data')) {
+        if (String(cachedPayload?.code) === '0' && Object.prototype.hasOwnProperty.call(cachedPayload, 'data')) {
           return cachedPayload.data;
         }
       }
@@ -489,7 +489,7 @@ async function uniNetwork(base, path, env, init = {}) {
       console.warn('UniSat API quota exceeded; trying configured same-network fallback key', { network, path });
       continue;
     }
-    if (payload.code !== 0) {
+    if (String(payload?.code) !== '0') {
       console.warn('UniSat network API rejected request', { network, path, code: payloadCode.slice(0, 32) });
       if (payloadCode === '-2005') throw new Error('UniSat API quota exceeded');
       throw new Error('UniSat upstream rejected the request');
@@ -498,7 +498,7 @@ async function uniNetwork(base, path, env, init = {}) {
     break;
   }
 
-  if (!response || !payload || payload.code !== 0) {
+  if (!response || !payload || String(payload.code) !== '0') {
     throw new Error('UniSat API quota exceeded');
   }
   if (edgeCache && cacheKey) {
@@ -1975,8 +1975,13 @@ export default {
         });
         if (detail.some(item => item === null)) throw new Error('Invalid Ordinals item');
         return Response.json({ network: chain, address, start, total, detail, refreshedAt: new Date().toISOString() }, { headers: noStore });
-      } catch {
-        console.warn('Ordinals address lookup failed', { chain });
+      } catch (error) {
+        // Keep provider diagnostics useful without logging addresses, API keys, or response bodies.
+        console.warn('Ordinals address lookup failed', {
+          chain,
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          reason: error instanceof Error ? error.message.slice(0, 120) : 'Unknown error',
+        });
         return Response.json({ error: 'Les inscriptions Ordinals sont temporairement indisponibles.' }, { status: 503, headers: noStore });
       }
     }
