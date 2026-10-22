@@ -15,7 +15,7 @@ const rateBuckets = new Map<string, { count: number; expiresAt: number }>();
 const ALLOWED_ORIGINS = new Set(
   (
     process.env.ALLOWED_ORIGINS ??
-    "https://demro-labs.github.io,https://punksgallery-mlwdpcwl.manus.space"
+    "https://ordi-labs.github.io,https://punksgallery-mlwdpcwl.manus.space"
   )
     .split(",")
     .map(value => value.trim())
