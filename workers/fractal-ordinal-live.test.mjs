@@ -1434,6 +1434,44 @@ test('refuses duplicate outpoints in a complete spendable-UTXO confirmation page
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('continues display-only UTXO pagination when UniSat omits total', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    assert.match(url.pathname, /\/all-utxo-data$/);
+    const cursor = Number(url.searchParams.get('cursor'));
+    const count = cursor === 0 ? 25 : 3;
+    const utxo = Array.from({ length: count }, (_, index) => ({
+      txid: (cursor + index + 1).toString(16).padStart(64, '0'),
+      vout: 0,
+      satoshi: 1200,
+      height: 100,
+      scriptPk: '0014' + '22'.repeat(20),
+      inscriptions: [],
+      runes: [],
+      alkanes: [],
+      isSpent: false,
+    }));
+    return Response.json({ code: 0, data: { cursor, utxo } });
+  };
+  try {
+    const first = await worker.fetch(makeRequest(`/api/address-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.198' }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(first.status, 200);
+    const firstData = await first.json();
+    assert.equal(firstData.totalKnown, false);
+    assert.equal(firstData.hasMore, true);
+    assert.equal(firstData.scannedCount, 25);
+    const second = await worker.fetch(makeRequest(`/api/address-utxos?chain=fractal&address=${address}&cursor=25&size=25`, { ip: '192.0.2.198' }), { UNISAT_API_KEY: 'test-only' });
+    assert.equal(second.status, 200);
+    const secondData = await second.json();
+    assert.equal(secondData.totalKnown, false);
+    assert.equal(secondData.hasMore, false);
+    assert.equal(secondData.nextCursor, 28);
+    assert.equal(secondData.scannedCount, 3);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('refuses duplicate outpoints in the display-only address UTXO page', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
