@@ -1,4 +1,4 @@
-const ALLOWED_ORIGIN = "https://demro-labs.github.io";
+const ALLOWED_ORIGIN = "https://ordi-labs.github.io";
 const ALLOWED_ACTIONS = new Set(["ordinal-punks", "pokedex"]);
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const RATE_WINDOW_MS = 60_000;
