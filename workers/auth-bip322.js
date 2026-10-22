@@ -4,15 +4,15 @@ import { Address, Verifier } from '@exodus/bip322-js';
 
 const AUTH_SITES = {
   punks: {
-    origin: 'https://demro-labs.github.io',
-    domain: 'demro-labs.github.io',
-    uri: 'https://demro-labs.github.io/ordinal-punks-collection/',
+    origin: 'https://ordi-labs.github.io',
+    domain: 'ordi-labs.github.io',
+    uri: 'https://ordi-labs.github.io/punks/',
     cookie: '__Host-demro-punks-auth',
   },
   pokedex: {
-    origin: 'https://demro-labs.github.io',
-    domain: 'demro-labs.github.io',
-    uri: 'https://demro-labs.github.io/fractal-pokedex-ordinal-ledger/',
+    origin: 'https://ordi-labs.github.io',
+    domain: 'ordi-labs.github.io',
+    uri: 'https://ordi-labs.github.io/pokedex/',
     cookie: '__Host-demro-pokedex-auth',
   },
 };
