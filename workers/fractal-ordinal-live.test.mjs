@@ -1861,7 +1861,7 @@ test('BIP-322 challenge is origin-bound, short-lived, uncached, and stores only 
   assert.equal(result.site, 'punks');
   assert.equal(result.network, 'FRACTAL_BITCOIN_MAINNET');
   assert.equal(Date.parse(result.expiresAt) - Date.now() <= 5 * 60 * 1000, true);
-  assert.match(result.message, /URI: https:\/\/demro-labs\.github\.io\/ordinal-punks-collection\//);
+  assert.match(result.message, /URI: https:\/\/ordi-labs\.github\.io\/punks\//);
   assert.match(result.message, /No payment, transfer, or spending approval is authorized\./);
   assert.equal(state.challenge.idHash.length, 64);
   assert.equal(state.challenge.idHash === result.challengeId, false);
@@ -1883,7 +1883,7 @@ test('sign-in challenges support Bitcoin and Fractal for both sites and stay bou
       assert.equal(result.site, site);
       assert.equal(result.network, network);
       assert.match(result.message, new RegExp(`Network: ${network}`));
-      assert.match(result.message, new RegExp(`URI: https://demro-labs\\.github\\.io/${site === 'punks' ? 'ordinal-punks-collection' : 'fractal-pokedex-ordinal-ledger'}/`));
+      assert.match(result.message, new RegExp(`URI: https://ordi-labs\\.github\\.io/${site === 'punks' ? 'punks' : 'pokedex'}/`));
       assert.match(result.message, /No payment, transfer, or spending approval is authorized\./);
       assert.equal(state.challenge.network, network);
       assert.equal(state.session, null);
