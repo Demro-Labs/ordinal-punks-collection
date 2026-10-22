@@ -37,7 +37,7 @@ curl -fsS --max-time 20 -H "${AUTH_HEADER}" "${SCRIPT_API}/secrets" \
 echo "Cloudflare UniSat and ETH API secret names/types verified; values were not read."
 
 bitcoin_fees="$(curl -fsS --retry 2 --max-time 20 "${BASE_URL}/api/fees/recommended?chain=BITCOIN_MAINNET" \
-  -H 'Origin: https://demro-labs.github.io')"
+  -H 'Origin: https://ordi-labs.github.io')"
 printf '%s' "${bitcoin_fees}" | jq -e '.network == "BITCOIN_MAINNET" and .sources.unisat.available == true and (.sources.unisat.feeRate | type == "number" and . >= 1)' >/dev/null
 echo "Bitcoin UniSat-authenticated fee source verified; the secret value was not returned."
 
@@ -47,7 +47,7 @@ echo "Cloudflare AuthStorage Durable Object binding verified."
 
 for collection in opunk pokedex; do
   payload="$(curl -fsS --retry 2 --max-time 20 "${BASE_URL}/api/market?collectionId=${collection}&start=0&limit=1" \
-    -H 'Origin: https://demro-labs.github.io')"
+    -H 'Origin: https://ordi-labs.github.io')"
   printf '%s' "${payload}" | jq -e --arg collection "${collection}" '.collectionId == $collection' >/dev/null
   echo "Market API verified for ${collection}."
 done
@@ -66,7 +66,7 @@ for network in BITCOIN_MAINNET FRACTAL_BITCOIN_MAINNET; do
     "/api/brc20/balances?address=${encoded_address}&chain=${network}"; do
     payload_file="${TMP_DIR}/read-route.json"
     status="$(curl -sS --max-time 20 -o "${payload_file}" -w '%{http_code}' \
-      -H 'Origin: https://demro-labs.github.io' "${BASE_URL}${route}" || true)"
+      -H 'Origin: https://ordi-labs.github.io' "${BASE_URL}${route}" || true)"
     if [[ "${status}" != "200" ]]; then
       route_path="${route%%\?*}"
       echo "Live UniSat read route ${route_path} on ${network} returned HTTP ${status}: $(jq -c '{error,code}' "${payload_file}" 2>/dev/null || true)" >&2
@@ -80,7 +80,7 @@ for network in BITCOIN_MAINNET FRACTAL_BITCOIN_MAINNET; do
   done
   if [[ "${network}" == "BITCOIN_MAINNET" ]]; then
     payload_file="${TMP_DIR}/alkanes-bitcoin.json"
-    status="$(curl -sS --max-time 20 -o "${payload_file}" -w '%{http_code}' -H 'Origin: https://demro-labs.github.io' "${BASE_URL}/api/alkanes/balances?address=${encoded_address}&chain=${network}" || true)"
+    status="$(curl -sS --max-time 20 -o "${payload_file}" -w '%{http_code}' -H 'Origin: https://ordi-labs.github.io' "${BASE_URL}/api/alkanes/balances?address=${encoded_address}&chain=${network}" || true)"
     if [[ "${status}" != "200" ]]; then
       echo "Live Alkanes balance route on ${network} returned HTTP ${status}: $(jq -c '{error,code}' "${payload_file}" 2>/dev/null || true)" >&2
       exit 1
@@ -94,9 +94,9 @@ for site in punks pokedex; do
   headers_file="${TMP_DIR}/${site}.headers"
   body_file="${TMP_DIR}/${site}.json"
   status="$(curl -sS --max-time 15 -D "${headers_file}" -o "${body_file}" -w '%{http_code}' \
-    -H 'Origin: https://demro-labs.github.io' "${BASE_URL}/api/auth/session?site=${site}" || true)"
+    -H 'Origin: https://ordi-labs.github.io' "${BASE_URL}/api/auth/session?site=${site}" || true)"
   [[ "${status}" == "200" ]] || { echo "Auth session endpoint for ${site} returned HTTP ${status}." >&2; exit 1; }
-  grep -Fqi 'access-control-allow-origin: https://demro-labs.github.io' "${headers_file}" || { echo "Auth CORS origin missing for ${site}." >&2; exit 1; }
+  grep -Fqi 'access-control-allow-origin: https://ordi-labs.github.io' "${headers_file}" || { echo "Auth CORS origin missing for ${site}." >&2; exit 1; }
   grep -Fqi 'cache-control: no-store' "${headers_file}" || { echo "Auth response for ${site} is not no-store." >&2; exit 1; }
   jq -e '.session == null' "${body_file}" >/dev/null
   echo "Anonymous auth session verified for ${site}."
@@ -108,7 +108,7 @@ for site in punks pokedex; do
     headers_file="${TMP_DIR}/${site}-${network}.headers"
     response_file="${TMP_DIR}/${site}-${network}.json"
     status="$(curl -sS --retry 0 --max-time 20 -D "${headers_file}" -o "${response_file}" -w '%{http_code}' -X POST "${BASE_URL}/api/auth/ownership/challenge" \
-      -H 'Origin: https://demro-labs.github.io' -H 'Content-Type: application/json' --data-binary "${payload}" || true)"
+      -H 'Origin: https://ordi-labs.github.io' -H 'Content-Type: application/json' --data-binary "${payload}" || true)"
     if [[ "${status}" == "429" ]]; then
       retry_after="$(awk 'BEGIN { IGNORECASE=1 } /^Retry-After:/ { sub(/^[^:]*:[[:space:]]*/, ""); gsub(/[[:space:]]+$/, ""); print; exit }' "${headers_file}")"
       echo "Ownership challenge for ${site} on ${network} returned HTTP 429; not retrying${retry_after:+ (Retry-After: ${retry_after})}." >&2
@@ -126,7 +126,7 @@ for site in punks pokedex; do
   headers_file="${TMP_DIR}/${site}-bitcoin-signin.headers"
   response_file="${TMP_DIR}/${site}-bitcoin-signin.json"
   status="$(curl -sS --retry 0 --max-time 20 -D "${headers_file}" -o "${response_file}" -w '%{http_code}' -X POST "${BASE_URL}/api/auth/challenge" \
-    -H 'Origin: https://demro-labs.github.io' -H 'Content-Type: application/json' --data-binary "${payload}" || true)"
+    -H 'Origin: https://ordi-labs.github.io' -H 'Content-Type: application/json' --data-binary "${payload}" || true)"
   if [[ "${status}" == "429" ]]; then
     retry_after="$(awk 'BEGIN { IGNORECASE=1 } /^Retry-After:/ { sub(/^[^:]*:[[:space:]]*/, ""); gsub(/[[:space:]]+$/, ""); print; exit }' "${headers_file}")"
     echo "Bitcoin sign-in challenge for ${site} returned HTTP 429; not retrying${retry_after:+ (Retry-After: ${retry_after})}." >&2
@@ -138,7 +138,7 @@ for site in punks pokedex; do
   echo "Bitcoin sign-in challenge verified for ${site}; no signature, session, or payment was created."
 done
 
-for origin in "https://demro-labs.github.io" "https://punksgallery-mlwdpcwl.manus.space"; do
+for origin in "https://ordi-labs.github.io" "https://punksgallery-mlwdpcwl.manus.space"; do
   headers_file="${TMP_DIR}/preflight.headers"
   status="$(curl -sS --max-time 15 -D "${headers_file}" -o /dev/null -w '%{http_code}' -X OPTIONS \
     -H "Origin: ${origin}" \
@@ -152,7 +152,7 @@ done
 
 status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
   "${BASE_URL}/api/inscribe/order" \
-  -H 'Origin: https://demro-labs.github.io' \
+  -H 'Origin: https://ordi-labs.github.io' \
   -H 'Content-Type: text/plain' \
   --data-binary 'pre-deploy-smoke-probe' || true)"
 [[ "${status}" == "415" ]] || { echo "Inscribe order route returned HTTP ${status} for a safe non-JSON probe (expected 415)." >&2; exit 1; }
