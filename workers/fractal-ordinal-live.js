@@ -1245,6 +1245,8 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     if (!Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_CONFIRMED', 409);
     if (detail?.isSpent !== false) throw new SpendableUtxoError('UTXO_CONFIRM_SPENT_OR_UNKNOWN', 409);
     if (detail?.isOpInRBF !== undefined && typeof detail.isOpInRBF !== 'boolean') throw new SpendableUtxoError('UTXO_CONFIRM_INVALID_RBF_FLAG', 409);
+    const isLowFee = typeof available.isLowFee === 'boolean' ? available.isLowFee : detail?.isLowFee;
+    if (typeof isLowFee !== 'boolean') throw new SpendableUtxoError('UTXO_CONFIRM_INVALID_LOW_FEE_FLAG', 409);
     if (!Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0) {
       throw new SpendableUtxoError('UTXO_CONFIRM_ASSET_OR_UNKNOWN', 409);
     }
@@ -1276,7 +1278,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     }
     safeSats += candidate.satoshi;
     if (!Number.isSafeInteger(safeSats)) throw new SpendableUtxoError('UTXO_CONFIRM_TOTAL_UNSAFE');
-    verified.push({ address, txid: candidate.txid, vout: candidate.vout, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk, height: Number(detail.height), isLowFee: available.isLowFee, isOpInRBF: typeof detail.isOpInRBF === 'boolean' ? detail.isOpInRBF : typeof available.isOpInRBF === 'boolean' ? available.isOpInRBF : false, inscriptionsRunesAlkanesChecked: true });
+    verified.push({ address, txid: candidate.txid, vout: candidate.vout, satoshi: candidate.satoshi, scriptPk: candidate.scriptPk, height: Number(detail.height), isLowFee, isOpInRBF: typeof detail.isOpInRBF === 'boolean' ? detail.isOpInRBF : typeof available.isOpInRBF === 'boolean' ? available.isOpInRBF : false, inscriptionsRunesAlkanesChecked: true });
   }
   return Response.json({ chain, address, minimumSats, safeSats, sufficient: safeSats >= minimumSats, verifiedUtxoCount: verified.length, utxo: verified, confirmedAt: new Date().toISOString() }, { headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
 }
