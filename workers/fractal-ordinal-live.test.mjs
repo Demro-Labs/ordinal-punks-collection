@@ -492,7 +492,8 @@ test('returns transferable inscriptions for a six-character classic BRC-20 ticke
   const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
   const inscriptionId = `${'a'.repeat(64)}i0`;
   globalThis.fetch = async input => {
-    assert.equal(String(input), `https://open-api-fractal.unisat.io/v1/indexer/address/${address}/brc20/ABCDEF/transferable-inscriptions?start=0&limit=100`);    return Response.json({ code: 0, data: { start: 0, total: 1, detail: [{ inscriptionId, data: { amt: '12.5' }, confirmations: 3 }] } });
+    assert.equal(String(input), `https://open-api-fractal.unisat.io/v1/indexer/address/${address}/brc20/ABCDEF/transferable-inscriptions?start=0&limit=100`);
+    return Response.json({ code: 0, data: { start: 0, total: 1, detail: [{ inscriptionId, data: { amt: '12.5' }, confirmations: 3 }] } });
   };
   try {
     const response = await worker.fetch(makeRequest(`/api/brc20/transferable?address=${address}&ticker=ABCDEF&chain=FRACTAL_BITCOIN_MAINNET`, { ip: '192.0.2.95' }), { UNISAT_API_KEY: 'test-only' });
@@ -2341,4 +2342,3 @@ test('caps the per-isolate client table under rotating IPs', async () => {
   }
   assert.equal(blocked, true);
 });
-
