@@ -2,7 +2,7 @@ import { Buffer } from "buffer";
 import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
 import type { AddressType, OrdiNetwork, OrdiWalletRecord } from "@/lib/ordi-wallet";
-import { getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress, type SpendableUtxo } from "@/lib/mempool";
+import { confirmSpendableUtxos, getMempoolRawTransaction, getRecommendedFeeEstimate, getSpendableUtxos, validateMempoolAddress, type SpendableUtxo } from "@/lib/mempool";
 import { parseFbAmountToSats } from "@/lib/native-fb-send";
 
 // Ensure bitcoinjs-lib and ECC adapters see the same browser Buffer implementation
@@ -96,6 +96,9 @@ export async function prepareLocalNativeTransfer(
     if (utxo.address !== account.address || !Buffer.from(utxo.scriptPk, "hex").equals(sourceScript)) throw new Error("Un UTXO sûr ne correspond pas au script de l’adresse source sélectionnée; aucun transfert n’a été construit.");
   }
   const inputSats = selected.reduce((sum, item) => sum + item.satoshi, 0);
+  // Bind the selected outpoints to a fresh Worker attestation before placing them in a PSBT.
+  // If the live safety service is unavailable or any input changed, fail closed before construction.
+  await confirmSpendableUtxos(network, account.address, inputSats, selected.map(({ txid, vout, satoshi, scriptPk, sourceCursor }) => ({ txid, vout, satoshi, scriptPk, sourceCursor })));
   const withChangeFee = Math.ceil(estimatedVsize(selected.length, addressType, [normalizedRecipient, account.address]) * feeRateSatVb);
   const provisionalChange = inputSats - amountSats - withChangeFee;
   const outputCount = provisionalChange >= DUST_SATS ? 2 : 1;
