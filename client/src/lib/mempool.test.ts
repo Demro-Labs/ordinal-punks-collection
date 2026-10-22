@@ -199,7 +199,7 @@ describe("getSpendableUtxos", () => {
     }));
 
     await expect(getSpendableUtxos("FRACTAL_BITCOIN_MAINNET", ADDRESS, 1, { collectAll: true, allowInsufficientSafeBalance: true }))
-      .rejects.toThrow(/scan is incomplete.*0 of 26/i);
+      .rejects.toThrow(/scan is incomplete.*0 address outputs/i);
   });
 
   it("keeps paging until every exact PSBT outpoint is verified", async () => {
