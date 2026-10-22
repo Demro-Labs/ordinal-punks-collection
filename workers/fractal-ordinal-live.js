@@ -1245,7 +1245,12 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     if (!Number.isSafeInteger(Number(detail?.height)) || Number(detail.height) <= 0) throw new SpendableUtxoError('UTXO_CONFIRM_NOT_CONFIRMED', 409);
     if (detail?.isSpent !== false) throw new SpendableUtxoError('UTXO_CONFIRM_SPENT_OR_UNKNOWN', 409);
     if (detail?.isOpInRBF !== undefined && typeof detail.isOpInRBF !== 'boolean') throw new SpendableUtxoError('UTXO_CONFIRM_INVALID_RBF_FLAG', 409);
-    const isLowFee = typeof available.isLowFee === 'boolean' ? available.isLowFee : detail?.isLowFee;
+    // isLowFee is advisory indexer metadata, not proof that an output is safe.
+    // The discovery scanner already normalizes an omitted flag to false; mirror that
+    // behavior only after this confirmation has independently matched the output,
+    // confirmed its height and unspent state. Reject malformed non-boolean values.
+    const rawLowFee = typeof available.isLowFee === 'boolean' ? available.isLowFee : detail?.isLowFee;
+    const isLowFee = rawLowFee === undefined || rawLowFee === null ? false : rawLowFee;
     if (typeof isLowFee !== 'boolean') throw new SpendableUtxoError('UTXO_CONFIRM_INVALID_LOW_FEE_FLAG', 409);
     if (!Array.isArray(detail?.inscriptions) || detail.inscriptions.length !== 0) {
       throw new SpendableUtxoError('UTXO_CONFIRM_ASSET_OR_UNKNOWN', 409);
