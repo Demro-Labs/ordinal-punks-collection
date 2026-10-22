@@ -91,15 +91,33 @@ describe("Local Vault BTC/FB PSBT signer", () => {
     expect(tx.rawTxHex).toMatch(/^[a-f0-9]+$/);
   });
 
-  it("rejects a tampered signature before finalizing or broadcasting", async () => {
-    const prepared = makePsbt();
+  it.each([
+    ["BITCOIN_MAINNET", "legacy"],
+    ["BITCOIN_MAINNET", "nested-segwit"],
+    ["BITCOIN_MAINNET", "native-segwit"],
+    ["BITCOIN_MAINNET", "taproot"],
+    ["FRACTAL_BITCOIN_MAINNET", "legacy"],
+    ["FRACTAL_BITCOIN_MAINNET", "nested-segwit"],
+    ["FRACTAL_BITCOIN_MAINNET", "native-segwit"],
+    ["FRACTAL_BITCOIN_MAINNET", "taproot"],
+  ] as const)("rejects a tampered signature before finalizing or broadcasting (%s, %s)", async (chain, type) => {
+    const network = chain;
+    const prepared = makePsbt(type);
     vi.mocked(getSpendableUtxos).mockResolvedValue([prepared.utxo]);
     const review = await reviewLocalPsbt(prepared.hex, wallet, network);
     const signed = await signLocalPsbt(prepared.hex, wallet, review);
     const tampered = bitcoin.Psbt.fromHex(signed);
-    const signature = tampered.data.inputs[0].partialSig?.[0];
-    expect(signature).toBeDefined();
-    signature!.signature[0] ^= 1;
+    if (type === "taproot") {
+      const signature = tampered.data.inputs[0].tapKeySig;
+      expect(signature).toBeDefined();
+      const changed = Buffer.from(signature!);
+      changed[0] ^= 1;
+      tampered.data.inputs[0].tapKeySig = changed;
+    } else {
+      const signature = tampered.data.inputs[0].partialSig?.[0];
+      expect(signature).toBeDefined();
+      signature!.signature[0] ^= 1;
+    }
     await expect(finalizeLocalPsbt(tampered.toHex(), wallet, review)).rejects.toThrow(/signature locale est absente ou invalide/i);
   });
 
