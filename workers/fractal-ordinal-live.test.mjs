@@ -1391,6 +1391,50 @@ test('Worker refuses an input whose value differs from the current UniSat outpoi
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('confirms a safe PSBT outpoint when inventory pages omit metadata verified by the detail endpoint', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qtestaddress0000000000000000000000000';
+  const record = {
+    address, txid: 'ef'.repeat(32), vout: 0, satoshi: 50000,
+    scriptPk: '0014' + '68'.repeat(20),
+  };
+  const detail = {
+    ...record, height: 100, isSpent: false, isLowFee: false, isOpInRBF: false,
+    inscriptions: [], runes: [], alkanes: [],
+  };
+  const calls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    calls.push(url.pathname);
+    assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
+    if (url.pathname.endsWith('/all-utxo-data')) {
+      return Response.json({ code: 0, data: { cursor: 0, total: 1, utxo: [record] } });
+    }
+    if (url.pathname === `/v1/indexer/utxo/${record.txid}/0`) {
+      return Response.json({ code: 0, data: detail });
+    }
+    throw new Error(`Unexpected upstream URL: ${url}`);
+  };
+  try {
+    const body = JSON.stringify({
+      chain: 'fractal', address, minimumSats: 40000,
+      utxos: [{ txid: record.txid, vout: record.vout, satoshi: record.satoshi, scriptPk: record.scriptPk }],
+    });
+    const response = await worker.fetch(makeRequest('/api/spendable-utxos/confirm', {
+      method: 'POST', ip: '192.0.2.245', body,
+    }), { UNISAT_API_KEY: 'test-only' });
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(result.sufficient, true);
+    assert.equal(result.safeSats, record.satoshi);
+    assert.equal(result.utxo[0].txid, record.txid);
+    assert.equal(result.utxo[0].isLowFee, false);
+    assert.ok(calls.includes(`/v1/indexer/utxo/${record.txid}/0`));
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test('refuses duplicate outpoints in a complete spendable-UTXO confirmation page', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
