@@ -660,6 +660,10 @@ test('keeps classic BRC-20 and Runes on their selected networks while rejecting 
       assert.equal(url.origin, 'https://open-api-fractal.unisat.io');
       return Response.json({ code: 0, data: { start: 0, total: 1, utxo: [{ address, txid: 'b'.repeat(64), vout: 1, satoshi: 1200, confirmations: 4, runes: [{ runeid: '1:1', amount: '250' }] }] } });
     }
+    if (url.pathname.includes('/runes/utxo/') && url.pathname.endsWith('/1/balance')) {
+      assert.equal(url.origin, 'https://open-api-fractal.unisat.io');
+      return Response.json({ code: 0, data: [{ runeid: '1:1', amount: '250' }] });
+    }
     throw new Error(`Unexpected wallet protocol URL: ${url}`);
   };
   try {
@@ -684,7 +688,7 @@ test('keeps classic BRC-20 and Runes on their selected networks while rejecting 
     assert.equal(runeResponse.status, 200);
     assert.equal(runeUtxos.runeid, '1:1');
     assert.deepEqual(runeUtxos.utxo[0].runes, [{ runeid: '1:1', amount: '250' }]);
-    assert.deepEqual(authHeaders, ['Bearer bitcoin-test-only', 'Bearer fractal-test-only']);
+    assert.deepEqual(authHeaders, ['Bearer bitcoin-test-only', 'Bearer fractal-test-only', 'Bearer fractal-test-only']);
     assert.equal(JSON.stringify(brc20).includes('test-only'), false);
     assert.equal(JSON.stringify(runeUtxos).includes('test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
