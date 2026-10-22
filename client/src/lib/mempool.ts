@@ -172,7 +172,7 @@ export async function getUtxoBalanceSummary(network: string, address: string): P
 export type AddressUtxoInventoryProgress = { scannedCount: number; totalCount: number };
 export type AddressUtxoInventoryScan = AddressUtxoInventoryProgress;
 type AddressUtxoInventoryPage = {
-  chain?: string; address?: string; cursor?: number; nextCursor?: number; total?: number; scannedCount?: number; utxo?: unknown[];
+  chain?: string; address?: string; cursor?: number; nextCursor?: number; total?: number; totalKnown?: boolean; hasMore?: boolean; scannedCount?: number; utxo?: unknown[];
 };
 const ADDRESS_UTXO_PAGE_SIZE = 25;
 const MAX_ADDRESS_UTXO_PAGES = 40_000;
@@ -187,6 +187,7 @@ export async function scanAddressUtxoInventory(network: string, address: string,
   let cursor = 0;
   let scannedCount = 0;
   let totalCount: number | null = null;
+  let totalCountKnown: boolean | null = null;
   let requestWindowStartedAt = Date.now();
   let requestsInWindow = 0;
   const seenInventoryOutpoints = new Set<string>();
@@ -204,12 +205,15 @@ export async function scanAddressUtxoInventory(network: string, address: string,
     const pageScannedCount = page.scannedCount;
     const nextCursor = page.nextCursor;
     const pageTotal = page.total;
+    const pageTotalKnown = typeof page.totalKnown === "boolean" ? page.totalKnown : !(pageScannedCount === ADDRESS_UTXO_PAGE_SIZE && pageTotal === nextCursor! + 1);
+    const hasMore = typeof page.hasMore === "boolean" ? page.hasMore : (pageTotalKnown ? nextCursor! < pageTotal! : pageScannedCount === ADDRESS_UTXO_PAGE_SIZE);
     if (
       page.chain !== chain || page.address !== address || page.cursor !== cursor || !Array.isArray(pageRows) ||
       !Number.isSafeInteger(pageScannedCount) || pageScannedCount! < 0 || pageScannedCount! > ADDRESS_UTXO_PAGE_SIZE ||
       !Number.isSafeInteger(nextCursor) || nextCursor !== cursor + pageScannedCount! ||
       !Number.isSafeInteger(pageTotal) || pageTotal! < nextCursor! || pageRows.length !== pageScannedCount! ||
-      (totalCount !== null && pageTotal !== totalCount)
+      typeof pageTotalKnown !== "boolean" || typeof hasMore !== "boolean" ||
+      (totalCountKnown === true && pageTotalKnown && pageTotal !== totalCount)
     ) {
       throw new Error("L’indexeur n’a pas confirmé une page d’inventaire UTXO cohérente. Les lignes partielles ne sont pas comptées.");
     }
@@ -236,13 +240,13 @@ export async function scanAddressUtxoInventory(network: string, address: string,
 
     const confirmedPageCount = pageScannedCount!;
     const confirmedNextCursor = nextCursor!;
-    const confirmedTotal = pageTotal!;
     scannedCount += confirmedPageCount;
-    totalCount = confirmedTotal;
-    options.onProgress?.({ scannedCount, totalCount: confirmedTotal });
-    if (confirmedNextCursor === confirmedTotal) return { scannedCount, totalCount: confirmedTotal };
+    if (pageTotalKnown) { totalCount = pageTotal!; totalCountKnown = true; }
+    else if (totalCountKnown !== true) { totalCount = pageTotal!; totalCountKnown = false; }
+    options.onProgress?.({ scannedCount, totalCount: totalCount ?? scannedCount });
+    if (!hasMore) return { scannedCount, totalCount: scannedCount };
     if (confirmedPageCount === 0 || confirmedNextCursor === cursor) {
-      throw new Error(`Inventaire UTXO incomplet : ${scannedCount} sorties parcourues sur ${confirmedTotal}. L’indexeur n’a pas avancé.`);
+      throw new Error(`Inventaire UTXO incomplet : ${scannedCount} sorties parcourues; l’indexeur n’a pas avancé.`);
     }
     cursor = confirmedNextCursor;
   }
@@ -356,7 +360,7 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     const query = new URLSearchParams({ chain, address, cursor: String(cursor), size: String(SPENDABLE_UTXO_PAGE_SIZE) });
     if (options.mobile) query.set("mobile", "1");
     type SpendableUtxoPage = {
-      chain?: string; address?: string; cursor?: number; nextCursor?: number; total?: number; scannedCount?: number;
+      chain?: string; address?: string; cursor?: number; nextCursor?: number; total?: number; totalKnown?: boolean; hasMore?: boolean; scannedCount?: number;
       utxo?: Array<Record<string, unknown>>;
       diagnostics?: Partial<UtxoRejectionDiagnostics>;
       diagnosticsSats?: Partial<UtxoRejectionSats>;
@@ -365,18 +369,21 @@ export async function getSpendableUtxos(network: string, address: string, minimu
     const pageScannedCount = page.scannedCount;
     const nextCursor = page.nextCursor;
     const total = page.total;
+    const totalKnown = typeof page.totalKnown === "boolean" ? page.totalKnown : !(pageScannedCount === SPENDABLE_UTXO_PAGE_SIZE && total === nextCursor! + 1);
+    const hasMore = typeof page.hasMore === "boolean" ? page.hasMore : (totalKnown ? nextCursor! < total! : pageScannedCount === SPENDABLE_UTXO_PAGE_SIZE);
     if (
       page.chain !== chain || page.address !== address || page.cursor !== cursor || !Array.isArray(page.utxo) ||
       !Number.isSafeInteger(pageScannedCount) || pageScannedCount! < 0 || pageScannedCount! > SPENDABLE_UTXO_PAGE_SIZE ||
       !Number.isSafeInteger(nextCursor) || nextCursor !== cursor + pageScannedCount! ||
       !Number.isSafeInteger(total) || total! < 0 || nextCursor! > total! || page.utxo.length > pageScannedCount! ||
-      (expectedTotal !== null && total !== expectedTotal)
+      typeof totalKnown !== "boolean" || typeof hasMore !== "boolean" ||
+      (expectedTotal !== null && totalKnown && total !== expectedTotal)
     ) {
       throw new Error("The server did not confirm a consistent safe-UTXO page for this address.");
     }
     scannedCount += pageScannedCount!;
-    sourceTotal = total!;
-    expectedTotal ??= total!;
+    sourceTotal = totalKnown ? total! : null;
+    if (totalKnown) expectedTotal = total!;
     if (page.diagnostics !== undefined) {
       let rejectedOnPage = 0;
       for (const key of UTXO_REJECTION_KEYS) {
@@ -421,16 +428,16 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       seenSafeOutpoints.add(key);
     }
     collected.push(...safe.map(item => ({ ...item, sourceCursor: cursor })));
-    options.onProgress?.({ scannedCount, totalCount: sourceTotal!, safeUtxoCount: collected.length });
+    options.onProgress?.({ scannedCount, totalCount: sourceTotal ?? (hasMore ? nextCursor! + 1 : nextCursor!), safeUtxoCount: collected.length });
     const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
     if (requiredOutpoints) {
       const byOutpoint = new Map(collected.map(item => [`${item.txid.toLowerCase()}:${item.vout}`, item]));
       if (requiredOutpoints.every(outpoint => byOutpoint.has(outpoint))) return requiredOutpoints.map(outpoint => byOutpoint.get(outpoint)!);
     } else if (!collectAll && safeSats >= minimumSats) return [...collected].sort(compareSpendableUtxos);
-    if (pageScannedCount === 0 && nextCursor! < total!) {
-      throw new Error(`Safe UTXO scan is incomplete: the indexer stopped at ${scannedCount} of ${total} address outputs. No transaction was signed or broadcast.`);
+    if (pageScannedCount === 0 && hasMore) {
+      throw new Error(`Safe UTXO scan is incomplete: the indexer stopped at ${scannedCount} address outputs. No transaction was signed or broadcast.`);
     }
-    if (nextCursor === total) break;
+    if (!hasMore) break;
     cursor = nextCursor!;
   }
   const safeSats = collected.reduce((sum, item) => sum + item.satoshi, 0);
