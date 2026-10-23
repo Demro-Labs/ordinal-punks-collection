@@ -60,6 +60,11 @@ const API_BASE = (
 const wallet = () => (window as Window & { unisat?: Wallet }).unisat;
 const txidOf = (value: string | { txid?: string }) =>
   typeof value === "string" ? value : value.txid || "";
+const sameWalletAddress = (left: string, right: string) =>
+  left === right ||
+  (/^(?:bc1|tb1|bcrt1|fb1)/i.test(left) &&
+    /^(?:bc1|tb1|bcrt1|fb1)/i.test(right) &&
+    left.toLowerCase() === right.toLowerCase());
 const dataUrl = (text: string) => `data:application/json;base64,${btoa(text)}`;
 const validDecimal = (value: string) =>
   /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value) &&
@@ -290,7 +295,7 @@ export function Brc20TransferFlow({
       provider.getAccounts().catch((): string[] => []),
       provider.getChain ? provider.getChain().catch(() => undefined) : Promise.resolve(undefined),
     ]);
-    if (!activeAccounts.some(account => account.toLowerCase() === address.toLowerCase())) {
+    if (!activeAccounts.some(account => sameWalletAddress(account, address))) {
       setMessage("Connectez le wallet UniSat correspondant à l’adresse affichée avant de scanner.");
       return;
     }
