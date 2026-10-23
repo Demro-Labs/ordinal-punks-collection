@@ -118,7 +118,7 @@ export function LocalVaultPortfolioPanel({ addresses, network }: { addresses: Ad
       <div className="min-w-0"><p className="font-mono text-[9px] uppercase tracking-[.16em] text-[#70c7a0]">Ordi Wallet · four local accounts</p><h3 id="local-vault-portfolio-title" className="mt-1 font-display text-lg text-[#f3efe5]">Live protocol portfolio</h3><p className="mt-1 font-mono text-[9px] leading-4 text-[#718092]">{network === "BITCOIN_MAINNET" ? "Bitcoin" : "Fractal Bitcoin"} · read-only indexer and Mempool data · refreshed every 60 seconds</p></div>
       <button type="button" onClick={() => void refresh()} disabled={busy} className="inline-flex min-h-11 shrink-0 items-center gap-2 border border-[#3b434d] px-3 font-mono text-[9px] uppercase text-[#d9d3c6] hover:border-[#70c7a0] disabled:opacity-50" aria-label="Refresh all Ordi Wallet account data"><RefreshCw size={12} className={busy ? "animate-spin" : ""} /> Refresh all</button>
     </div>
-    <p className="mt-2 font-mono text-[9px] leading-4 text-[#9ea7b3]">Local signing is enabled only for the separately reviewed BTC/FB and single-Ordinal paths. BRC-20, BRC20-Prog, Runes and Alkanes are indexed here but are not signed by this portfolio panel.</p>
+    <p className="mt-2 font-mono text-[9px] leading-4 text-[#9ea7b3]">{network === "BITCOIN_MAINNET" ? "BRC-20 classique, BRC20-Prog, Runes et Alkanes sont affichés en lecture seule ici; les transferts utilisent leurs parcours dédiés." : "Fractal Bitcoin : BRC-20 classique, Ordinals et Runes uniquement. BRC20-Prog et Alkanes ne sont ni affichés ni proposés dans le Local Vault."} La signature locale reste soumise aux validations du parcours dédié.</p>
     {(() => {
       const allBalancesAvailable = rows.length === ADDRESS_SPECS.length && rows.every(row => row.balance !== null);
       const totalSats = allBalancesAvailable ? rows.reduce((sum, row) => sum + (row.balance?.total ?? 0), 0) : null;
@@ -151,12 +151,12 @@ export function LocalVaultPortfolioPanel({ addresses, network }: { addresses: Ad
             <p className="text-[#d9d3c6]">Confirmed / unconfirmed: <span className="text-[#9ea7b3]">{row?.balance ? (row.balance.confirmed / 100000000).toFixed(8) + " / " + (row.balance.unconfirmed / 100000000).toFixed(8) : "Unavailable"}</span></p>
             <p className="text-[#d9d3c6]">Ordinals / inscriptions: <span className="text-[#70c7a0]">{row?.inscriptions ?? "—"}</span></p>
             <p className="break-words text-[#d9d3c6]">BRC-20: <span className="text-[#9ea7b3]">{formatProtocolBalances(protocols, "brc20")}</span></p>
-            <p className="break-words text-[#d9d3c6]">BRC20-Prog: <span className="text-[#9ea7b3]">{formatProtocolBalances(protocols, "brc20Prog")}</span></p>
+            {network === "BITCOIN_MAINNET" && <p className="break-words text-[#d9d3c6]">BRC20-Prog: <span className="text-[#9ea7b3]">{formatProtocolBalances(protocols, "brc20Prog")}</span></p>}
             <p className="break-words text-[#d9d3c6]">Runes: <span className="text-[#9ea7b3]">{formatRunes(protocols)}</span></p>
-            <p className="break-words text-[#d9d3c6]">Alkanes: <span className="text-[#9ea7b3]">{formatAlkanes(protocols)}</span></p>
+            {network === "BITCOIN_MAINNET" && <p className="break-words text-[#d9d3c6]">Alkanes: <span className="text-[#9ea7b3]">{formatAlkanes(protocols)}</span></p>}
             {network === "BITCOIN_MAINNET" && <p className="break-words text-[#d9d3c6]">Alkane collections: <span className="text-[#9ea7b3]">{row?.alkaneCollections ? `${row.alkaneCollections.total}${row.alkaneCollections.names.length ? ` · ${row.alkaneCollections.names.join(", ")}` : ""}` : "—"}</span></p>}
           </div>
-          {protocols && Object.keys(protocols.errors).length > 0 && <p className="mt-2 break-words font-mono text-[8px] leading-4 text-[#e0b45f]">Unavailable: {Object.keys(protocols.errors).join(" · ")}</p>}
+          {protocols && Object.keys(protocols.errors).filter(name => network === "BITCOIN_MAINNET" || (name !== "BRC20-Prog" && name !== "Alkanes")).length > 0 && <p className="mt-2 break-words font-mono text-[8px] leading-4 text-[#e0b45f]">Unavailable: {Object.keys(protocols.errors).filter(name => network === "BITCOIN_MAINNET" || (name !== "BRC20-Prog" && name !== "Alkanes")).join(" · ")}</p>}
           {row?.errors.map(item => <p key={item} className="mt-1 break-words font-mono text-[8px] leading-4 text-[#e0b45f]">{item}</p>)}
           <div className="mt-3 border-t border-[#2c323a] pt-2">
             <p className="font-mono text-[8px] uppercase tracking-[.1em] text-[#718092]">Recent chain activity</p>
