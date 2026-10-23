@@ -5252,7 +5252,7 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  body-parser@2.4.0:
+  body-parser@2.4.0(supports-color@7.2.0):
     dependencies:
       bytes: 3.1.2
       content-type: 2.1.0
