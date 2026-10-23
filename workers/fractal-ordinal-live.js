@@ -426,20 +426,46 @@ async function uniNetwork(base, path, env, init = {}) {
 
   let payload;
   let response;
+  // Only retry idempotent reads. Never automatically replay payment, inscription,
+  // cancellation, or broadcast POST requests because their outcome may be ambiguous.
+  const retryableRead = method === 'GET';
   for (let keyIndex = 0; keyIndex < apiKeys.length; keyIndex += 1) {
     const requestHeaders = new Headers(headers);
     if (apiKeys[keyIndex]) requestHeaders.set('Authorization', 'Bearer ' + apiKeys[keyIndex]);
     let currentResponse;
-    try {
-      currentResponse = await fetch(base + path, { ...init, headers: requestHeaders });
-    } catch (error) {
-      console.warn('UniSat network fetch failed', {
+    let lastNetworkError = null;
+    const maxAttempts = retryableRead ? 3 : 1;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        currentResponse = await fetch(base + path, { ...init, headers: requestHeaders });
+        lastNetworkError = null;
+      } catch (error) {
+        lastNetworkError = error;
+        if (!retryableRead || attempt + 1 >= maxAttempts) break;
+        const delayMs = 200 * (2 ** attempt);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        continue;
+      }
+      if (currentResponse.ok || !retryableRead ||
+          (currentResponse.status !== 429 && currentResponse.status < 500)) break;
+      if (attempt + 1 < maxAttempts) {
+        const retryAfter = Number(currentResponse.headers.get('Retry-After'));
+        const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(1500, retryAfter * 1000)
+          : 200 * (2 ** attempt);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+    if (lastNetworkError) {
+      console.warn('UniSat network fetch failed after retry attempts', {
         network,
         path,
-        errorName: error instanceof Error ? error.name : 'UnknownError',
+        errorName: lastNetworkError instanceof Error ? lastNetworkError.name : 'UnknownError',
       });
+      if (retryableRead && keyIndex + 1 < apiKeys.length) continue;
       throw new Error('UniSat network request failed');
     }
+    if (!currentResponse) throw new Error('UniSat network request failed');
 
     let upstreamCode = null;
     if (!currentResponse.ok) {
@@ -451,13 +477,14 @@ async function uniNetwork(base, path, env, init = {}) {
       } catch {}
     }
 
-    if (currentResponse.status === 403 && keyIndex + 1 < apiKeys.length) {
-      // UniSat can return 403 for quota exhaustion or key-specific access denial.
-      // Retry only with a configured key for this exact same network.
-      // Never cross-use Bitcoin and Fractal credentials, or expose either key to clients.
-      console.warn('UniSat API returned 403; trying configured same-network fallback key', {
+    if ((currentResponse.status === 403 || currentResponse.status === 429 ||
+         (retryableRead && currentResponse.status >= 500)) && keyIndex + 1 < apiKeys.length) {
+      // Try only a configured fallback key for the same network after access/quota
+      // errors or a persistent transient upstream failure. Never cross-use BTC/FB keys.
+      console.warn('UniSat API transient/access error; trying same-network fallback key', {
         network,
         path,
+        status: currentResponse.status,
         upstreamCode,
         requestId: currentResponse.headers.get('x-request-id') || currentResponse.headers.get('cf-ray') || null,
       });
