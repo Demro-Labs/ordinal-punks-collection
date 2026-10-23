@@ -60,6 +60,11 @@ const API_BASE = (
 const wallet = () => (window as Window & { unisat?: Wallet }).unisat;
 const txidOf = (value: string | { txid?: string }) =>
   typeof value === "string" ? value : value.txid || "";
+const sameWalletAddress = (left: string, right: string) =>
+  left === right ||
+  (/^(?:bc1|tb1|bcrt1|fb1)/i.test(left) &&
+    /^(?:bc1|tb1|bcrt1|fb1)/i.test(right) &&
+    left.toLowerCase() === right.toLowerCase());
 const dataUrl = (text: string) => `data:application/json;base64,${btoa(text)}`;
 const validDecimal = (value: string) =>
   /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value) &&
@@ -285,8 +290,19 @@ export function Brc20TransferFlow({
   const scanBrc20Inscriptions = async () => {
     const provider = wallet();
     if (!provider?.getInscriptions) { setMessage("UniSat ne fournit pas getInscriptions. Mettez le portefeuille à jour."); return; }
-    const activeAccounts: string[] = provider.getAccounts ? await provider.getAccounts().catch((): string[] => []) : [];
-    if (!activeAccounts?.includes(address)) { setMessage("Connectez le wallet UniSat correspondant à l’adresse affichée avant de scanner."); return; }
+    if (!provider.getAccounts) { setMessage("UniSat ne fournit pas getAccounts. Mettez le portefeuille à jour avant de scanner."); return; }
+    const [activeAccounts, activeChain] = await Promise.all([
+      provider.getAccounts().catch((): string[] => []),
+      provider.getChain ? provider.getChain().catch(() => undefined) : Promise.resolve(undefined),
+    ]);
+    if (!activeAccounts.some(account => sameWalletAddress(account, address))) {
+      setMessage("Connectez le wallet UniSat correspondant à l’adresse affichée avant de scanner.");
+      return;
+    }
+    if (activeChain?.enum && activeChain.enum !== network) {
+      setMessage(`Le réseau UniSat (${activeChain.enum}) ne correspond pas au réseau sélectionné (${network}). Changez de réseau puis relancez le scan.`);
+      return;
+    }
     setBusyAction("scanning");
     setMessage("Lecture des inscriptions transférables depuis l’indexeur UniSat sécurisé…");
     setScannedInscriptions([]);
@@ -297,7 +313,21 @@ export function Brc20TransferFlow({
       let total: number | null = null;
       for (let start = 0; start < 10_000; ) {
         const query = new URLSearchParams({ address, ticker, chain: network, start: String(start), limit: String(pageSize) });
-        const response = await fetch(`${API_BASE}/api/brc20/transferable?${query}`, { cache: "no-store", headers: { Accept: "application/json" } });
+        // Retry transient Worker/UniSat failures without retrying client/auth errors.
+        let response: Response | null = null;
+        let lastFetchError: unknown = null;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          response = null;
+          try {
+            const candidate = await fetch(`${API_BASE}/api/brc20/transferable?${query}`, { cache: "no-store", headers: { Accept: "application/json" } });
+            response = candidate;
+            if (candidate.ok || (candidate.status !== 429 && candidate.status < 500)) break;
+          } catch (cause) {
+            lastFetchError = cause;
+          }
+          if (attempt < 2) await new Promise(resolve => window.setTimeout(resolve, 350 * (attempt + 1)));
+        }
+        if (!response) throw new Error(lastFetchError instanceof Error ? lastFetchError.message : "Le Worker BRC-20 est temporairement inaccessible après trois tentatives.");
         const payload = await response.json().catch(() => null) as {
           network?: string; address?: string; ticker?: string; start?: number; total?: number;
           detail?: Array<{ inscriptionId?: string; amount?: string }>; error?: string;
@@ -877,7 +907,12 @@ export function Brc20TransferFlow({
     }
     clearProgress();
     setValidatedRecipient("");
-    setMessage("Unpaid draft discarded. No payment was requested.");
+    setAmountToTransfer("");
+    setConfirmed(false);
+    setOwnershipProofKey(null);
+    setPaymentPreflight(null);
+    setTransferFeePreflight(null);
+    setMessage("Brouillon local non payé effacé. Aucun paiement n’a été demandé par cette interface. Le service peut encore conserver l’ordre non payé : vérifiez son état avant de créer un nouveau reçu.");
   };
   const startAnotherTransfer = () => {
     clearProgress();
@@ -1034,6 +1069,21 @@ export function Brc20TransferFlow({
           </span>
         </label>
       </div>
+      {progress && nextAction === "pay" && !progress.paymentStarted && !progress.paymentTxid && !progress.inscriptionId && (
+        <div className="mt-2 border border-[#d99a54]/40 p-2">
+          <p className="font-mono text-[9px] leading-4 text-[#9ea7b3]">
+            Un reçu non payé existe déjà : le montant est verrouillé pour empêcher de modifier un ordre déjà créé. Si aucun paiement n’a été envoyé, vous pouvez effacer le brouillon local pour saisir un nouveau montant.
+          </p>
+          <button
+            type="button"
+            onClick={discardUnpaidOrder}
+            disabled={Boolean(busyAction)}
+            className="mt-2 min-h-10 border border-[#d99a54] px-3 py-2 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-40"
+          >
+            Déverrouiller le montant · effacer le brouillon non payé
+          </button>
+        </div>
+      )}
       {(progress?.inscriptionId || selectedInscriptionId) && validatedRecipient !== recipient.trim() && recipient.trim() && (
         <button
           type="button"
@@ -1157,12 +1207,6 @@ export function Brc20TransferFlow({
             Masquer ce reçu (interface uniquement)
           </button>
         </>
-      )}
-      {progress && nextAction === "pay" && (
-        <button type="button" onClick={discardUnpaidOrder} disabled={Boolean(busyAction)}
-          className="mt-2 w-full font-mono text-[9px] uppercase text-[#a45e54] disabled:opacity-40">
-          Discard unpaid draft
-        </button>
       )}
       {progress && (
         <p className="mt-2 break-all font-mono text-[9px] text-[#718092]">
