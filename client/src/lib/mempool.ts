@@ -213,6 +213,8 @@ export async function scanAddressUtxoInventory(network: string, address: string,
       !Number.isSafeInteger(nextCursor) || nextCursor !== cursor + pageScannedCount! ||
       !Number.isSafeInteger(pageTotal) || pageTotal! < nextCursor! || pageRows.length !== pageScannedCount! ||
       typeof pageTotalKnown !== "boolean" || typeof hasMore !== "boolean" ||
+      (pageTotalKnown && hasMore !== (nextCursor! < pageTotal!)) ||
+      (!pageTotalKnown && hasMore !== (pageScannedCount === ADDRESS_UTXO_PAGE_SIZE)) ||
       (totalCountKnown === true && pageTotalKnown && pageTotal !== totalCount)
     ) {
       throw new Error("L’indexeur n’a pas confirmé une page d’inventaire UTXO cohérente. Les lignes partielles ne sont pas comptées.");
@@ -378,6 +380,8 @@ export async function getSpendableUtxos(network: string, address: string, minimu
       !Number.isSafeInteger(nextCursor) || nextCursor !== cursor + pageScannedCount! ||
       !Number.isSafeInteger(total) || total! < 0 || nextCursor! > total! || page.utxo.length > pageScannedCount! ||
       typeof totalKnown !== "boolean" || typeof hasMore !== "boolean" ||
+      (totalKnown && hasMore !== (nextCursor! < total!)) ||
+      (!totalKnown && hasMore !== (pageScannedCount === SPENDABLE_UTXO_PAGE_SIZE)) ||
       (expectedTotal !== null && totalKnown && total !== expectedTotal)
     ) {
       throw new Error("The server did not confirm a consistent safe-UTXO page for this address.");
