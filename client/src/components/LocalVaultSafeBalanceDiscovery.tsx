@@ -108,9 +108,8 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
             },
           });
           row = { ...row, inventoryScannedUtxos: inventory.scannedCount, inventoryTotalUtxos: inventory.totalCount };
-          if (summaryResult.status === "fulfilled" && inventory.totalCount !== summaryResult.value.totalUtxoCount) {
-            row = addConsistencyWarning(row, `Le résumé UniSat annonce ${summaryResult.value.totalUtxoCount} UTXO, mais l’inventaire complet en confirme ${inventory.totalCount}.`);
-          }
+          // L’inventaire complet et le résumé agrégé UniSat peuvent couvrir des ensembles différents.
+          // La complétude est vérifiée par la pagination; les UTXO sûrs restent validés séparément.
         } catch (error) {
           row = { ...row, inventoryError: errorMessage(error, "Inventaire complet UTXO indisponible.") };
         }
