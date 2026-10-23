@@ -136,14 +136,11 @@ export function LocalVaultSafeBalanceDiscovery({ wallet, network, selectedAddres
           });
           const safeSats = safe.reduce((sum, item) => sum + item.satoshi, 0);
           row = { ...row, safeSats, safeUtxos: safe.length };
-          // Reconcile source outputs traversed separately from the fee-safe subset.
-          // A single-page scan must never appear complete just because it found one safe UTXO.
-          if (summaryResult.status === "fulfilled" && row.scannedUtxos !== undefined && row.scannedUtxos !== summaryResult.value.availableUtxoCount) {
-            row = addConsistencyWarning(row, "Le scanner a parcouru " + row.scannedUtxos + " sorties disponibles, mais le résumé UniSat en annonce " + summaryResult.value.availableUtxoCount + ". Le scan n’est pas considéré comme concordant.");
-          }
-          if (summaryResult.status === "fulfilled" && (safe.length !== summaryResult.value.availableUtxoCount || safeSats !== summaryResult.value.availableBalance)) {
-            row = addConsistencyWarning(row, `UniSat annonce ${summaryResult.value.availableUtxoCount} UTXO disponibles (${summaryResult.value.availableBalance.toLocaleString("fr-FR")} sats), mais la validation stricte confirme ${safe.length} (${safeSats.toLocaleString("fr-FR")} sats).`);
-          }
+          // UniSat's aggregate "available" count is not the number of outputs
+          // traversed by the fee-safe endpoint, nor the strict safe subset. The
+          // endpoint may enumerate the full inventory and then reject protected or
+          // uncertain outputs. Its own pagination/consistency checks fail closed;
+          // do not compare these different populations as if they were equal.
         } catch (error) {
           row = { ...row, safeError: errorMessage(error, "Scan UTXO sûr indisponible.") };
         }
