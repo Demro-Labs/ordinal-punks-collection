@@ -874,6 +874,80 @@ function minimumSpendableSatsForScript(scriptPk) {
   return 600; // Unknown/non-standard script: keep the conservative floor.
 }
 
+async function utxoAvailabilityDiagnostics(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  const chain = url.searchParams.get('chain') || '';
+  const address = url.searchParams.get('address') || '';
+  if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address)) {
+    return Response.json({ error: 'Invalid UTXO diagnostic query.', code: 'INVALID_QUERY' }, { status: 400, headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+  }
+  const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
+  const noStore = { ...corsHeaders, 'Cache-Control': 'no-store' };
+  try {
+    // Diagnostic only: this endpoint never returns fee candidates or spend authorization.
+    // Compare the complete inventory against UniSat's available inventory, then explain
+    // missing outputs from the metadata UniSat provides. Unknown metadata remains unknown.
+    const [all, available] = await Promise.all([
+      uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=0&size=25`, env, { signal: AbortSignal.timeout(10000) }),
+      uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=0&size=25`, env, { signal: AbortSignal.timeout(10000) }),
+    ]);
+    if (!Array.isArray(all?.utxo) || !Array.isArray(available?.utxo) || all.utxo.length > 25 || available.utxo.length > 25) {
+      throw new SpendableUtxoError('UTXO_DIAGNOSTIC_INVALID_RESPONSE');
+    }
+    const keyOf = item => {
+      const txid = typeof item?.txid === 'string' ? item.txid.toLowerCase() : '';
+      const vout = Number(item?.vout);
+      return /^[a-f0-9]{64}$/.test(txid) && Number.isSafeInteger(vout) && vout >= 0 ? `${txid}:${vout}` : null;
+    };
+    const allByKey = new Map();
+    for (const item of all.utxo) {
+      const key = keyOf(item);
+      if (!key || allByKey.has(key)) throw new SpendableUtxoError('UTXO_DIAGNOSTIC_INVALID_INVENTORY');
+      allByKey.set(key, item);
+    }
+    const availableKeys = new Set();
+    for (const item of available.utxo) {
+      const key = keyOf(item);
+      if (!key || availableKeys.has(key)) throw new SpendableUtxoError('UTXO_DIAGNOSTIC_INVALID_AVAILABLE');
+      availableKeys.add(key);
+    }
+    const counts = { inscription: 0, runes: 0, alkanes: 0, spent: 0, unconfirmed: 0, belowDust: 0, metadataUnknown: 0, otherUnavailable: 0 };
+    const sats = Object.fromEntries(Object.keys(counts).map(key => [key, 0]));
+    for (const [key, item] of allByKey) {
+      if (availableKeys.has(key)) continue;
+      const satoshi = normalizeSatoshiValue(item);
+      const value = Number.isSafeInteger(satoshi) && satoshi >= 0 ? satoshi : 0;
+      const height = Number(item?.height);
+      let reason = 'otherUnavailable';
+      if (!Array.isArray(item?.inscriptions)) reason = 'metadataUnknown';
+      else if (item.inscriptions.length > 0) reason = 'inscription';
+      else if (Array.isArray(item?.runes) && item.runes.length > 0) reason = 'runes';
+      else if (Array.isArray(item?.alkanes) && item.alkanes.length > 0) reason = 'alkanes';
+      else if (item?.isSpent === true) reason = 'spent';
+      else if (!Number.isSafeInteger(height) || height <= 0) reason = 'unconfirmed';
+      else if (!Number.isSafeInteger(satoshi) || satoshi < 294) reason = 'belowDust';
+      else if (item?.isSpent !== false || !Array.isArray(item?.runes) || !Array.isArray(item?.alkanes)) reason = 'metadataUnknown';
+      counts[reason] += 1;
+      sats[reason] += value;
+    }
+    const sourceTotal = value => typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : null;
+    const allTotal = sourceTotal(all.total);
+    const availableTotal = sourceTotal(available.total);
+    return Response.json({
+      chain, inventoryScanned: all.utxo.length, availableScanned: available.utxo.length,
+      inventoryTotal: allTotal, availableTotal,
+      inventoryHasMore: allTotal === null ? all.utxo.length === 25 : all.utxo.length < allTotal,
+      availableHasMore: availableTotal === null ? available.utxo.length === 25 : available.utxo.length < availableTotal,
+      missingCount: [...allByKey.keys()].filter(key => !availableKeys.has(key)).length,
+      counts, sats, diagnosticOnly: true,
+      note: 'Première page uniquement si hasMore est vrai. Ce diagnostic ne déverrouille aucun UTXO et ne donne aucune autorisation de dépense.'
+    }, { headers: noStore });
+  } catch (error) {
+    const code = safeUniSatFailureCode(error);
+    return Response.json({ error: 'Diagnostic de disponibilité UniSat indisponible.', code: `UTXO_DIAGNOSTIC_${code}` }, { status: 503, headers: noStore });
+  }
+}
+
 async function spendableUtxos(request, env, corsHeaders) {
   const url = new URL(request.url);
   const chain = url.searchParams.get('chain') || '';
