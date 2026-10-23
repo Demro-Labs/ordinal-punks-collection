@@ -1944,10 +1944,14 @@ export default {
       const normalizeTransferable = rawDetail => {
         if (!Array.isArray(rawDetail)) throw new Error('Invalid UniSat transferable inscription list');
         return rawDetail.map(item => {
+          // UniSat has returned the BRC-20 amount under different fields across
+          // transferable-inscription and address-info responses. Accept only a
+          // validated decimal string; never infer an amount from inscription text.
+          const amount = item?.data?.amt ?? item?.amt ?? item?.amount;
           if (typeof item?.inscriptionId !== 'string' || !/^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId) ||
-              typeof item?.data?.amt !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(item.data.amt) ||
-              item.data.amt === '0' || /^0+\.0+$/.test(item.data.amt)) throw new Error('Invalid UniSat transferable inscription item');
-          return { inscriptionId: item.inscriptionId.toLowerCase(), amount: item.data.amt };
+              typeof amount !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(amount) ||
+              amount === '0' || /^0+\.0+$/.test(amount)) throw new Error('Invalid UniSat transferable inscription item');
+          return { inscriptionId: item.inscriptionId.toLowerCase(), amount };
         });
       };
       try {
@@ -1958,9 +1962,10 @@ export default {
           const total = Number(source?.total ?? normalized.length);
           if (!Number.isSafeInteger(sourceStart) || sourceStart !== start || !Number.isSafeInteger(total) || total < 0 || normalized.length > limit || total < start + normalized.length) throw new Error('Invalid UniSat transferable-inscriptions response');
           return Response.json({ network: chain, address, ticker, start, total, detail: normalized, refreshedAt: new Date().toISOString() }, { headers: noStore });
-        } catch (cause) {
-          if (start !== 0) throw cause;
-          console.warn('UniSat transferable-inscriptions endpoint failed; trying address info fallback', { network: chain });
+        } catch {
+          // Retry the documented address-info fallback for every requested page.
+          // Otherwise page 1 may load while page 2 fails, leaving the scan incomplete.
+          console.warn('UniSat transferable-inscriptions endpoint failed; trying address info fallback', { network: chain, start });
         }
         const info = await uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/brc20/${encodeURIComponent(ticker)}/info`, env, { signal: AbortSignal.timeout(8000) });
         const normalized = normalizeTransferable(info?.transferableInscriptions);
