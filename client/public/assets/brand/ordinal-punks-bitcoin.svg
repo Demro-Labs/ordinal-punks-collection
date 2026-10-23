@@ -1,8 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title">
-  <title id="title">Ordinal Punks — Bitcoin orange</title>
-  <rect width="160" height="160" fill="#F7931A"/>
-  <path fill="#FFFFFF" shape-rendering="crispEdges" d="
-    M45 14 H105 V21 H114 V29 H121 V58 H39 V29 H45 Z
-    M32 65 H54 V72 H61 V79 H68 V72 H75 V79 H82 V79 H89 V72 H96 V65 H117 V72 H124 V79 H131 V87 H138 V120 H131 V128 H124 V136 H76 V160 H32 V87 H25 V79 H32 Z
-  "/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-labelledby="title">
+  <title id="title">Ordinal Punks — original Bitcoin orange pixel logo</title>
+  <defs>
+    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FB8C04"/>
+      <stop offset="0.52" stop-color="#FF8C00"/>
+      <stop offset="1" stop-color="#FB8C04"/>
+    </linearGradient>
+  </defs>
+  <rect width="1254" height="1254" fill="url(#orange)"/>
+  <g fill="#FFFFFF" shape-rendering="crispEdges">
+    <path d="M304 225 H360 V168 H420 V111 H836 V166 H838 V168 H894 V224 H948 V454 H304 Z"/>
+    <path d="M419 510 H248 V677 H304 V1254 H595 V1070 L597 1068 H833 V1007 L894 1006 V947 L948 946 V622 H835 L834 565 H776 L775 510 H650 V564 L597 565 L598 620 L596 622 H477 L476 565 H420 Z"/>
+  </g>
 </svg>
