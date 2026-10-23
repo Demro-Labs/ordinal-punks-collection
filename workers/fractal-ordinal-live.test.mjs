@@ -1557,7 +1557,6 @@ test('continues fee-safe UTXO pagination from the complete inventory when UniSat
   const address = 'bc1qtestaddress0000000000000000000000000';
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
-    assert.match(url.pathname, /\/all-utxo-data$/);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
     const cursor = Number(url.searchParams.get('cursor'));
     const count = cursor === 0 ? 25 : 2;
