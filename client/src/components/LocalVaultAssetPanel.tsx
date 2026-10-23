@@ -110,7 +110,7 @@ export function LocalVaultAssetPanel({
           <h3 className="mt-1 font-display text-base text-[#f3efe5]">Deux étapes si le protocole l’exige</h3>
           <p className="mt-1 font-mono text-[10px] leading-5 text-[#9ea7b3]">Pour BRC-20 classique : préparer et payer la création de l’inscription TRANSFER, vérifier qu’elle est indexée, puis effectuer une seconde revue, signature locale et diffusion vers le destinataire. Pour BTC/FB et Runes, la préparation construit la transaction propre au protocole, sans inventer d’inscription TRANSFER.</p>
         </article>
-        <p className="md:col-span-2 border border-[#a45e54]/40 p-2 font-mono text-[9px] leading-4 text-[#e6a69b]">BRC20-Prog et Alkanes restent bloqués dans le Local Vault tant que leurs constructeurs dédiés et validations indépendantes ne sont pas disponibles. Ne pas utiliser un signataire générique. Les UTXO contenant une inscription, Rune ou Alkane ne doivent jamais payer les frais.</p>
+        {network === "BITCOIN_MAINNET" && <p className="md:col-span-2 border border-[#a45e54]/40 p-2 font-mono text-[9px] leading-4 text-[#e6a69b]">BRC20-Prog et Alkanes restent bloqués dans le Local Vault tant que leurs constructeurs dédiés et validations indépendantes ne sont pas disponibles. Ne pas utiliser un signataire générique. Les UTXO contenant une inscription, Rune ou Alkane ne doivent jamais payer les frais.</p>}
       </div>
     <LocalVaultBrc20TransferPanel wallet={wallet} network={network} addressType={addressType} site={site} completedInscriptionId={brc20CompletedId} onCreated={(inscriptionId, target) => {
       void (async () => {

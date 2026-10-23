@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, ExternalLink, ShieldCheck, Wallet, Coins, Image, Layers, LockKeyhole } from "lucide-react";
 import type { LocalVaultSiteSession } from "@/lib/local-vault-bridge";
 
@@ -11,6 +11,9 @@ export function TransactionControlCenter({ session }: { session: LocalVaultSiteS
   const explorerAddress = `${explorerBase(session.network)}/address/${encodeURIComponent(address)}`;
   type TransferAsset = "native" | "ordinal" | "brc20" | "runes" | "brc20prog" | "alkanes";
   const [selectedAsset, setSelectedAsset] = useState<TransferAsset>("native");
+  useEffect(() => {
+    if (session.network !== "BITCOIN_MAINNET" && (selectedAsset === "brc20prog" || selectedAsset === "alkanes")) setSelectedAsset("native");
+  }, [session.network, selectedAsset]);
   const transferChoices: { id: TransferAsset; label: string; detail: string; icon: typeof Coins }[] = [
     { id: "native", label: session.network === "BITCOIN_MAINNET" ? "BTC" : "FB", detail: "Paiement natif", icon: Coins },
     { id: "ordinal", label: "Ordinals", detail: "Inscription existante", icon: Image },
@@ -19,6 +22,7 @@ export function TransactionControlCenter({ session }: { session: LocalVaultSiteS
     { id: "brc20prog", label: "BRC20-Prog", detail: "Constructeur non validé", icon: LockKeyhole },
     { id: "alkanes", label: "Alkanes", detail: "Constructeur non validé", icon: LockKeyhole },
   ];
+  const visibleTransferChoices = transferChoices.filter(choice => session.network === "BITCOIN_MAINNET" || (choice.id !== "brc20prog" && choice.id !== "alkanes"));
   const blocked = selectedAsset === "brc20prog" || selectedAsset === "alkanes";
   const target = selectedAsset === "ordinal" ? "#local-vault-assets"
     : selectedAsset === "brc20" ? "#local-vault-brc20-transfer"
@@ -54,7 +58,7 @@ export function TransactionControlCenter({ session }: { session: LocalVaultSiteS
           <span className="rounded border border-[#27332f] px-2 py-1 font-mono text-[9px] text-[#9ea7b3]">{networkLabel}</span>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
-          {transferChoices.map(choice => {
+          {visibleTransferChoices.map(choice => {
             const Icon = choice.icon;
             const isBlocked = choice.id === "brc20prog" || choice.id === "alkanes";
             return <button key={choice.id} type="button" aria-pressed={selectedAsset === choice.id} onClick={() => setSelectedAsset(choice.id)} className={`min-h-[76px] rounded-lg border p-3 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#d7b77b] ${selectedAsset === choice.id ? "border-[#d7b77b] bg-[#d7b77b]/10" : "border-[#27332f] bg-[#10151a] hover:border-[#56616d]"}`}>
