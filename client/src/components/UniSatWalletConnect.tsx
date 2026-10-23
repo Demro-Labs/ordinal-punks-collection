@@ -252,6 +252,23 @@ function describeWalletError(cause: unknown, fallback: string) {
 
 export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "pokedex" } = {}) {
   const [providerAvailable, setProviderAvailable] = useState(false);
+  // Browser extensions can inject their provider after React mounts.
+  // Keep the connect control in sync without requesting account access until
+  // the user explicitly clicks it.
+  useEffect(() => {
+    let attempts = 0;
+    const refreshAvailability = () => {
+      const available = Boolean(getProvider()?.requestAccounts);
+      setProviderAvailable(current => current === available ? current : available);
+      return available;
+    };
+    if (refreshAvailability()) return;
+    const poll = window.setInterval(() => {
+      attempts += 1;
+      if (refreshAvailability() || attempts >= 80) window.clearInterval(poll);
+    }, 250);
+    return () => window.clearInterval(poll);
+  }, []);
   const [localVaultSession, setLocalVaultSession] = useState<LocalVaultSiteSession | null>(() => readLocalVaultSiteSession(site));
   const [address, setAddress] = useState<string | null>(null);
   const [chain, setChain] = useState<UniSatChain | null>(null);
