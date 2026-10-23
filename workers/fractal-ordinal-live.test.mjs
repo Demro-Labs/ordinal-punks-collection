@@ -1176,7 +1176,7 @@ test('verifies every candidate through the detail endpoint even when inventory m
     if (url.pathname.endsWith('/all-utxo-data')) {
       return Response.json({ code: 0, data: { cursor: 0, total: records.length, utxo: records } });
     }
-    const match = url.pathname.match(/^\\/v1\\/indexer\\/utxo\\/([0-9a-f]{64})\\/(\\d+)$/);
+    const match = url.pathname.match(/^\/v1\/indexer\/utxo\/([0-9a-f]{64})\/(\d+)$/);
     if (match) {
       const record = records.find(item => item.txid === match[1]);
       if (record) return Response.json({ code: 0, data: { ...record, isSpent: false } });
@@ -1575,7 +1575,7 @@ test('continues fee-safe UTXO pagination from the complete inventory when UniSat
       isOpInRBF: false,
     }));
     if (url.pathname.endsWith('/all-utxo-data')) return Response.json({ code: 0, data: { cursor, utxo } });
-    const match = url.pathname.match(/^\\/v1\\/indexer\\/utxo\\/([0-9a-f]{64})\\/(\\d+)$/);
+    const match = url.pathname.match(/^\/v1\/indexer\/utxo\/([0-9a-f]{64})\/(\d+)$/);
     if (match) {
       const record = utxo.find(item => item.txid === match[1]);
       if (record) return Response.json({ code: 0, data: { ...record, isSpent: false } });
