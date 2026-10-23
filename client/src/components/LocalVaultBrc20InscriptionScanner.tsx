@@ -4,7 +4,7 @@ import { validateMempoolAddress } from "@/lib/mempool";
 import type { OrdiNetwork } from "@/lib/ordi-wallet";
 
 type Item = { inscriptionId: string; amount: string };
-const API = (import.meta.env.VITE_LIVE_DATA_URL || "https://fractal-ordinal-live.servostar23.workers.dev/api/live-inscription").replace(/\\/api\\/live-inscription\\/?$/, "");
+const API = (import.meta.env.VITE_LIVE_DATA_URL || "https://fractal-ordinal-live.servostar23.workers.dev/api/live-inscription").replace("/api/live-inscription", "");
 
 export function LocalVaultBrc20InscriptionScanner({ address, network, ticker, recipient, disabled, onSelect }: {
   address: string; network: OrdiNetwork; ticker: string; recipient: string; disabled?: boolean;
@@ -32,7 +32,7 @@ export function LocalVaultBrc20InscriptionScanner({ address, network, ticker, re
         if (!Number.isSafeInteger(payload.total) || (payload.total as number) < 0 || (total !== null && total !== payload.total)) throw new Error("Le total d’inscriptions transférables est incohérent; sélection bloquée.");
         total = payload.total as number;
         for (const item of payload.detail) {
-          if (typeof item.inscriptionId !== "string" || !/^[a-f0-9]{64}i\\d+$/i.test(item.inscriptionId) || typeof item.amount !== "string" || !/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(item.amount) || !/[1-9]/.test(item.amount)) throw new Error("Une inscription transférable contient des données invalides; le résultat complet n’est pas fiable.");
+          if (typeof item.inscriptionId !== "string" || !/^[a-f0-9]{64}i[0-9]+$/i.test(item.inscriptionId) || typeof item.amount !== "string" || !/^(?:0|[1-9][0-9]*)(?:[.][0-9]+)?$/.test(item.amount) || !/[1-9]/.test(item.amount)) throw new Error("Une inscription transférable contient des données invalides; le résultat complet n’est pas fiable.");
           found.push({ inscriptionId: item.inscriptionId, amount: item.amount });
         }
         if (found.length >= total || payload.detail.length === 0) break;
