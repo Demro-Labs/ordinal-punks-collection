@@ -2164,6 +2164,10 @@ export default {
         return Response.json({ error: 'Le résumé des UTXO UniSat est temporairement indisponible.', code }, { status: 503, headers: noStore });
       }
     }
+    if (request.method === 'GET' && url.pathname === '/api/utxo-availability-diagnostics') {
+      if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
+      return await utxoAvailabilityDiagnostics(request, env, headers);
+    }
     if (request.method === 'GET' && url.pathname === '/api/spendable-utxos') {
       if (isRateLimited(request)) return Response.json({ error: 'Too many requests.' }, { status: 429, headers: { ...headers, 'Cache-Control': 'no-store', 'Retry-After': '60' } });
       try { return await spendableUtxos(request, env, headers); } catch (error) {
