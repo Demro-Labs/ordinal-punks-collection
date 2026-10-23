@@ -932,10 +932,10 @@ async function spendableUtxos(request, env, corsHeaders) {
   if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new SpendableUtxoError('INVALID_QUERY', 400);
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
   const supportsAlkanes = chain === 'bitcoin';
-  // Start from UniSat's available-UTXO inventory for fee candidates; the complete all-utxo-data
-  // inventory remains display-only. Every candidate still passes explicit metadata checks below,
-  // and unknown or contradictory asset metadata fails closed.
-  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
+  // Enumerate the complete all-utxo-data inventory so outputs omitted from UniSat's available list
+  // are still inspected. This is NOT spend authorization: every output must pass per-outpoint
+  // verification and protocol-asset checks below; unknown or contradictory metadata fails closed.
+  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
   if (!Array.isArray(source?.utxo)) throw new SpendableUtxoError('UTXO_LIST_INVALID_RESPONSE');
   const raw = source.utxo;
   if (raw.length > requestedSize) throw new SpendableUtxoError('UTXO_PAGE_OVERSIZED');
@@ -1006,17 +1006,9 @@ async function spendableUtxos(request, env, corsHeaders) {
       rejectedSats.hasInscriptionOrUnknown += satoshi;
       continue;
     }
-    // available-utxo-data is the authoritative spendable inventory. If it explicitly
-    // includes empty Runes and Alkanes arrays, plus an empty inscriptions array, we can
-    // defer the per-outpoint detail request until signing-time confirmation. This avoids
-    // one extra UniSat HTTP call for every ordinary UTXO during a 500-output scan.
-    // If either protocol marker is missing, keep the conservative detail lookup below.
-    const hasExplicitAssetFreeMarkers =
-      Array.isArray(item?.runes) && item.runes.length === 0 &&
-      (!supportsAlkanes || (Array.isArray(item?.alkanes) && item.alkanes.length === 0)) &&
-      Array.isArray(item?.inscriptions) && item.inscriptions.length === 0 &&
-      Number.isSafeInteger(Number(item?.height)) && Number(item.height) > 0 &&
-      item?.isSpent === false;
+    // Because this page comes from the complete inventory rather than UniSat's available list,
+    // never infer safety from the list alone. Verify every outpoint against UniSat's detail route.
+    const hasExplicitAssetFreeMarkers = false;
     let detail = null;
     if (!hasExplicitAssetFreeMarkers) {
       detail = await spendableUtxoStage('UTXO_DETAIL', () => uniNetwork(base, `/v1/indexer/utxo/${txid}/${vout}`, env));
