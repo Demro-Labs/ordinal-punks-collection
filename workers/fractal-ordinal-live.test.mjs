@@ -1796,7 +1796,7 @@ test('uses the Bitcoin UniSat secret for Bitcoin UTXOs without sending the Fract
     assert.equal(JSON.stringify(data).includes(address), false);
     assert.equal(JSON.stringify(data).includes('fractal-test-only'), false);
     assert.equal(JSON.stringify(data).includes('bitcoin-test-only'), false);
-    assert.deepEqual(upstreamAuthorization, ['Bearer bitcoin-test-only']);
+    assert.deepEqual(upstreamAuthorization, Array(3).fill('Bearer bitcoin-test-only'));
   } finally { globalThis.fetch = previousFetch; }
 });
 
