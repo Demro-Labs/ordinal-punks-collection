@@ -883,9 +883,10 @@ async function spendableUtxos(request, env, corsHeaders) {
   if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new SpendableUtxoError('INVALID_QUERY', 400);
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
   const supportsAlkanes = chain === 'bitcoin';
-  // Scan the complete address inventory, not only UniSat's pre-filtered available set.
-  // Every candidate must pass explicit on-chain/indexer metadata checks below; unknown metadata fails closed.
-  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
+  // Start from UniSat's available-UTXO inventory for fee candidates; the complete all-utxo-data
+  // inventory remains display-only. Every candidate still passes explicit metadata checks below,
+  // and unknown or contradictory asset metadata fails closed.
+  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
   if (!Array.isArray(source?.utxo)) throw new SpendableUtxoError('UTXO_LIST_INVALID_RESPONSE');
   const raw = source.utxo;
   if (raw.length > requestedSize) throw new SpendableUtxoError('UTXO_PAGE_OVERSIZED');
@@ -1137,7 +1138,7 @@ async function confirmSpendableUtxos(request, env, corsHeaders) {
     'UTXO_CONFIRM_AVAILABLE_SNAPSHOT_CHANGED',
   ]);
   const fetchAvailablePage = async (cursor, expectedTotal) => {
-    const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=${cursor}&size=${UTXO_CONFIRM_PAGE_SIZE}`, env));
+    const source = await spendableUtxoStage('UTXO_CONFIRM_AVAILABLE', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${UTXO_CONFIRM_PAGE_SIZE}`, env));
     const raw = source?.utxo;
     const sourceCursor = Number(source?.cursor);
     const total = Number(source?.total);
