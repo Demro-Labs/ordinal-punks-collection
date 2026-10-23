@@ -40,7 +40,6 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
   const [tx, setTx] = useState<Tx | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmedBroadcast, setConfirmedBroadcast] = useState(false);
-  const [receiptOpen, setReceiptOpen] = useState(false);
   const [proofKey, setProofKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -203,23 +202,8 @@ export function LocalVaultBrc20TransferPanel({ wallet, network, addressType, sit
     {context && (!order || (!order.paymentStarted && !order.inscriptionId)) && <LocalVaultOwnershipProof key={context} site={site} network={network} wallet={wallet} addressType={addressType} contextKey={context} onVerified={setProofKey} />}
     <LocalVaultSafeBalanceDiscovery wallet={wallet} network={network} selectedAddressType={addressType} />
     {!order && <button type="button" onClick={() => void createOrder()} disabled={busy || !selected || !positive(amount) || compare(amount, selected.availableBalance) > 0 || !recipient.trim() || !context || proofKey !== context} className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 bg-[#d99a54] px-4 font-mono text-[10px] uppercase text-[#0b0d10] disabled:opacity-40">{busy ? <Loader2 size={13} className="animate-spin" /> : <Wallet size={13} />} Préparer l’inscription de transfert (sans paiement)</button>}
-    {order && <div className="mt-3 border border-[#d99a54]/50 bg-[#0b0f13] p-3 font-mono text-[10px] leading-5">
-      <button type="button" onClick={() => setReceiptOpen(value => !value)} aria-expanded={receiptOpen} className="flex min-h-11 w-full items-center justify-between gap-2 text-left uppercase text-[#f2bd63]">
-        <span>Reçu de précommande BRC-20</span><span>{receiptOpen ? "Masquer le reçu −" : "Afficher le reçu +"}</span>
-      </button>
-      {receiptOpen && <div className="mt-2 border-t border-[#3b434d] pt-2" role="region" aria-label="Reçu de précommande BRC-20">
-        <p className="text-[#f2bd63]">Ordre: {order.orderId}</p>
-        <p className="break-all">Adresse de paiement: {order.payAddress}</p>
-        <p>Coût exact de l’ordre: {order.payAmount.toLocaleString("en-US")} sats · frais réseau séparés.</p>
-        <p>Réseau: {network === "BITCOIN_MAINNET" ? "Bitcoin mainnet" : "Fractal Bitcoin mainnet"}</p>
-        <p>Jeton et montant: {order.amount} {order.ticker}</p>
-        <p className="break-all">Destinataire prévu: {order.recipient}</p>
-        <p>État du paiement: {order.paymentStarted ? "paiement démarré — vérifier le TXID avant toute nouvelle action" : "précommande non payée"}</p>
-        {order.paymentTxid && <p className="break-all">TXID paiement: {order.paymentTxid}</p>}
-        {order.inscriptionId && <p className="break-all text-[#70c7a0]">Inscription créée: {order.inscriptionId}</p>}
-      </div>}
+    {order && <div className="mt-3 border border-[#d99a54]/50 bg-[#0b0f13] p-3 font-mono text-[10px] leading-5"><p className="text-[#f2bd63]">Ordre: {order.orderId}</p><p className="break-all">Adresse de paiement: {order.payAddress}</p><p>Coût exact de l’ordre: {order.payAmount.toLocaleString("en-US")} sats · frais réseau séparés.</p><p>Jeton: {order.amount} {order.ticker} · destinataire après inscription: {order.recipient}</p>{order.inscriptionId && <p className="break-all text-[#70c7a0]">Inscription: {order.inscriptionId}</p>}
       {!order.paymentStarted && !order.inscriptionId && !plan && <button type="button" onClick={() => void preparePayment()} disabled={busy || !context || proofKey !== context} className="mt-3 min-h-11 w-full border border-[#3b434d] px-3 uppercase disabled:opacity-40">{busy ? "Préparation…" : "Préparer et examiner le paiement local"}</button>}
-      {!order.paymentStarted && !order.inscriptionId && !(review && plan) && <button type="button" disabled className="mt-2 min-h-11 w-full border border-[#3b434d] px-3 uppercase text-[#718092] disabled:opacity-60" aria-label="Signer localement indisponible avant la préparation et la revue du PSBT">Signer localement · préparer et vérifier le PSBT d’abord</button>}
       {review && plan && !order.paymentStarted && <div className="mt-3 border border-[#3b434d] p-3"><p>Entrées: {review.inputCount} · total {review.inputSats.toLocaleString("en-US")} sats · frais {review.feeSats.toLocaleString("en-US")} sats · change {plan.changeSats.toLocaleString("en-US")} sats.</p><p className="break-all">Destination: {order.payAddress} · montant exact {order.payAmount.toLocaleString("en-US")} sats.</p><label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} className="mt-1" /><span>Je confirme le réseau, l’adresse de paiement, le montant exact et les frais séparés. Signer dans le coffre local.</span></label><button type="button" onClick={() => void signPayment()} disabled={busy || !confirmed || !context || proofKey !== context} className="mt-3 min-h-11 w-full bg-[#d99a54] px-3 uppercase text-[#0b0f13] disabled:opacity-40">{busy ? "Signature…" : "Signer localement"}</button></div>}
       {signed && !tx && !order.paymentStarted && <button type="button" onClick={() => void finalizePayment()} disabled={busy} className="mt-3 min-h-11 w-full border border-[#3b434d] px-3 uppercase">{busy ? "Finalisation…" : "Vérifier la transaction signée"}</button>}
       {tx && !order.paymentStarted && <div className="mt-3 border border-[#e0b45f]/40 p-3"><p className="break-all">TXID: {tx.txid}</p><label className="mt-2 flex min-h-11 items-start gap-2"><input type="checkbox" checked={confirmedBroadcast} onChange={e => setConfirmedBroadcast(e.target.checked)} className="mt-1 h-4 w-4" /><span>Je confirme ce TXID exact, le montant du paiement et sa diffusion irréversible sur {network}.</span></label><button type="button" onClick={() => void broadcastPayment()} disabled={busy || !confirmedBroadcast} className="mt-3 min-h-11 w-full bg-[#d99a54] px-3 uppercase text-[#0b0f13] disabled:opacity-40">{busy ? "Diffusion…" : "Diffuser le paiement de l’inscription"}</button></div>}
