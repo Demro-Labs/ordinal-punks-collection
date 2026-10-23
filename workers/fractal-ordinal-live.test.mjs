@@ -476,6 +476,34 @@ test('requires an explicit network for classic BRC-20 balances and transferable 
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('retries a transient UniSat 503 and returns real HTTP 200 when the read succeeds', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const inscriptionId = 'ab'.repeat(32) + 'i0';
+  let calls = 0;
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    assert.equal(url.origin, 'https://open-api-fractal.unisat.io');
+    assert.ok(url.pathname.endsWith('/transferable-inscriptions'));
+    calls += 1;
+    if (calls === 1) return Response.json({ code: 'temporary_unavailable' }, { status: 503 });
+    return Response.json({ code: 0, data: {
+      start: 0, total: 1,
+      detail: [{ inscriptionId, data: { amt: '12.5' } }],
+    } });
+  };
+  try {
+    const response = await worker.fetch(
+      makeRequest(`/api/brc20/transferable?address=${address}&ticker=ordi&chain=FRACTAL_BITCOIN_MAINNET&start=0&limit=100`, { ip: '192.0.2.245' }),
+      { UNISAT_API_KEY: 'test-only' },
+    );
+    const data = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(data));
+    assert.equal(data.detail[0].amount, '12.5');
+    assert.equal(calls, 2, 'the Worker must retry the transient upstream failure');
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('falls back to address info for later BRC-20 scan pages', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
