@@ -1575,7 +1575,19 @@ test('continues fee-safe UTXO pagination from the complete inventory when UniSat
       isLowFee: false,
       isOpInRBF: false,
     }));
-    return Response.json({ code: 0, data: { cursor, utxo } });
+    if (url.pathname.endsWith('/all-utxo-data')) return Response.json({ code: 0, data: { cursor, utxo } });
+    const match = url.pathname.match(/^\\/v1\\/indexer\\/utxo\\/([0-9a-f]{64})\\/(\\d+)$/);
+    if (match) {
+      const record = utxo.find(item => item.txid === match[1]);
+      if (record) return Response.json({ code: 0, data: { ...record, isSpent: false } });
+      const pageStart = Number(match[1], 16) - 1;
+      return Response.json({ code: 0, data: {
+        address, txid: match[1], vout: Number(match[2]), satoshi: 1200,
+        height: 100, scriptPk: '0014' + '22'.repeat(20), inscriptions: [], runes: [], alkanes: [],
+        isSpent: false, isLowFee: false, isOpInRBF: false,
+      }});
+    }
+    throw new Error(`Unexpected upstream URL: ${url}`);
   };
   try {
     const first = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.197' }), { UNISAT_API_KEY: 'test-only' });
