@@ -476,6 +476,35 @@ test('requires an explicit network for classic BRC-20 balances and transferable 
   } finally { globalThis.fetch = previousFetch; }
 });
 
+test('falls back to address info for later BRC-20 scan pages', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const rows = Array.from({ length: 101 }, (_, index) => ({
+    inscriptionId: 'a'.repeat(64) + 'i' + index,
+    data: { amt: String(index + 1) },
+  }));
+  const calls = [];
+  globalThis.fetch = async input => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith('/transferable-inscriptions?start=100&limit=100')) {
+      return Response.json({ code: -1, msg: 'endpoint temporarily unavailable' });
+    }
+    assert.equal(url, 'https://open-api-fractal.unisat.io/v1/indexer/address/' + address + '/brc20/ordi/info');
+    return Response.json({ code: 0, data: { transferableCount: rows.length, transferableInscriptions: rows } });
+  };
+  try {
+    const response = await worker.fetch(makeRequest('/api/brc20/transferable?address=' + address + '&ticker=ordi&chain=FRACTAL_BITCOIN_MAINNET&start=100&limit=100', { ip: '192.0.2.97' }), { UNISAT_API_KEY: 'test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.start, 100);
+    assert.equal(data.total, 101);
+    assert.equal(data.detail.length, 1);
+    assert.equal(data.detail[0].amount, '101');
+    assert.equal(calls.length, 2);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('does not turn a malformed classic BRC-20 summary into an empty live balance', async () => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json({ code: 0, data: { total: 1 } });
