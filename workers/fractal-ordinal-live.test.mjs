@@ -1078,7 +1078,8 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     assert.equal(data.diagnosticsSats.hasRunes, records[1].satoshi);
     assert.equal(data.diagnosticsSats.hasAlkanes, records[2].satoshi);
     assert.equal(data.diagnosticsSats.unconfirmedOrInvalidHeight, records[3].satoshi);
-    assert.ok(calls.some(path => path.endsWith('/available-utxo-data')), 'fee-safe discovery must use UniSat available inventory');
+    assert.ok(calls.some(path => path.endsWith('/all-utxo-data')), 'fee-safe discovery must enumerate the complete UniSat inventory');
+    assert.ok(calls.some(path => path.startsWith('/v1/indexer/utxo/')), 'every candidate must be verified through the detail endpoint');
     assert.equal(calls.some(path => path.includes('/runes/utxo/') || path.includes('/alkanes/utxo/')), false);
     assert.equal(JSON.stringify(data).includes('test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
@@ -1160,7 +1161,7 @@ test('checks Runes on Fractal but never calls the unsupported Alkanes endpoint',
   } finally { globalThis.fetch = previousFetch; }
 });
 
-test('uses explicit asset-free metadata to avoid per-UTXO detail calls during discovery', async () => {
+test('verifies every candidate through the detail endpoint even when inventory metadata looks asset-free', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qassetfreemetadata000000000000000000000';
   const records = Array.from({ length: 25 }, (_, index) => ({
@@ -1172,10 +1173,15 @@ test('uses explicit asset-free metadata to avoid per-UTXO detail calls during di
   globalThis.fetch = async input => {
     const url = new URL(String(input));
     calls.push(url.pathname);
-    if (url.pathname.endsWith('/all-utxo-data') || url.pathname.endsWith('/available-utxo-data')) {
+    if (url.pathname.endsWith('/all-utxo-data')) {
       return Response.json({ code: 0, data: { cursor: 0, total: records.length, utxo: records } });
     }
-    throw new Error(`Unexpected detail request during discovery: ${url.pathname}`);
+    const match = url.pathname.match(/^\\/v1\\/indexer\\/utxo\\/([0-9a-f]{64})\\/(\\d+)$/);
+    if (match) {
+      const record = records.find(item => item.txid === match[1]);
+      if (record) return Response.json({ code: 0, data: { ...record, isSpent: false } });
+    }
+    throw new Error(`Unexpected upstream request during discovery: ${url.pathname}`);
   };
   try {
     const response = await worker.fetch(
@@ -1186,7 +1192,8 @@ test('uses explicit asset-free metadata to avoid per-UTXO detail calls during di
     assert.equal(response.status, 200);
     assert.equal(data.utxo.length, 25);
     assert.equal(data.utxo.every(item => item.inscriptionsRunesAlkanesChecked === true), true);
-    assert.deepEqual(calls, ['/v1/indexer/address/' + address + '/available-utxo-data']);
+    assert.ok(calls.includes('/v1/indexer/address/' + address + '/all-utxo-data'));
+    assert.equal(calls.filter(path => path.startsWith('/v1/indexer/utxo/')).length, 25);
   } finally { globalThis.fetch = previousFetch; }
 });
 
@@ -1545,12 +1552,12 @@ test('refuses duplicate outpoints in the display-only address UTXO page', async 
     assert.equal((await response.json()).code, 'ACTIVE_UTXO_UPSTREAM_CONNECTION_OR_RESPONSE');
   } finally { globalThis.fetch = previousFetch; }
 });
-test('continues fee-safe UTXO pagination when UniSat omits total', async () => {
+test('continues fee-safe UTXO pagination from the complete inventory when UniSat omits total', async () => {
   const previousFetch = globalThis.fetch;
   const address = 'bc1qtestaddress0000000000000000000000000';
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
-    assert.match(url.pathname, /\/available-utxo-data$/);
+    assert.match(url.pathname, /\/all-utxo-data$/);
     assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
     const cursor = Number(url.searchParams.get('cursor'));
     const count = cursor === 0 ? 25 : 2;
