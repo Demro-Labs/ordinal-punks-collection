@@ -1950,7 +1950,7 @@ export default {
           const amount = item?.data?.amt ?? item?.amt ?? item?.amount;
           if (typeof item?.inscriptionId !== 'string' || !/^[a-f0-9]{64}i\d+$/i.test(item.inscriptionId) ||
               typeof amount !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(amount) ||
-              amount === '0' || /^0+\.\0+$/.test(amount)) throw new Error('Invalid UniSat transferable inscription item');
+              amount === '0' || /^0+\.0+$/.test(amount)) throw new Error('Invalid UniSat transferable inscription item');
           return { inscriptionId: item.inscriptionId.toLowerCase(), amount };
         });
       };
