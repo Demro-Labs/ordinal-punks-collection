@@ -1078,7 +1078,7 @@ test('attests confirmed asset-free Fractal UTXOs despite a historical RBF flag a
     assert.equal(data.diagnosticsSats.hasRunes, records[1].satoshi);
     assert.equal(data.diagnosticsSats.hasAlkanes, records[2].satoshi);
     assert.equal(data.diagnosticsSats.unconfirmedOrInvalidHeight, records[3].satoshi);
-    assert.ok(calls.some(path => path.endsWith('/all-utxo-data') || path.endsWith('/available-utxo-data')));
+    assert.ok(calls.some(path => path.endsWith('/available-utxo-data')), 'fee-safe discovery must use UniSat available inventory');
     assert.equal(calls.some(path => path.includes('/runes/utxo/') || path.includes('/alkanes/utxo/')), false);
     assert.equal(JSON.stringify(data).includes('test-only'), false);
   } finally { globalThis.fetch = previousFetch; }
