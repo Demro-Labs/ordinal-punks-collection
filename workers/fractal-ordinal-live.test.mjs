@@ -2427,3 +2427,64 @@ test('caps the per-isolate client table under rotating IPs', async () => {
   }
   assert.equal(blocked, true);
 });
+test('keeps Rune-bearing Fractal outputs excluded when UniSat confirms a non-empty Rune balance', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const txid = 'ab'.repeat(32);
+  const calls = [];
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    calls.push(url.pathname + url.search);
+    if (url.pathname.endsWith('/all-utxo-data')) {
+      return Response.json({ code: 0, data: { cursor: 0, total: 1, utxo: [{
+        txid, vout: 0, address, satoshi: 50000, scriptPk: '0014' + '22'.repeat(20),
+        height: 100, isSpent: false, inscriptions: [],
+      }] } });
+    }
+    if (url.pathname === `/v1/indexer/utxo/${txid}/0`) {
+      return Response.json({ code: 0, data: {
+        txid, vout: 0, address, satoshi: 50000, scriptPk: '0014' + '22'.repeat(20),
+        height: 100, isSpent: false, inscriptions: [],
+      } });
+    }
+    if (url.pathname === `/v1/indexer/runes/utxo/${txid}/0/balance`) {
+      return Response.json({ code: 0, data: [{ rune: 'TEST•RUNE', amount: '1' }] });
+    }
+    throw new Error(`Unexpected UniSat URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.199' }), { UNISAT_API_KEY: 'fractal-test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(data));
+    assert.equal(data.scannedCount, 1);
+    assert.equal(data.utxo.length, 0, 'Rune-bearing output must never be offered as fee-safe');
+    assert.equal(data.diagnostics.hasRunes, 1);
+    assert.equal(data.diagnosticsSats.hasRunes, 50000);
+    assert.ok(calls.some(path => path.includes('/runes/utxo/')));
+  } finally { globalThis.fetch = previousFetch; }
+});
+
+test('accepts a Fractal UTXO only when the per-outpoint Rune balance is explicitly empty', async () => {
+  const previousFetch = globalThis.fetch;
+  const address = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+  const txid = 'cd'.repeat(32);
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/all-utxo-data')) return Response.json({ code: 0, data: { cursor: 0, total: 1, utxo: [{
+      txid, vout: 0, address, satoshi: 50000, scriptPk: '0014' + '22'.repeat(20), height: 100, isSpent: false, inscriptions: [],
+    }] } });
+    if (url.pathname === `/v1/indexer/utxo/${txid}/0`) return Response.json({ code: 0, data: {
+      txid, vout: 0, address, satoshi: 50000, scriptPk: '0014' + '22'.repeat(20), height: 100, isSpent: false, inscriptions: [],
+    } });
+    if (url.pathname === `/v1/indexer/runes/utxo/${txid}/0/balance`) return Response.json({ code: 0, data: [] });
+    throw new Error(`Unexpected UniSat URL: ${url}`);
+  };
+  try {
+    const response = await worker.fetch(makeRequest(`/api/spendable-utxos?chain=fractal&address=${address}&cursor=0&size=25`, { ip: '192.0.2.198' }), { UNISAT_API_KEY: 'fractal-test-only' });
+    const data = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(data));
+    assert.equal(data.utxo.length, 1);
+    assert.equal(data.utxo[0].txid, txid);
+    assert.equal(data.diagnostics.hasRunes, 0);
+  } finally { globalThis.fetch = previousFetch; }
+});
