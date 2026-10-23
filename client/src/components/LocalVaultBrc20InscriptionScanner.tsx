@@ -6,8 +6,8 @@ import type { OrdiNetwork } from "@/lib/ordi-wallet";
 type Item = { inscriptionId: string; amount: string };
 const API = (import.meta.env.VITE_LIVE_DATA_URL || "https://fractal-ordinal-live.servostar23.workers.dev/api/live-inscription").replace("/api/live-inscription", "");
 
-export function LocalVaultBrc20InscriptionScanner({ address, network, ticker, recipient, disabled, onSelect }: {
-  address: string; network: OrdiNetwork; ticker: string; recipient: string; disabled?: boolean;
+export function LocalVaultBrc20InscriptionScanner({ address, network, ticker, recipient, disabled, selectionDisabled, onSelect }: {
+  address: string; network: OrdiNetwork; ticker: string; recipient: string; disabled?: boolean; selectionDisabled?: boolean;
   onSelect: (inscriptionId: string, recipient: string) => void;
 }) {
   const [items, setItems] = useState<Item[]>([]);
@@ -27,9 +27,27 @@ export function LocalVaultBrc20InscriptionScanner({ address, network, ticker, re
       let total: number | null = null;
       for (let start = 0; start < 10_000;) {
         const query = new URLSearchParams({ address, ticker: symbol, chain: network, start: String(start), limit: String(pageSize) });
-        const response = await fetch(API + "/api/brc20/transferable?" + query, { cache: "no-store", headers: { Accept: "application/json" } });
-        const payload = await response.json().catch(() => null) as { network?: string; address?: string; ticker?: string; start?: number; total?: number; detail?: Array<{ inscriptionId?: string; amount?: string }>; error?: string } | null;
-        if (!response.ok || !payload || !Array.isArray(payload.detail)) throw new Error(payload?.error || "Le scanner BRC-20 n’a pas retourné une page valide.");
+        let response: Response | null = null;
+        let payload: { network?: string; address?: string; ticker?: string; start?: number; total?: number; detail?: Array<{ inscriptionId?: string; amount?: string }>; error?: string } | null = null;
+        let lastFailure: Error | null = null;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          response = null;
+          payload = null;
+          try {
+            response = await fetch(API + "/api/brc20/transferable?" + query, { cache: "no-store", headers: { Accept: "application/json" } });
+            payload = await response.json().catch(() => null) as { network?: string; address?: string; ticker?: string; start?: number; total?: number; detail?: Array<{ inscriptionId?: string; amount?: string }>; error?: string } | null;
+            if (response.ok && payload && Array.isArray(payload.detail)) break;
+            lastFailure = new Error(payload?.error || "Le scanner BRC-20 n’a pas retourné une page valide.");
+            const transient = response.status === 429 || response.status >= 500;
+            if (!transient || attempt === 2) throw lastFailure;
+          } catch (cause) {
+            lastFailure = cause instanceof Error ? cause : new Error("Échec réseau du scanner BRC-20.");
+            const transient = response === null || response.status === 429 || response.status >= 500;
+            if (!transient || attempt === 2) throw lastFailure;
+          }
+          await new Promise(resolve => window.setTimeout(resolve, attempt === 0 ? 350 : 700));
+        }
+        if (!response?.ok || !payload || !Array.isArray(payload.detail)) throw lastFailure || new Error("Le scanner BRC-20 n’a pas retourné une page valide.");
         if (payload.network !== network || payload.address?.toLowerCase() !== address.toLowerCase() || payload.ticker?.toLowerCase() !== symbol.toLowerCase() || payload.start !== start) throw new Error("Réponse du scanner incohérente avec le compte, le réseau, le ticker ou la page demandée.");
         if (!Number.isSafeInteger(payload.total) || (payload.total as number) < 0 || (total !== null && total !== payload.total)) throw new Error("Le total d’inscriptions transférables est incohérent; sélection bloquée.");
         total = payload.total as number;
@@ -66,7 +84,7 @@ export function LocalVaultBrc20InscriptionScanner({ address, network, ticker, re
     {scanned && <p className="mt-2 font-mono text-[9px] text-[#70c7a0]">{items.length} inscription(s) transférable(s) vérifiée(s).</p>}
     {items.length > 0 && <div className="mt-2 max-h-56 space-y-2 overflow-y-auto">{items.map(item => <div key={item.inscriptionId} className="border border-[#2c323a] p-2">
       <p className="font-mono text-[10px] text-[#f2bd63]">{item.amount} {ticker}</p><p className="break-all font-mono text-[9px] text-[#9ea7b3]">{item.inscriptionId}</p>
-      <button type="button" onClick={() => void select(item)} disabled={scanning || disabled} className="mt-2 inline-flex min-h-9 items-center gap-2 border border-[#d99a54] px-3 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-40"><Send size={11} /> Sélectionner pour transfert</button>
+      <button type="button" onClick={() => void select(item)} disabled={scanning || disabled || selectionDisabled} className="mt-2 inline-flex min-h-9 items-center gap-2 border border-[#d99a54] px-3 font-mono text-[9px] uppercase text-[#f2bd63] disabled:opacity-40"><Send size={11} /> Sélectionner pour transfert</button>
     </div>)}</div>}
     {error && <p className="mt-2 break-words font-mono text-[9px] leading-4 text-[#e6a69b]" role="alert">{error}</p>}
   </div>;
