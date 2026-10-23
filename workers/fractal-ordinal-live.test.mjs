@@ -1186,7 +1186,7 @@ test('uses explicit asset-free metadata to avoid per-UTXO detail calls during di
     assert.equal(response.status, 200);
     assert.equal(data.utxo.length, 25);
     assert.equal(data.utxo.every(item => item.inscriptionsRunesAlkanesChecked === true), true);
-    assert.deepEqual(calls, ['/v1/indexer/address/' + address + '/all-utxo-data']);
+    assert.deepEqual(calls, ['/v1/indexer/address/' + address + '/available-utxo-data']);
   } finally { globalThis.fetch = previousFetch; }
 });
 
