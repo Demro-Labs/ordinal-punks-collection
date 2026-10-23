@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title">
+  <title id="title">Ordinal Punks — Bitcoin orange</title>
+  <rect width="160" height="160" fill="#F7931A"/>
+  <g fill="#FFFFFF" shape-rendering="crispEdges">
+    <path d="M37 15h86v8h8v26H29V23h8z"/>
+    <path d="M29 55h8v8h8v8h8v-8h8v8h8v8h8v-8h8v-8h8v8h8v-8h8v8h8v8h8v40h-8v8h-8v8H75v24H37V79h-8z"/>
+  </g>
+</svg>
