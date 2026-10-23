@@ -550,12 +550,13 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
     if (!provider) {
       setProviderAvailable(false);
       if (openUniSatMobileWallet()) {
-        setError("Opening this site inside UniSat Wallet. Approve the request, then connect from the UniSat in-app browser.");
+        setError("Opening this site in UniSat Wallet. If it does not open, launch UniSat Wallet manually, open its browser, navigate to this site, then press Connect UniSat.");
       } else if (window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true) {
-        setError("This installed app cannot open a browser extension popup. Open this same site in Chrome/Brave with UniSat Wallet enabled, then press Connect UniSat. On mobile, open the site from UniSat Wallet's in-app browser.");
-        window.open(window.location.href, "_blank", "noopener,noreferrer");
+        setError("UniSat is not available inside this installed app. Opening the site in your browser; if no tab opens, use the app menu to open this site in Chrome or Brave with the UniSat extension enabled.");
+        // Do not rely on window.open here: async handlers and installed PWAs can lose
+        // the browser's user-activation context. Render a dedicated user-clicked link below.
       } else {
-        setError("UniSat Wallet is not available in this browser. Install or enable the official extension, then refresh this page. On mobile, open the site in UniSat Wallet's in-app browser.");
+        setError("UniSat Wallet is not available in this browser. Install or enable the official UniSat extension and reload this page. On mobile, open this site from UniSat Wallet's own browser.");
       }
       return;
     }
@@ -1228,6 +1229,18 @@ export function UniSatWalletConnect({ site = "punks" }: { site?: "punks" | "poke
             </p>
           )}
           {error && <p className="mt-2 font-mono text-[10px] text-[#e08b7d]" role="alert">{error}</p>}
+          {!providerAvailable && (window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true) && (
+            <button
+              type="button"
+              onClick={() => {
+                const opened = window.open(window.location.href, "_blank", "noopener,noreferrer");
+                if (!opened) setError("The browser blocked opening a tab. Close this installed app, open Chrome or Brave directly, visit this site's URL, and press Connect UniSat there.");
+              }}
+              className="mt-2 border border-[#d99a54] px-3 py-2 font-mono text-[10px] text-[#f3b36d] underline"
+            >
+              Open site in browser to connect UniSat
+            </button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {connectedToFractal ? (
