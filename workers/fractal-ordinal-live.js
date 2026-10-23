@@ -426,7 +426,6 @@ async function uniNetwork(base, path, env, init = {}) {
 
   let payload;
   let response;
-  const method = (init.method || 'GET').toUpperCase();
   // Only retry idempotent reads. Never automatically replay payment, inscription,
   // cancellation, or broadcast POST requests because their outcome may be ambiguous.
   const retryableRead = method === 'GET';
