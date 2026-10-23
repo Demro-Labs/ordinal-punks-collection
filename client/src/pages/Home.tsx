@@ -49,8 +49,8 @@ const HERO_AVIF_URL = `${ASSET_BASE}assets/brand/ordinal-punks-hero.avif`;
 const HERO_MOBILE_AVIF_URL = `${ASSET_BASE}assets/brand/ordinal-punks-hero-mobile.avif`;
 const PAPER_URL = `${ASSET_BASE}assets/brand/ordinal-ledger-paper-texture.webp`;
 const FRACTAL_ORDINALS_URL = `${ASSET_BASE}assets/brand/fractal-ordinals.jpeg`;
-const MARK_URL = FRACTAL_ORDINALS_URL;
-const STAMP_URL = FRACTAL_ORDINALS_URL;
+const MARK_URL = `${ASSET_BASE}assets/brand/ordinal-punks-bitcoin.svg`;
+const STAMP_URL = `${ASSET_BASE}assets/brand/ordinal-punks-bitcoin.svg`;
 const SOCIAL_ASSET_BASE = `${ASSET_BASE}assets/brand/social/`;
 const PUNKS_IMAGE_BASE = `${ASSET_BASE}assets/ordinal-punks/images/`;
 
@@ -569,7 +569,7 @@ export default function Home() {
           >
             <img
               src={MARK_URL}
-              alt="Fractal Ordinals logo"
+              alt="Ordinal Punks Bitcoin-orange logo"
               className="h-10 w-10 object-contain transition-transform duration-200 group-hover:rotate-3"
             />
             <span className="hidden items-baseline gap-2 font-display tracking-[-0.04em] sm:flex">
