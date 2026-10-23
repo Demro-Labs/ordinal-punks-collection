@@ -3,6 +3,7 @@ import { ExternalLink, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { LocalVaultOwnershipProof } from "@/components/LocalVaultOwnershipProof";
 import { PreSignatureSecurityPreview } from "@/components/PreSignatureSecurityPreview";
 import { LocalVaultBrc20TransferPanel } from "@/components/LocalVaultBrc20TransferPanel";
+import { LocalVaultTransactionHub } from "@/components/LocalVaultTransactionHub";
 import { LocalVaultRuneTransferPanel } from "@/components/LocalVaultRuneTransferPanel";
 import { UniSatRunesSendPanel } from "@/components/UniSatRunesSendPanel";
 import { fetchAddressOrdinals, type AddressOrdinal, type OrdinalNetwork } from "@/lib/ordinals";
@@ -99,6 +100,7 @@ export function LocalVaultAssetPanel({
     finally { setBusy(false); }
   }
   return <section id="local-vault-assets" className="mt-4 border border-[#70c7a0]/35 bg-[#101a16] p-3 sm:p-4 scroll-mt-6" aria-labelledby="local-vault-assets-title">
+    <LocalVaultTransactionHub network={network} />
       <div className="mt-4 grid gap-3 md:grid-cols-2" aria-label="Parcours de transfert Local Vault">
         <article className="border border-[#70c7a0]/40 bg-[#0b0f13] p-3">
           <p className="font-mono text-[9px] uppercase tracking-[.14em] text-[#9fe0bd]">Parcours A · Actif existant</p>
