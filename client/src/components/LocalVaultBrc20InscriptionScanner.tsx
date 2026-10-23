@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, Radar, Send } from "lucide-react";
 import { validateMempoolAddress } from "@/lib/mempool";
 import type { OrdiNetwork } from "@/lib/ordi-wallet";
@@ -14,6 +14,8 @@ export function LocalVaultBrc20InscriptionScanner({ address, network, ticker, re
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
   const [scanned, setScanned] = useState(false);
+
+  useEffect(() => { setItems([]); setError(""); setScanned(false); }, [address, network, ticker]);
 
   async function scan() {
     const symbol = ticker.trim();
