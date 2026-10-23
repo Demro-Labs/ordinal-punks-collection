@@ -8,7 +8,7 @@ type Row = { id: string; category: Exclude<Filter, "all">; title: string; detail
 const rows: Row[] = [
   { id: "native-send", category: "native", title: "BTC / FB — transfert natif", detail: "Envoi de sats, estimation et revue des frais, signature locale et diffusion confirmée.", target: "local-native-transfer", action: "Ouvrir le transfert" },
   { id: "utxo-scan", category: "scanners", title: "Scanner UTXO sûrs", detail: "Parcourir les sorties et sélectionner le type d’adresse avant de préparer un paiement.", target: "local-native-transfer", action: "Ouvrir le scanner", scanner: true },
-  { id: "ordinal-send", category: "ordinals", title: "Ordinals / inscriptions", detail: "Scanner les inscriptions indexées, choisir l’inscription et vérifier la propriété avant signature.", target: "local-vault-assets", action: "Voir les inscriptions", scanner: true },
+  { id: "ordinal-send", category: "ordinals", title: "Ordinals / inscriptions", detail: "Scanner les inscriptions indexées, choisir l’inscription et vérifier la propriété avant signature.", target: "local-vault-ordinal-scanner", action: "Voir les inscriptions", scanner: true },
   { id: "brc20-send", category: "brc20", title: "BRC-20 classique", detail: "Scanner les inscriptions transférables par ticker, préparer TRANSFER, payer avec revue locale puis envoyer l’inscription séparément.", target: "local-vault-brc20-transfer", action: "Ouvrir le scanner BRC-20", scanner: true },
   { id: "runes-send", category: "runes", title: "Runes", detail: "Scanner les soldes paginés, sélectionner le Rune et préparer la transaction dédiée.", target: "local-vault-runes", action: "Ouvrir le scanner Runes", scanner: true },
 ];
