@@ -932,12 +932,12 @@ async function spendableUtxos(request, env, corsHeaders) {
   if (!['bitcoin', 'fractal'].includes(chain) || !validWalletAddress(address) || cursor === null || requestedSize === null || requestedSize < 1) throw new SpendableUtxoError('INVALID_QUERY', 400);
   const base = chain === 'bitcoin' ? BITCOIN_API_BASE : API_BASE;
   const supportsAlkanes = chain === 'bitcoin';
-  // Enumerate the complete all-utxo-data inventory so outputs omitted from UniSat's available list
-  // are still inspected. This is NOT spend authorization: every output must pass per-outpoint
-  // verification and protocol-asset checks below; unknown or contradictory metadata fails closed.
-  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/all-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
-  if (!Array.isArray(source?.utxo)) throw new SpendableUtxoError('UTXO_LIST_INVALID_RESPONSE');
-  const raw = source.utxo;
+  // Use UniSat's available-UTXO inventory as requested: this endpoint excludes outputs
+  // that UniSat does not consider spendable. It is discovery only, not final authorization:
+  // each candidate is still checked against its detail endpoint and protocol metadata below.
+  const source = await spendableUtxoStage('UTXO_LIST', () => uniNetwork(base, `/v1/indexer/address/${encodeURIComponent(address)}/available-utxo-data?cursor=${cursor}&size=${requestedSize}`, env));
+  if (!Array.isArray(source?.detail)) throw new SpendableUtxoError('UTXO_LIST_INVALID_RESPONSE');
+  const raw = source.detail;
   if (raw.length > requestedSize) throw new SpendableUtxoError('UTXO_PAGE_OVERSIZED');
   const checked = [];
   const pageOutpoints = new Set();
@@ -1001,7 +1001,7 @@ async function spendableUtxos(request, env, corsHeaders) {
       rejectedSats.invalidFlags += satoshi;
       continue;
     }
-    if (!Array.isArray(item?.inscriptions) || item.inscriptions.length !== 0) {
+    if (item?.inscriptions !== undefined && (!Array.isArray(item.inscriptions) || item.inscriptions.length !== 0)) {
       rejected.hasInscriptionOrUnknown += 1;
       rejectedSats.hasInscriptionOrUnknown += satoshi;
       continue;
@@ -1097,7 +1097,7 @@ async function spendableUtxos(request, env, corsHeaders) {
     : typeof source?.total === 'string' && /^\d+$/.test(source.total) ? Number(source.total) : null;
   const nextCursor = cursor + raw.length;
   if (sourceTotal !== null && (!Number.isSafeInteger(sourceTotal) || sourceTotal < nextCursor)) throw new SpendableUtxoError('UTXO_LIST_INCONSISTENT_TOTAL');
-  // If UniSat omits total, a full page means there may be another page. Only a short/empty page proves exhaustion.
+  // UniSat's available-utxo-data pagination uses detail + total. If total is omitted, a full page means there may be another page; only a short/empty page proves exhaustion.
   const totalKnown = sourceTotal !== null;
   const hasMore = totalKnown ? nextCursor < sourceTotal : raw.length === requestedSize;
   const total = sourceTotal ?? nextCursor + (hasMore ? 1 : 0);
