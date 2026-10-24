@@ -8,11 +8,6 @@
   "background_color": "#F7931A",
   "theme_color": "#F7931A",
   "icons": [
-    {
-      "src": "./assets/brand/ordinal-punks-bitcoin.svg?v=3",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
-    }
+    { "src": "./assets/brand/ordinal-punks-bitcoin.svg?v=6", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }
